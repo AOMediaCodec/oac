@@ -174,6 +174,7 @@ noinst_PROGRAMS = celt/tests/test_unit_cwrs32 \
                   tests/test_oac_extensions \
                   tests/test_oac_padding \
                   tests/test_oac_projection \
+                  tests/test_oac_demo_wav \
                   trivial_example
 
 TESTS = celt/tests/test_unit_cwrs32 \
@@ -246,6 +247,18 @@ tests_test_oac_projection_LDADD = $(OAC_OBJ) $(SILK_OBJ) $(LPCNET_OBJ) $(CELT_OB
 if OAC_ARM_EXTERNAL_ASM
 tests_test_oac_projection_LDADD += libarmasm.la
 endif
+
+# Test for oac_demo WAV output
+TESTS += \
+        tests/test_oac_demo_wav \
+        tests/test_oac_demo_encode_only
+
+tests_test_oac_demo_wav_SOURCES = tests/test_oac_demo_wav.c
+tests_test_oac_demo_wav_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+
+# Test for oac_demo encode-only + decode-to-wav
+tests_test_oac_demo_encode_only_SOURCES = tests/test_oac_demo_encode_only.c
+tests_test_oac_demo_encode_only_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
 
 silk_tests_test_unit_LPC_inv_pred_gain_SOURCES = silk/tests/test_unit_LPC_inv_pred_gain.c
 silk_tests_test_unit_LPC_inv_pred_gain_LDADD = $(SILK_OBJ) $(LPCNET_OBJ) $(CELT_OBJ) $(NE10_LIBS) $(LIBM)

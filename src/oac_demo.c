@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <stdint.h>
 #include "oac.h"
 #include "debug.h"
 #include "oac_types.h"
@@ -140,6 +141,7 @@ void print_usage( char* argv[] ) {
     fprintf(stderr, "-inbandfec           : enable SILK inband FEC\n" );
     fprintf(stderr, "-forcemono           : force mono encoding, even for stereo input\n" );
     fprintf(stderr, "-dtx                 : enable SILK DTX\n" );
+    fprintf(stderr, "-wav                 : write output as WAV file (with header)\n" );
     fprintf(stderr,
     "-loss <perc>         : optimize for loss percentage and simulate packet loss, in percent (0-100); default: 0\n" );
 #ifdef ENABLE_LOSSGEN
@@ -425,6 +427,8 @@ int main(int argc, char *argv[]) {
     int k;
     oac_int32 skip = 0;
     int format = FORMAT_S16_LE;
+    int output_wav = 0;
+    oac_uint64 wav_data_bytes = 0;
     int stop = 0;
     oac_int32 *in = NULL;
     oac_int32 *out = NULL;
@@ -729,6 +733,10 @@ int main(int argc, char *argv[]) {
             check_decoder_option(encode_only, "-ignore_extensions");
             ignore_extensions = 1;
             args++;
+        } else if (strcmp( argv[ args ], "-wav" ) == 0) {
+            check_decoder_option(encode_only, "-wav");
+            output_wav = 1;
+            args++;
 #ifdef ENABLE_OSCE_TRAINING_DATA
         } else if (strcmp( argv[ args ], "-silk_random_switching" ) == 0) {
             silk_random_switching = atoi( argv[ args + 1 ] );
@@ -780,6 +788,33 @@ int main(int argc, char *argv[]) {
     if (!fout) {
         fprintf (stderr, "Could not open output file %s\n", argv[argc - 1]);
         goto failure;
+    }
+    if (output_wav) {
+        /* Write a WAV header placeholder (we'll update sizes at the end). */
+        unsigned char header[44] = {0};
+        int bits_per_sample = (format == FORMAT_S16_LE) ? 16 : (format == FORMAT_S24_LE) ? 24 : 32;
+        int audio_format = (format == FORMAT_F32_LE) ? 3 : 1;
+        uint32_t byte_rate = (uint32_t)(sampling_rate * channels * (bits_per_sample/8));
+        uint16_t block_align = (uint16_t)(channels * (bits_per_sample/8));
+        memcpy(header + 0, "RIFF", 4);
+        /* chunk size = 36 + subchunk2size (unknown yet, set to 36) */
+        header[4] = 36 & 0xFF; header[5] = (36>>8) & 0xFF; header[6] = (36>>16) & 0xFF; header[7] = (36>>24) & 0xFF;
+        memcpy(header + 8, "WAVE", 4);
+        memcpy(header + 12, "fmt ", 4);
+        header[16] = 16 & 0xFF; header[17] = 0; header[18] = 0; header[19] = 0;
+        header[20] = audio_format & 0xFF; header[21] = (audio_format>>8) & 0xFF;
+        header[22] = channels & 0xFF; header[23] = (channels>>8) & 0xFF;
+        header[24] = sampling_rate & 0xFF; header[25] = (sampling_rate>>8) & 0xFF; header[26] = (sampling_rate>>16) & 0xFF; header[27] = (sampling_rate>>24) & 0xFF;
+        header[28] = byte_rate & 0xFF; header[29] = (byte_rate>>8) & 0xFF; header[30] = (byte_rate>>16) & 0xFF; header[31] = (byte_rate>>24) & 0xFF;
+        header[32] = block_align & 0xFF; header[33] = (block_align>>8) & 0xFF;
+        header[34] = bits_per_sample & 0xFF; header[35] = (bits_per_sample>>8) & 0xFF;
+        memcpy(header + 36, "data", 4);
+        /* subchunk2size (data size) left at 0 for now */
+        if (fwrite(header, 1, 44, fout) != 44) {
+            fprintf(stderr, "Error writing wav header\n");
+            goto failure;
+        }
+        wav_data_bytes = 0;
     }
 
     if (!decode_only) {
@@ -1137,12 +1172,15 @@ int main(int argc, char *argv[]) {
                                 fbytes[4*i + 3] = (s.i>>24)&0xFF;
                             }
                         }
-                        if (fwrite(fbytes, format_size[format]*channels, output_samples - skip,
-                        fout) != (unsigned)(output_samples - skip)) {
-                            fprintf(stderr, "Error writing.\n");
-                            goto failure;
+                        {
+                            size_t bytes_to_write = (size_t)format_size[format]*channels*(output_samples - skip);
+                            if (fwrite(fbytes, 1, bytes_to_write, fout) != bytes_to_write) {
+                                fprintf(stderr, "Error writing.\n");
+                                goto failure;
+                            }
+                            if (output_wav) wav_data_bytes += bytes_to_write;
+                            tot_out += output_samples - skip;
                         }
-                        tot_out += output_samples - skip;
                     }
                     if (output_samples < skip)skip -= output_samples;
                     else skip = 0;
@@ -1223,8 +1261,21 @@ failure:
     free(data);
     if (fin)
         fclose(fin);
-    if (fout)
+    if (fout) {
+        if (output_wav) {
+            /* Update RIFF chunk size and data chunk size */
+            uint32_t data_size = (uint32_t)wav_data_bytes;
+            uint32_t chunk_size = 36 + data_size;
+            unsigned char buf[4];
+            buf[0] = chunk_size & 0xFF; buf[1] = (chunk_size>>8) & 0xFF; buf[2] = (chunk_size>>16) & 0xFF; buf[3] = (chunk_size>>24) & 0xFF;
+            fseek(fout, 4, SEEK_SET);
+            fwrite(buf, 1, 4, fout);
+            buf[0] = data_size & 0xFF; buf[1] = (data_size>>8) & 0xFF; buf[2] = (data_size>>16) & 0xFF; buf[3] = (data_size>>24) & 0xFF;
+            fseek(fout, 40, SEEK_SET);
+            fwrite(buf, 1, 4, fout);
+        }
         fclose(fout);
+    }
     free(in);
     free(out);
     free(fbytes);

@@ -80,10 +80,12 @@ options:
   -inbandfec        : enable SILK inband FEC
   -forcemono        : force mono encoding, even for stereo input
   -dtx              : enable SILK DTX
+  -wav              : write output as WAV file (with header) when decoding
   -loss <perc>      : simulate packet loss, in percent (0-100); default: 0
 
 input and output are little-endian signed 16-bit PCM files or OAC
-bitstreams with simple oac_demo custom framing.
+bitstreams with simple oac_demo custom framing. Use -wav to produce a
+standard WAV file (with header) for decoded PCM output.
 
 == Testing ==
 
