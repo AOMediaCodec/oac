@@ -52,6 +52,7 @@ typedef struct {
 #define WEIGHT_TYPE_int 1
 #define WEIGHT_TYPE_qweight 2
 #define WEIGHT_TYPE_int8 3
+#define WEIGHT_TYPE_uint8 4  /* Added for generated DNN sources that use q8/uint8 weights */
 
 typedef struct {
     char head[4];
