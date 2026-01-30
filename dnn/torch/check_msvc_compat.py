@@ -24,7 +24,7 @@ ALLOWED_DTYPES = set([
 ])
 
 # regexes
-RE_DESIGNATED = re.compile(r"\.[A-Za-z_][A-Za-z0-9_]*\s*=")
+RE_DESIGNATED = re.compile(r"=\s*\{\s*(?:\.[A-Za-z_][A-Za-z0-9_]*\s*=|\[\s*\d+\s*\]\s*=)")
 RE_COMPOUND = re.compile(r"\([A-Za-z_][A-Za-z0-9_]*\s*\[\s*\]\)\s*\{")
 RE_ARRAY_DECL = re.compile(r"\b(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[.*\]\s*=")
 
