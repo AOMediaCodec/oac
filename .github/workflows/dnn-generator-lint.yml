@@ -1,0 +1,23 @@
+name: DNN generator lint
+
+on:
+  push:
+    paths:
+      - 'dnn/**'
+      - '.github/workflows/dnn-generator-lint.yml'
+  pull_request:
+    paths:
+      - 'dnn/**'
+
+jobs:
+  msvc-compat-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Run DNN MSVC compatibility linter
+        run: |
+          python3 dnn/torch/check_msvc_compat.py
