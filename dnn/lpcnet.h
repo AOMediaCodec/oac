@@ -182,4 +182,34 @@ void oaci_lpcnet_plc_fec_clear(LPCNetPLCState *st);
 int lpcnet_load_model(LPCNetState *st, const void *data, int len);
 int oaci_lpcnet_plc_load_model(LPCNetPLCState *st, const void *data, int len);
 
+/* Backwards compatibility: map older API names to oaci_ variants so callers using
+   the older names keep building. */
+#ifndef lpcnet_plc_init
+# define lpcnet_plc_init oaci_lpcnet_plc_init
+#endif
+
+#ifndef lpcnet_plc_reset
+# define lpcnet_plc_reset oaci_lpcnet_plc_reset
+#endif
+
+#ifndef lpcnet_plc_update
+# define lpcnet_plc_update oaci_lpcnet_plc_update
+#endif
+
+#ifndef lpcnet_plc_conceal
+# define lpcnet_plc_conceal oaci_lpcnet_plc_conceal
+#endif
+
+#ifndef lpcnet_plc_fec_add
+# define lpcnet_plc_fec_add oaci_lpcnet_plc_fec_add
+#endif
+
+#ifndef lpcnet_plc_fec_clear
+# define lpcnet_plc_fec_clear oaci_lpcnet_plc_fec_clear
+#endif
+
+#ifndef lpcnet_plc_load_model
+# define lpcnet_plc_load_model oaci_lpcnet_plc_load_model
+#endif
+
 #endif
