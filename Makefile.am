@@ -175,6 +175,7 @@ noinst_PROGRAMS = celt/tests/test_unit_cwrs32 \
                   tests/test_oac_padding \
                   tests/test_oac_projection \
                   tests/test_oac_demo_wav \
+                  tests/test_oac_demo_input_wav \
                   trivial_example
 
 TESTS = celt/tests/test_unit_cwrs32 \
@@ -192,7 +193,8 @@ TESTS = celt/tests/test_unit_cwrs32 \
         tests/test_oac_encode \
         tests/test_oac_extensions \
         tests/test_oac_padding \
-        tests/test_oac_projection
+        tests/test_oac_projection \
+        tests/test_oac_demo_input_wav
 
 oac_demo_SOURCES = src/oac_demo.c
 if ENABLE_LOSSGEN

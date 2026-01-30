@@ -109,15 +109,21 @@ TESTOACPADDING_OBJS := $(patsubst %.c,%$(OBJSUFFIX),$(TESTOACPADDING_SRCS_C))
 OACCOMPARE_SRCS_C = src/oac_compare.c
 OACCOMPARE_OBJS := $(patsubst %.c,%$(OBJSUFFIX),$(OACCOMPARE_SRCS_C))
 
-TESTS := test_oac_api test_oac_decode test_oac_encode test_oac_extensions test_oac_padding test_oac_demo_wav test_oac_demo_encode_only
+TESTS := test_oac_api test_oac_decode test_oac_encode test_oac_extensions test_oac_padding test_oac_demo_wav test_oac_demo_input_wav test_oac_demo_encode_only
 
 TESTOACDEMOWAV_SRCS_C = tests/test_oac_demo_wav.c
 TESTOACDEMOWAV_OBJS := $(patsubst %.c,%$(OBJSUFFIX),$(TESTOACDEMOWAV_SRCS_C))
+
+TESTOACDEMOINPUTWAV_SRCS_C = tests/test_oac_demo_input_wav.c
+TESTOACDEMOINPUTWAV_OBJS := $(patsubst %.c,%$(OBJSUFFIX),$(TESTOACDEMOINPUTWAV_SRCS_C))
 
 TESTOACDEMOENCODEONLY_SRCS_C = tests/test_oac_demo_encode_only.c
 TESTOACDEMOENCODEONLY_OBJS := $(patsubst %.c,%$(OBJSUFFIX),$(TESTOACDEMOENCODEONLY_SRCS_C))
 
 test_oac_demo_wav$(EXESUFFIX): $(TESTOACDEMOWAV_OBJS) $(TARGET)
+	$(LINK.o.cmdline)
+
+test_oac_demo_input_wav$(EXESUFFIX): $(TESTOACDEMOINPUTWAV_OBJS) $(TARGET)
 	$(LINK.o.cmdline)
 
 test_oac_demo_encode_only$(EXESUFFIX): $(TESTOACDEMOENCODEONLY_OBJS) $(TARGET)

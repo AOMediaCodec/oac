@@ -429,6 +429,9 @@ int main(int argc, char *argv[]) {
     int format = FORMAT_S16_LE;
     int output_wav = 0;
     oac_uint64 wav_data_bytes = 0;
+    int input_wav = 0;
+    uint32_t input_wav_data_size = 0;
+    long input_wav_data_start = 0;
     int stop = 0;
     oac_int32 *in = NULL;
     oac_int32 *out = NULL;
@@ -733,6 +736,10 @@ int main(int argc, char *argv[]) {
             check_decoder_option(encode_only, "-ignore_extensions");
             ignore_extensions = 1;
             args++;
+        } else if (strcmp( argv[ args ], "-wav_in" ) == 0) {
+            check_encoder_option(decode_only, "-wav_in");
+            input_wav = 1;
+            args++;
         } else if (strcmp( argv[ args ], "-wav" ) == 0) {
             check_decoder_option(encode_only, "-wav");
             output_wav = 1;
@@ -770,6 +777,73 @@ int main(int argc, char *argv[]) {
         fprintf (stderr, "Could not open input file %s\n", argv[argc - 2]);
         goto failure;
     }
+    if (input_wav) {
+        unsigned char hdr[12];
+        if (fread(hdr, 1, 12, fin) != 12) {
+            fprintf(stderr, "Failed reading WAV header from %s\n", inFile);
+            goto failure;
+        }
+        if (memcmp(hdr, "RIFF", 4) != 0 || memcmp(hdr + 8, "WAVE", 4) != 0) {
+            fprintf(stderr, "Input file %s is not a WAV file\n", inFile);
+            goto failure;
+        }
+        /* Parse chunks to find 'fmt ' then 'data' */
+        while (1) {
+            unsigned char chunk[8];
+            if (fread(chunk, 1, 8, fin) != 8) {
+                fprintf(stderr, "Invalid WAV file %s\n", inFile);
+                goto failure;
+            }
+            uint32_t chunk_size = chunk[4] | (chunk[5]<<8) | (chunk[6]<<16) | (chunk[7]<<24);
+            if (memcmp(chunk, "fmt ", 4) == 0) {
+                unsigned char fmt[16];
+                size_t toread = chunk_size < 16 ? chunk_size : 16;
+                if (fread(fmt, 1, toread, fin) != toread) {
+                    fprintf(stderr, "Invalid WAV fmt chunk in %s\n", inFile);
+                    goto failure;
+                }
+                uint16_t audio_format = fmt[0] | (fmt[1]<<8);
+                uint16_t num_channels = fmt[2] | (fmt[3]<<8);
+                uint32_t sr = fmt[4] | (fmt[5]<<8) | (fmt[6]<<16) | (fmt[7]<<24);
+                uint16_t bits_per_sample = fmt[14] | (fmt[15]<<8);
+                if (chunk_size > toread) fseek(fin, chunk_size - toread, SEEK_CUR);
+                /* Now find data chunk */
+                while (1) {
+                    if (fread(chunk, 1, 8, fin) != 8) {
+                        fprintf(stderr, "Invalid WAV file %s (no data chunk)\n", inFile);
+                        goto failure;
+                    }
+                    uint32_t cs = chunk[4] | (chunk[5]<<8) | (chunk[6]<<16) | (chunk[7]<<24);
+                    if (memcmp(chunk, "data", 4) == 0) {
+                        input_wav_data_size = cs;
+                        input_wav_data_start = ftell(fin);
+                        break;
+                    } else {
+                        if (fseek(fin, cs, SEEK_CUR) < 0) {
+                            fprintf(stderr, "Failed seeking WAV chunk\n");
+                            goto failure;
+                        }
+                    }
+                }
+                sampling_rate = (oac_int32) sr;
+                channels = (int) num_channels;
+                if (bits_per_sample == 16) format = FORMAT_S16_LE;
+                else if (bits_per_sample == 24) format = FORMAT_S24_LE;
+                else if (audio_format == 3 && bits_per_sample == 32) format = FORMAT_F32_LE;
+                else {
+                    fprintf(stderr, "Unsupported WAV format: audio_format %d bits %d\n", audio_format, bits_per_sample);
+                    goto failure;
+                }
+                fprintf(stderr, "Input WAV: %d Hz, %d channels, %d bits\n", sampling_rate, channels, bits_per_sample);
+                break;
+            } else {
+                if (fseek(fin, chunk_size, SEEK_CUR) < 0) {
+                    fprintf(stderr, "Invalid WAV file %s\n", inFile);
+                    goto failure;
+                }
+            }
+        }
+    }
     if (mode_list) {
         int size;
         int sample_size = 2;
@@ -777,10 +851,22 @@ int main(int argc, char *argv[]) {
         else if (format == FORMAT_F32_LE) sample_size = 4;
         fseek(fin, 0, SEEK_END);
         size = ftell(fin);
+        if (input_wav) {
+            size -= input_wav_data_start;
+            fseek(fin, input_wav_data_start, SEEK_SET);
+        } else {
+            fseek(fin, 0, SEEK_SET);
+        }
         fprintf(stderr, "File size is %d bytes\n", size);
-        fseek(fin, 0, SEEK_SET);
         mode_switch_time = size/sample_size/channels/nb_modes_in_list;
         fprintf(stderr, "Switching mode every %d samples\n", mode_switch_time);
+    }
+    if (input_wav && !mode_list) {
+        /* Ensure file position is at the start of PCM data */
+        if (fseek(fin, input_wav_data_start, SEEK_SET) < 0) {
+            fprintf(stderr, "Failed to seek to WAV data start\n");
+            goto failure;
+        }
     }
 
     outFile = argv[argc - 1];

@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, feat/demo-wav ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git autoconf automake libtool gcc make pkg-config
+      - name: Prepare build
+        run: |
+          ./autogen.sh
+          ./configure
+      - name: Build
+        run: |
+          make -j2
+      - name: Run tests
+        run: |
+          make check -j2

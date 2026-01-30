@@ -81,11 +81,14 @@ options:
   -forcemono        : force mono encoding, even for stereo input
   -dtx              : enable SILK DTX
   -wav              : write output as WAV file (with header) when decoding
+  -wav_in           : read input as WAV file and use header (sample rate, channels, format)
   -loss <perc>      : simulate packet loss, in percent (0-100); default: 0
 
 input and output are little-endian signed 16-bit PCM files or OAC
 bitstreams with simple oac_demo custom framing. Use -wav to produce a
-standard WAV file (with header) for decoded PCM output.
+standard WAV file (with header) for decoded PCM output, and use -wav_in
+when encoding to read standard WAV files as input (the WAV header will
+be used to determine sample rate, channels and sample format).
 
 == Testing ==
 
