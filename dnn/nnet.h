@@ -52,6 +52,7 @@ typedef struct {
 #define WEIGHT_TYPE_int 1
 #define WEIGHT_TYPE_qweight 2
 #define WEIGHT_TYPE_int8 3
+#define WEIGHT_TYPE_uint8 4  /* Added for generated DNN sources that use q8/uint8 weights */
 
 typedef struct {
     char head[4];
@@ -173,5 +174,101 @@ void oaci_compute_conv2d_c(const Conv2dLayer *conv, float *out, float *mem, cons
 #endif
 
 
+
+/* Backwards compatibility shims: map older or newer generated names to each other. */
+
+#ifndef compute_generic_dense
+# define compute_generic_dense oaci_compute_generic_dense
+#endif
+
+#ifndef compute_generic_gru
+# define compute_generic_gru oaci_compute_generic_gru
+#endif
+
+#ifndef compute_generic_conv1d
+# define compute_generic_conv1d oaci_compute_generic_conv1d
+#endif
+
+#ifndef compute_generic_conv1d_dilation
+# define compute_generic_conv1d_dilation oaci_compute_generic_conv1d_dilation
+#endif
+
+#ifndef compute_glu
+# define compute_glu oaci_compute_glu
+#endif
+
+#ifndef parse_weights
+# define parse_weights oaci_parse_weights
+#endif
+
+#ifndef plcmodel_arrays
+# define plcmodel_arrays oaci_plcmodel_arrays
+#endif
+
+#ifndef rdovaeenc_arrays
+# define rdovaeenc_arrays oaci_rdovaeenc_arrays
+#endif
+
+#ifndef rdovaedec_arrays
+# define rdovaedec_arrays oaci_rdovaedec_arrays
+#endif
+
+#ifndef fargan_arrays
+# define fargan_arrays oaci_fargan_arrays
+#endif
+
+#ifndef pitchdnn_arrays
+# define pitchdnn_arrays oaci_pitchdnn_arrays
+#endif
+
+#ifndef lossgen_arrays
+# define lossgen_arrays oaci_lossgen_arrays
+#endif
+
+#ifndef lacelayers_arrays
+# define lacelayers_arrays oaci_lacelayers_arrays
+#endif
+
+#ifndef nolacelayers_arrays
+# define nolacelayers_arrays oaci_nolacelayers_arrays
+#endif
+
+#ifndef bbwenetlayers_arrays
+# define bbwenetlayers_arrays oaci_bbwenetlayers_arrays
+#endif
+
+#ifndef linear_init
+# define linear_init oaci_linear_init
+#endif
+
+#ifndef conv2d_init
+# define conv2d_init oaci_conv2d_init
+#endif
+
+#ifndef compute_linear_c
+# define compute_linear_c oaci_compute_linear_c
+#endif
+
+#ifndef compute_activation_c
+# define compute_activation_c oaci_compute_activation_c
+#endif
+
+#ifndef compute_conv2d_c
+# define compute_conv2d_c oaci_compute_conv2d_c
+#endif
+
+#ifndef compute_linear
+# define compute_linear(linear, out, in, arch) ((void)(arch), compute_linear_c(linear, out, in))
+#endif
+
+#ifndef compute_activation
+# define compute_activation(output, input, N, activation, arch) ((void)(arch), \
+                                                                 compute_activation_c(output, input, N, activation))
+#endif
+
+#ifndef compute_conv2d
+# define compute_conv2d(conv, out, mem, in, height, hstride, activation, arch) ((void)(arch), \
+                                                                                compute_conv2d_c(conv, out, mem, in, height, hstride, activation))
+#endif
 
 #endif /* NNET_H_ */
