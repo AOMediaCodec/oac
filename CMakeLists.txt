@@ -22,6 +22,23 @@ if (MSVC)
     endif()
 endif()
 
+# Workaround: MSVC's cl (not clang-cl) struggles compiling generated DNN sources (large initializers and some constructs).
+# Disable DNN-related features on MSVC as a temporary mitigation until the generated sources are made MSVC-friendly.
+if(MSVC AND NOT MSVC_CLANG_CL)
+  if(OAC_DNN)
+    message(WARNING "Disabling OAC_DNN on MSVC because generated DNN sources may be incompatible with MSVC.")
+    set(OAC_DNN FALSE CACHE BOOL "Disable DNN on MSVC" FORCE)
+  endif()
+  if(OAC_DRED)
+    message(WARNING "Disabling OAC_DRED on MSVC because generated DNN sources may be incompatible with MSVC.")
+    set(OAC_DRED FALSE CACHE BOOL "Disable DRED on MSVC" FORCE)
+  endif()
+  if(OAC_OSCE)
+    message(WARNING "Disabling OAC_OSCE on MSVC because generated DNN sources may be incompatible with MSVC.")
+    set(OAC_OSCE FALSE CACHE BOOL "Disable OSCE on MSVC" FORCE)
+  endif()
+endif()
+
 set(OAC_BUILD_SHARED_LIBRARY_HELP_STR "build shared library.")
 option(OAC_BUILD_SHARED_LIBRARY ${OAC_BUILD_SHARED_LIBRARY_HELP_STR} OFF)
 if(OAC_BUILD_SHARED_LIBRARY OR BUILD_SHARED_LIBS OR OAC_BUILD_FRAMEWORK)
