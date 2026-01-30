@@ -56,13 +56,13 @@ typedef struct {
     int last_period;
 } FARGANState;
 
-void fargan_init(FARGANState *st);
-int fargan_load_model(FARGANState *st, const void *data, int len);
+void oaci_fargan_init(FARGANState *st);
+int oaci_fargan_load_model(FARGANState *st, const void *data, int len);
 
-void fargan_cont(FARGANState *st, const float *pcm0, const float *features0);
+void oaci_fargan_cont(FARGANState *st, const float *pcm0, const float *features0);
 
-void fargan_synthesize(FARGANState *st, float *pcm, const float *features);
-void fargan_synthesize_int(FARGANState *st, oac_int16 *pcm, const float *features);
+void oaci_fargan_synthesize(FARGANState *st, float *pcm, const float *features);
+void oaci_fargan_synthesize_int(FARGANState *st, oac_int16 *pcm, const float *features);
 
 
 #endif /* FARGAN_H */

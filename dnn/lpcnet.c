@@ -104,12 +104,12 @@ void run_frame_network(LPCNetState *lpcnet, float *gru_a_condition, float *gru_b
 #elif FEATURES_DELAY > 0
     memcpy(lpc, lpcnet->old_lpc[FEATURES_DELAY - 1], LPC_ORDER*sizeof(lpc[0]));
     memmove(lpcnet->old_lpc[1], lpcnet->old_lpc[0], (FEATURES_DELAY - 1)*LPC_ORDER*sizeof(lpc[0]));
-    lpc_from_cepstrum(lpcnet->old_lpc[0], features);
+    oaci_lpc_from_cepstrum(lpcnet->old_lpc[0], features);
 #else
-    lpc_from_cepstrum(lpc, features);
+    oaci_lpc_from_cepstrum(lpc, features);
 #endif
 #ifdef LPC_GAMMA
-    lpc_weighting(lpc, LPC_GAMMA);
+    oaci_lpc_weighting(lpc, LPC_GAMMA);
 #endif
     if (lpcnet->frame_count < 1000) lpcnet->frame_count++;
 }
@@ -193,7 +193,7 @@ int lpcnet_init(LPCNetState *lpcnet) {
 int lpcnet_load_model(LPCNetState *st, const unsigned char *data, int len) {
     WeightArray *list;
     int ret;
-    parse_weights(&list, data, len);
+    oaci_parse_weights(&list, data, len);
     ret = init_lpcnet_model(&st->model, list);
     oac_free(list);
     if (ret == 0) return 0;

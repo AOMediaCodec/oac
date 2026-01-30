@@ -29,7 +29,7 @@
 #define BURG_H
 
 
-float silk_burg_analysis(              /* O    returns residual energy                                     */
+float oaci_silk_burg_analysis(              /* O    returns residual energy                                     */
     float A[],                         /* O    prediction coefficients (length order)                      */
     const float x[],                   /* I    input signal, length: nb_subfr*(D+L_sub)                    */
     const float minInvGain,            /* I    minimum inverse prediction gain                             */

@@ -171,7 +171,7 @@ static void spectrum(float *_ps, const int *_bands, int _nbands,
     int xj;
     int ps_sz;
     mini_kiss_fft_cpx X[2][NFREQS + 1];
-    mini_kiss_fftr_cfg kfft;
+    mini_kiss_fftr_cfg oaci_kfft;
     ps_sz = _window_sz/2;
     /* Blackman-Harris window. */
     for (xj = 0; xj < _window_sz; xj++) {
@@ -179,7 +179,7 @@ static void spectrum(float *_ps, const int *_bands, int _nbands,
         window[xj] = 0.35875 - 0.48829*cos(2*OAC_PI*n)
                      + 0.14128*cos(4*OAC_PI*n) - 0.01168*cos(6*OAC_PI*n);
     }
-    kfft = mini_kiss_fftr_alloc(_window_sz, 0, NULL, NULL);
+    oaci_kfft = mini_kiss_fftr_alloc(_window_sz, 0, NULL, NULL);
     for (xi = 0; xi < _nframes; xi++) {
         int ci;
         int xk;
@@ -188,7 +188,7 @@ static void spectrum(float *_ps, const int *_bands, int _nbands,
             for (xk = 0; xk < _window_sz; xk++) {
                 x[xk] = window[xk]*_in[(xi*_step + xk)*_nchannels + ci];
             }
-            mini_kiss_fftr(kfft, x, X[ci]);
+            mini_kiss_fftr(oaci_kfft, x, X[ci]);
         }
         for (bi = xj = 0; bi < _nbands; bi++) {
             float p[2] = {0};
@@ -204,7 +204,7 @@ static void spectrum(float *_ps, const int *_bands, int _nbands,
             }
         }
     }
-    free(kfft);
+    free(oaci_kfft);
 }
 
 

@@ -9,7 +9,7 @@
 #include "lpcnet_private.h"
 
 
-float compute_pitchdnn(
+float oaci_compute_pitchdnn(
     PitchDNNState *st,
     const float *if_features,
     const float *xcorr_features,
@@ -27,19 +27,19 @@ float compute_pitchdnn(
     float count = 0;
     PitchDNN *model = &st->model;
     /* IF */
-    compute_generic_dense(&model->dense_if_upsampler_1, if1_out, if_features, ACTIVATION_TANH, arch);
-    compute_generic_dense(&model->dense_if_upsampler_2, &downsampler_in[NB_XCORR_FEATURES], if1_out, ACTIVATION_TANH,
+    oaci_compute_generic_dense(&model->dense_if_upsampler_1, if1_out, if_features, ACTIVATION_TANH, arch);
+    oaci_compute_generic_dense(&model->dense_if_upsampler_2, &downsampler_in[NB_XCORR_FEATURES], if1_out, ACTIVATION_TANH,
     arch);
     /* xcorr*/
     OAC_COPY(&conv1_tmp1[1], xcorr_features, NB_XCORR_FEATURES);
-    compute_conv2d(&model->conv2d_1, &conv1_tmp2[1], st->xcorr_mem1, conv1_tmp1, NB_XCORR_FEATURES,
+    oaci_compute_conv2d(&model->conv2d_1, &conv1_tmp2[1], st->xcorr_mem1, conv1_tmp1, NB_XCORR_FEATURES,
     NB_XCORR_FEATURES + 2, ACTIVATION_TANH, arch);
-    compute_conv2d(&model->conv2d_2, downsampler_in, st->xcorr_mem2, conv1_tmp2, NB_XCORR_FEATURES, NB_XCORR_FEATURES,
+    oaci_compute_conv2d(&model->conv2d_2, downsampler_in, st->xcorr_mem2, conv1_tmp2, NB_XCORR_FEATURES, NB_XCORR_FEATURES,
     ACTIVATION_TANH, arch);
 
-    compute_generic_dense(&model->dense_downsampler, downsampler_out, downsampler_in, ACTIVATION_TANH, arch);
-    compute_generic_gru(&model->gru_1_input, &model->gru_1_recurrent, st->gru_state, downsampler_out, arch);
-    compute_generic_dense(&model->dense_final_upsampler, output, st->gru_state, ACTIVATION_LINEAR, arch);
+    oaci_compute_generic_dense(&model->dense_downsampler, downsampler_out, downsampler_in, ACTIVATION_TANH, arch);
+    oaci_compute_generic_gru(&model->gru_1_input, &model->gru_1_recurrent, st->gru_state, downsampler_out, arch);
+    oaci_compute_generic_dense(&model->dense_final_upsampler, output, st->gru_state, ACTIVATION_LINEAR, arch);
     for (i = 0; i < 180; i++) {
         if (output[i] > maxval) {
             pos = i;
@@ -57,22 +57,22 @@ float compute_pitchdnn(
 }
 
 
-void pitchdnn_init(PitchDNNState *st) {
+void oaci_pitchdnn_init(PitchDNNState *st) {
     int ret;
     OAC_CLEAR(st, 1);
 #ifndef USE_WEIGHTS_FILE
-    ret = init_pitchdnn(&st->model, pitchdnn_arrays);
+    ret = oaci_init_pitchdnn(&st->model, oaci_pitchdnn_arrays);
 #else
     ret = 0;
 #endif
     celt_assert(ret == 0);
 }
 
-int pitchdnn_load_model(PitchDNNState *st, const void *data, int len) {
+int oaci_pitchdnn_load_model(PitchDNNState *st, const void *data, int len) {
     WeightArray *list;
     int ret;
-    parse_weights(&list, data, len);
-    ret = init_pitchdnn(&st->model, list);
+    oaci_parse_weights(&list, data, len);
+    ret = oaci_init_pitchdnn(&st->model, list);
     oac_free(list);
     if (ret == 0) return 0;
     else return -1;

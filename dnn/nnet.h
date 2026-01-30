@@ -52,7 +52,6 @@ typedef struct {
 #define WEIGHT_TYPE_int 1
 #define WEIGHT_TYPE_qweight 2
 #define WEIGHT_TYPE_int8 3
-#define WEIGHT_TYPE_uint8 4  /* Added for generated DNN sources that use q8/uint8 weights */
 
 typedef struct {
     char head[4];
@@ -87,33 +86,33 @@ typedef struct {
 } Conv2dLayer;
 
 
-void compute_generic_dense(const LinearLayer *layer, float *output, const float *input, int activation, int arch);
-void compute_generic_gru(const LinearLayer *input_weights, const LinearLayer *recurrent_weights, float *state,
+void oaci_compute_generic_dense(const LinearLayer *layer, float *output, const float *input, int activation, int arch);
+void oaci_compute_generic_gru(const LinearLayer *input_weights, const LinearLayer *recurrent_weights, float *state,
     const float *in, int arch);
-void compute_generic_conv1d(const LinearLayer *layer, float *output, float *mem, const float *input, int input_size,
+void oaci_compute_generic_conv1d(const LinearLayer *layer, float *output, float *mem, const float *input, int input_size,
     int activation, int arch);
-void compute_generic_conv1d_dilation(const LinearLayer *layer, float *output, float *mem, const float *input,
+void oaci_compute_generic_conv1d_dilation(const LinearLayer *layer, float *output, float *mem, const float *input,
     int input_size, int dilation, int activation, int arch);
-void compute_glu(const LinearLayer *layer, float *output, const float *input, int arch);
+void oaci_compute_glu(const LinearLayer *layer, float *output, const float *input, int arch);
 void compute_gated_activation(const LinearLayer *layer, float *output, const float *input, int activation, int arch);
 
 
-int parse_weights(WeightArray **list, const void *data, int len);
+int oaci_parse_weights(WeightArray **list, const void *data, int len);
 
 
 extern const WeightArray lpcnet_arrays[];
-extern const WeightArray plcmodel_arrays[];
-extern const WeightArray rdovaeenc_arrays[];
-extern const WeightArray rdovaedec_arrays[];
+extern const WeightArray oaci_plcmodel_arrays[];
+extern const WeightArray oaci_rdovaeenc_arrays[];
+extern const WeightArray oaci_rdovaedec_arrays[];
 extern const WeightArray fwgan_arrays[];
-extern const WeightArray fargan_arrays[];
-extern const WeightArray pitchdnn_arrays[];
-extern const WeightArray lossgen_arrays[];
-extern const WeightArray lacelayers_arrays[];
-extern const WeightArray nolacelayers_arrays[];
-extern const WeightArray bbwenetlayers_arrays[];
+extern const WeightArray oaci_fargan_arrays[];
+extern const WeightArray oaci_pitchdnn_arrays[];
+extern const WeightArray oaci_lossgen_arrays[];
+extern const WeightArray oaci_lacelayers_arrays[];
+extern const WeightArray oaci_nolacelayers_arrays[];
+extern const WeightArray oaci_bbwenetlayers_arrays[];
 
-int linear_init(LinearLayer *layer, const WeightArray *arrays,
+int oaci_linear_init(LinearLayer *layer, const WeightArray *arrays,
     const char *bias,
     const char *subias,
     const char *weights,
@@ -124,7 +123,7 @@ int linear_init(LinearLayer *layer, const WeightArray *arrays,
     int nb_inputs,
     int nb_outputs);
 
-int conv2d_init(Conv2dLayer *layer, const WeightArray *arrays,
+int oaci_conv2d_init(Conv2dLayer *layer, const WeightArray *arrays,
     const char *bias,
     const char *float_weights,
     int in_channels,
@@ -133,9 +132,9 @@ int conv2d_init(Conv2dLayer *layer, const WeightArray *arrays,
     int kheight);
 
 
-void compute_linear_c(const LinearLayer *linear, float *out, const float *in);
-void compute_activation_c(float *output, const float *input, int N, int activation);
-void compute_conv2d_c(const Conv2dLayer *conv, float *out, float *mem, const float *in, int height, int hstride,
+void oaci_compute_linear_c(const LinearLayer *linear, float *out, const float *in);
+void oaci_compute_activation_c(float *output, const float *input, int N, int activation);
+void oaci_compute_conv2d_c(const Conv2dLayer *conv, float *out, float *mem, const float *in, int height, int hstride,
     int activation);
 
 
@@ -148,17 +147,17 @@ void compute_conv2d_c(const Conv2dLayer *conv, float *out, float *mem, const flo
 #endif
 
 #ifndef OVERRIDE_COMPUTE_LINEAR
-# define compute_linear(linear, out, in, arch) ((void)(arch), compute_linear_c(linear, out, in))
+# define oaci_compute_linear(linear, out, in, arch) ((void)(arch), oaci_compute_linear_c(linear, out, in))
 #endif
 
 #ifndef OVERRIDE_COMPUTE_ACTIVATION
-# define compute_activation(output, input, N, activation, arch) ((void)(arch), \
-                                                                 compute_activation_c(output, input, N, activation))
+# define oaci_compute_activation(output, input, N, activation, arch) ((void)(arch), \
+                                                                 oaci_compute_activation_c(output, input, N, activation))
 #endif
 
 #ifndef OVERRIDE_COMPUTE_CONV2D
-# define compute_conv2d(conv, out, mem, in, height, hstride, activation, arch) ((void)(arch), \
-                                                                                compute_conv2d_c(conv, out, mem, in, \
+# define oaci_compute_conv2d(conv, out, mem, in, height, hstride, activation, arch) ((void)(arch), \
+                                                                                oaci_compute_conv2d_c(conv, out, mem, in, \
     height, hstride, activation))
 #endif
 

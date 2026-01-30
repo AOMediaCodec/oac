@@ -46,9 +46,9 @@ struct RDOVAEDecStruct {
     float conv5_state[DEC_CONV5_STATE_SIZE];
 };
 
-void dred_rdovae_dec_init_states(RDOVAEDecState *h, const RDOVAEDec *model, const float * initial_state, int arch);
-void dred_rdovae_decode_qframe(RDOVAEDecState *h, const RDOVAEDec *model, float *qframe, const float * z, int arch);
-void DRED_rdovae_decode_all(const RDOVAEDec *model, float *features, const float *state, const float *latents,
+void oaci_dred_rdovae_dec_init_states(RDOVAEDecState *h, const RDOVAEDec *model, const float * initial_state, int arch);
+void oaci_dred_rdovae_decode_qframe(RDOVAEDecState *h, const RDOVAEDec *model, float *qframe, const float * z, int arch);
+void oaci_DRED_rdovae_decode_all(const RDOVAEDec *model, float *features, const float *state, const float *latents,
     int nb_latents, int arch);
 
 #endif

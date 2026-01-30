@@ -77,17 +77,17 @@ void write_weights(const WeightArray *list, FILE *fout) {
 
 int main(void) {
     FILE *fout = fopen("weights_blob.bin", "w");
-    write_weights(pitchdnn_arrays, fout);
-    write_weights(fargan_arrays, fout);
-    write_weights(plcmodel_arrays, fout);
-    write_weights(rdovaeenc_arrays, fout);
-    write_weights(rdovaedec_arrays, fout);
+    write_weights(oaci_pitchdnn_arrays, fout);
+    write_weights(oaci_fargan_arrays, fout);
+    write_weights(oaci_plcmodel_arrays, fout);
+    write_weights(oaci_rdovaeenc_arrays, fout);
+    write_weights(oaci_rdovaedec_arrays, fout);
 #ifdef ENABLE_OSCE
 # ifndef DISABLE_LACE
-    write_weights(lacelayers_arrays, fout);
+    write_weights(oaci_lacelayers_arrays, fout);
 # endif
 # ifndef DISABLE_NOLACE
-    write_weights(nolacelayers_arrays, fout);
+    write_weights(oaci_nolacelayers_arrays, fout);
 # endif
 #endif
     fclose(fout);

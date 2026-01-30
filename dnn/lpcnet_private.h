@@ -71,9 +71,9 @@ struct LPCNetPLCState {
     PLCNetState plc_bak[2];
 };
 
-void preemphasis(float *y, float *mem, const float *x, float coef, int N);
+void oaci_preemphasis(float *y, float *mem, const float *x, float coef, int N);
 
-void compute_frame_features(LPCNetEncState *st, const float *in, int arch);
+void oaci_compute_frame_features(LPCNetEncState *st, const float *in, int arch);
 
 void lpcnet_reset_signal(LPCNetState *lpcnet);
 void run_frame_network(LPCNetState *lpcnet, float *gru_a_condition, float *gru_b_condition, float *lpc,

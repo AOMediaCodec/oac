@@ -130,7 +130,7 @@ void usage(void) {
 }
 
 #ifdef ENABLE_DRED
-void dred_decode_latents(ec_dec *dec, float *x, const oac_uint8 *scale, const oac_uint8 *r, const oac_uint8 *p0,
+void oaci_dred_decode_latents(ec_dec *dec, float *x, const oac_uint8 *scale, const oac_uint8 *r, const oac_uint8 *p0,
     int dim);
 
 static oac_uint32 char_to_int(unsigned char ch[4]) {
@@ -178,17 +178,17 @@ int main(int argc, char **argv) {
 #endif
     if (mode == MODE_FEATURES) {
         LPCNetEncState *net;
-        net = lpcnet_encoder_create();
+        net = oaci_lpcnet_encoder_create();
         while (1) {
             float features[NB_TOTAL_FEATURES];
             oac_int16 pcm[LPCNET_FRAME_SIZE];
             size_t ret;
             ret = fread(pcm, sizeof(pcm[0]), LPCNET_FRAME_SIZE, fin);
             if (feof(fin) || ret != LPCNET_FRAME_SIZE) break;
-            lpcnet_compute_single_frame_features(net, pcm, features, arch);
+            oaci_lpcnet_compute_single_frame_features(net, pcm, features, arch);
             fwrite(features, sizeof(float), NB_FEATURES, fout);
         }
-        lpcnet_encoder_destroy(net);
+        oaci_lpcnet_encoder_destroy(net);
     } else if (mode == MODE_FARGAN_SYNTHESIS) {
         FARGANState fargan;
         size_t ret, i;
@@ -196,16 +196,16 @@ int main(int argc, char **argv) {
         int stop = 0;
         float in_features[5*NB_FEATURES];
         float zeros[320] = {0};
-        fargan_init(&fargan);
+        oaci_fargan_init(&fargan);
 #ifdef USE_WEIGHTS_FILE
-        fargan_load_model(&fargan, data, len);
+        oaci_fargan_load_model(&fargan, data, len);
 #endif
         /* uncomment the following to align with Python code */
         ret = fread(&in_features[0], sizeof(in_features[0]), NB_FEATURES, fin);
         for (i = 1; i < 5; i++) {
             OAC_COPY(&in_features[i*NB_FEATURES], &in_features[0], NB_FEATURES);
         }
-        fargan_cont(&fargan, zeros, in_features);
+        oaci_fargan_cont(&fargan, zeros, in_features);
         while (1) {
             float features[NB_FEATURES];
             float fpcm[LPCNET_FRAME_SIZE];
@@ -216,7 +216,7 @@ int main(int argc, char **argv) {
             } else {
                 OAC_COPY(features, in_features, NB_FEATURES);
             }
-            fargan_synthesize(&fargan, fpcm, features);
+            oaci_fargan_synthesize(&fargan, fpcm, features);
             for (i = 0; i < LPCNET_FRAME_SIZE; i++)pcm[i] = (int)floor(.5 + MIN32(32767, MAX32(-32767, 32768.f*fpcm[i])));
             if (stop == 2) {
                 fwrite(pcm + skip, sizeof(pcm[0]), LPCNET_FRAME_SIZE/2, fout);
@@ -238,10 +238,10 @@ int main(int argc, char **argv) {
         RDOVAEDec rdovae_dec_model;
         int q0 = -1;
 # ifdef USE_WEIGHTS_FILE
-        WeightArray *rdovaedec_arrays;
-        parse_weights(&rdovaedec_arrays, data, len);
+        WeightArray *oaci_rdovaedec_arrays;
+        oaci_parse_weights(&oaci_rdovaedec_arrays, data, len);
 # endif
-        init_rdovaedec(&rdovae_dec_model, rdovaedec_arrays);
+        oaci_init_rdovaedec(&rdovae_dec_model, oaci_rdovaedec_arrays);
         while (1) {
             unsigned char ch[4];
             int nb_bytes;
@@ -265,33 +265,33 @@ int main(int argc, char **argv) {
             ret = fread(bits, 1, nb_bytes, fin);
             if (feof(fin) || (int)ret != nb_bytes) break;
 
-            ec_dec_init(&dec,  bits, nb_bytes);
+            oaci_ec_dec_init(&dec,  bits, nb_bytes);
             memset(&rdovae_dec, 0, sizeof(rdovae_dec));
-            dred_decode_latents(
+            oaci_dred_decode_latents(
                  &dec,
                  initial_state,
-                 dred_state_quant_scales_q8 + state_qoffset,
-                 dred_state_r_q8 + state_qoffset,
-                 dred_state_p0_q8 + state_qoffset,
+                 oaci_dred_state_quant_scales_q8 + state_qoffset,
+                 oaci_dred_state_r_q8 + state_qoffset,
+                 oaci_dred_state_p0_q8 + state_qoffset,
                  DRED_STATE_DIM);
 
-            dred_rdovae_dec_init_states(&rdovae_dec, &rdovae_dec_model, initial_state, arch);
+            oaci_dred_rdovae_dec_init_states(&rdovae_dec, &rdovae_dec_model, initial_state, arch);
             for (i = nb_chunks - 1; i >= 0; i -= 2) {
                 int k;
                 float dec_tmp[4*DRED_NUM_FEATURES];
                 int offset = q0*DRED_LATENT_DIM;
 
-                dred_decode_latents(
+                oaci_dred_decode_latents(
                     &dec,
                     &latents[i*(DRED_LATENT_DIM + 1)],
-                    dred_latent_quant_scales_q8 + offset,
-                    dred_latent_r_q8 + offset,
-                    dred_latent_p0_q8 + offset,
+                    oaci_dred_latent_quant_scales_q8 + offset,
+                    oaci_dred_latent_r_q8 + offset,
+                    oaci_dred_latent_p0_q8 + offset,
                     DRED_LATENT_DIM
                     );
                 latents[i*(DRED_LATENT_DIM + 1) + DRED_LATENT_DIM] = q0*.125 - 1;
 
-                dred_rdovae_decode_qframe(
+                oaci_dred_rdovae_decode_qframe(
                     &rdovae_dec,
                     &rdovae_dec_model,
                     dec_tmp,

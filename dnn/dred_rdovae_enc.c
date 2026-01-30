@@ -44,7 +44,7 @@ static void conv1_cond_init(float *mem, int len, int dilation, int *init) {
     *init = 1;
 }
 
-void dred_rdovae_encode_dframe(
+void oaci_dred_rdovae_encode_dframe(
     RDOVAEEncState *enc_state,           /* io: encoder state */
     const RDOVAEEnc *model,
     float *latents,                 /* o: latent vector */
@@ -62,59 +62,59 @@ void dred_rdovae_encode_dframe(
     int output_index = 0;
 
     /* run encoder stack and concatenate output in buffer*/
-    compute_generic_dense(&model->enc_dense1, &buffer[output_index], input, ACTIVATION_TANH, arch);
+    oaci_compute_generic_dense(&model->enc_dense1, &buffer[output_index], input, ACTIVATION_TANH, arch);
     output_index += ENC_DENSE1_OUT_SIZE;
 
-    compute_generic_gru(&model->enc_gru1_input, &model->enc_gru1_recurrent, enc_state->gru1_state, buffer, arch);
+    oaci_compute_generic_gru(&model->enc_gru1_input, &model->enc_gru1_recurrent, enc_state->gru1_state, buffer, arch);
     OAC_COPY(&buffer[output_index], enc_state->gru1_state, ENC_GRU1_OUT_SIZE);
     output_index += ENC_GRU1_OUT_SIZE;
     conv1_cond_init(enc_state->conv1_state, ENC_CONV1_IN_SIZE, 1, &enc_state->initialized);
-    compute_generic_dense(&model->enc_conv_dense1, conv_tmp, buffer, ACTIVATION_TANH, arch);
-    compute_generic_conv1d(&model->enc_conv1, &buffer[output_index], enc_state->conv1_state, conv_tmp,
+    oaci_compute_generic_dense(&model->enc_conv_dense1, conv_tmp, buffer, ACTIVATION_TANH, arch);
+    oaci_compute_generic_conv1d(&model->enc_conv1, &buffer[output_index], enc_state->conv1_state, conv_tmp,
     ENC_CONV1_OUT_SIZE, ACTIVATION_TANH, arch);
     output_index += ENC_CONV1_OUT_SIZE;
 
-    compute_generic_gru(&model->enc_gru2_input, &model->enc_gru2_recurrent, enc_state->gru2_state, buffer, arch);
+    oaci_compute_generic_gru(&model->enc_gru2_input, &model->enc_gru2_recurrent, enc_state->gru2_state, buffer, arch);
     OAC_COPY(&buffer[output_index], enc_state->gru2_state, ENC_GRU2_OUT_SIZE);
     output_index += ENC_GRU2_OUT_SIZE;
     conv1_cond_init(enc_state->conv2_state, ENC_CONV2_IN_SIZE, 2, &enc_state->initialized);
-    compute_generic_dense(&model->enc_conv_dense2, conv_tmp, buffer, ACTIVATION_TANH, arch);
-    compute_generic_conv1d_dilation(&model->enc_conv2, &buffer[output_index], enc_state->conv2_state, conv_tmp,
+    oaci_compute_generic_dense(&model->enc_conv_dense2, conv_tmp, buffer, ACTIVATION_TANH, arch);
+    oaci_compute_generic_conv1d_dilation(&model->enc_conv2, &buffer[output_index], enc_state->conv2_state, conv_tmp,
     ENC_CONV2_OUT_SIZE, 2, ACTIVATION_TANH, arch);
     output_index += ENC_CONV2_OUT_SIZE;
 
-    compute_generic_gru(&model->enc_gru3_input, &model->enc_gru3_recurrent, enc_state->gru3_state, buffer, arch);
+    oaci_compute_generic_gru(&model->enc_gru3_input, &model->enc_gru3_recurrent, enc_state->gru3_state, buffer, arch);
     OAC_COPY(&buffer[output_index], enc_state->gru3_state, ENC_GRU3_OUT_SIZE);
     output_index += ENC_GRU3_OUT_SIZE;
     conv1_cond_init(enc_state->conv3_state, ENC_CONV3_IN_SIZE, 2, &enc_state->initialized);
-    compute_generic_dense(&model->enc_conv_dense3, conv_tmp, buffer, ACTIVATION_TANH, arch);
-    compute_generic_conv1d_dilation(&model->enc_conv3, &buffer[output_index], enc_state->conv3_state, conv_tmp,
+    oaci_compute_generic_dense(&model->enc_conv_dense3, conv_tmp, buffer, ACTIVATION_TANH, arch);
+    oaci_compute_generic_conv1d_dilation(&model->enc_conv3, &buffer[output_index], enc_state->conv3_state, conv_tmp,
     ENC_CONV3_OUT_SIZE, 2, ACTIVATION_TANH, arch);
     output_index += ENC_CONV3_OUT_SIZE;
 
-    compute_generic_gru(&model->enc_gru4_input, &model->enc_gru4_recurrent, enc_state->gru4_state, buffer, arch);
+    oaci_compute_generic_gru(&model->enc_gru4_input, &model->enc_gru4_recurrent, enc_state->gru4_state, buffer, arch);
     OAC_COPY(&buffer[output_index], enc_state->gru4_state, ENC_GRU4_OUT_SIZE);
     output_index += ENC_GRU4_OUT_SIZE;
     conv1_cond_init(enc_state->conv4_state, ENC_CONV4_IN_SIZE, 2, &enc_state->initialized);
-    compute_generic_dense(&model->enc_conv_dense4, conv_tmp, buffer, ACTIVATION_TANH, arch);
-    compute_generic_conv1d_dilation(&model->enc_conv4, &buffer[output_index], enc_state->conv4_state, conv_tmp,
+    oaci_compute_generic_dense(&model->enc_conv_dense4, conv_tmp, buffer, ACTIVATION_TANH, arch);
+    oaci_compute_generic_conv1d_dilation(&model->enc_conv4, &buffer[output_index], enc_state->conv4_state, conv_tmp,
     ENC_CONV4_OUT_SIZE, 2, ACTIVATION_TANH, arch);
     output_index += ENC_CONV4_OUT_SIZE;
 
-    compute_generic_gru(&model->enc_gru5_input, &model->enc_gru5_recurrent, enc_state->gru5_state, buffer, arch);
+    oaci_compute_generic_gru(&model->enc_gru5_input, &model->enc_gru5_recurrent, enc_state->gru5_state, buffer, arch);
     OAC_COPY(&buffer[output_index], enc_state->gru5_state, ENC_GRU5_OUT_SIZE);
     output_index += ENC_GRU5_OUT_SIZE;
     conv1_cond_init(enc_state->conv5_state, ENC_CONV5_IN_SIZE, 2, &enc_state->initialized);
-    compute_generic_dense(&model->enc_conv_dense5, conv_tmp, buffer, ACTIVATION_TANH, arch);
-    compute_generic_conv1d_dilation(&model->enc_conv5, &buffer[output_index], enc_state->conv5_state, conv_tmp,
+    oaci_compute_generic_dense(&model->enc_conv_dense5, conv_tmp, buffer, ACTIVATION_TANH, arch);
+    oaci_compute_generic_conv1d_dilation(&model->enc_conv5, &buffer[output_index], enc_state->conv5_state, conv_tmp,
     ENC_CONV5_OUT_SIZE, 2, ACTIVATION_TANH, arch);
     output_index += ENC_CONV5_OUT_SIZE;
 
-    compute_generic_dense(&model->enc_zdense, padded_latents, buffer, ACTIVATION_LINEAR, arch);
+    oaci_compute_generic_dense(&model->enc_zdense, padded_latents, buffer, ACTIVATION_LINEAR, arch);
     OAC_COPY(latents, padded_latents, DRED_LATENT_DIM);
 
     /* next, calculate initial state */
-    compute_generic_dense(&model->gdense1, state_hidden, buffer, ACTIVATION_TANH, arch);
-    compute_generic_dense(&model->gdense2, padded_state, state_hidden, ACTIVATION_LINEAR, arch);
+    oaci_compute_generic_dense(&model->gdense1, state_hidden, buffer, ACTIVATION_TANH, arch);
+    oaci_compute_generic_dense(&model->gdense2, padded_state, state_hidden, ACTIVATION_LINEAR, arch);
     OAC_COPY(initial_state, padded_state, DRED_STATE_DIM);
 }

@@ -46,7 +46,7 @@ struct RDOVAEEncStruct {
     float conv5_state[2*ENC_CONV5_STATE_SIZE];
 };
 
-void dred_rdovae_encode_dframe(RDOVAEEncState *enc_state, const RDOVAEEnc *model, float *latents, float *initial_state,
+void oaci_dred_rdovae_encode_dframe(RDOVAEEncState *enc_state, const RDOVAEEnc *model, float *latents, float *initial_state,
     const float *input, int arch);
 
 

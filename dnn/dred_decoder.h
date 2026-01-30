@@ -44,6 +44,6 @@ struct OacDRED {
 };
 
 
-int dred_ec_decode(OacDRED *dec, const oac_uint8 *bytes, int num_bytes, int min_feature_frames, int dred_frame_offset);
+int oaci_dred_ec_decode(OacDRED *dec, const oac_uint8 *bytes, int num_bytes, int min_feature_frames, int dred_frame_offset);
 
 #endif

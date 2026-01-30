@@ -42,11 +42,11 @@
 /* Comment this out to have LPCNet update its state on every good packet (slow). */
 #define PLC_SKIP_UPDATES
 
-void lpcnet_plc_reset(LPCNetPLCState *st) {
+void oaci_lpcnet_plc_reset(LPCNetPLCState *st) {
     OAC_CLEAR((char*)&st->LPCNET_PLC_RESET_START,
           sizeof(LPCNetPLCState)
         - ((char*)&st->LPCNET_PLC_RESET_START - (char*)st));
-    lpcnet_encoder_init(&st->enc);
+    oaci_lpcnet_encoder_init(&st->enc);
     OAC_CLEAR(st->pcm, PLC_BUF_SIZE);
     st->blend = 0;
     st->loss_count = 0;
@@ -55,40 +55,40 @@ void lpcnet_plc_reset(LPCNetPLCState *st) {
     st->predict_pos = PLC_BUF_SIZE;
 }
 
-int lpcnet_plc_init(LPCNetPLCState *st) {
+int oaci_lpcnet_plc_init(LPCNetPLCState *st) {
     int ret;
     st->arch = oac_select_arch();
-    fargan_init(&st->fargan);
-    lpcnet_encoder_init(&st->enc);
+    oaci_fargan_init(&st->fargan);
+    oaci_lpcnet_encoder_init(&st->enc);
     st->loaded = 0;
 #ifndef USE_WEIGHTS_FILE
-    ret = init_plcmodel(&st->model, plcmodel_arrays);
+    ret = oaci_init_plcmodel(&st->model, oaci_plcmodel_arrays);
     if (ret == 0) st->loaded = 1;
 #else
     ret = 0;
 #endif
     celt_assert(ret == 0);
-    lpcnet_plc_reset(st);
+    oaci_lpcnet_plc_reset(st);
     return ret;
 }
 
-int lpcnet_plc_load_model(LPCNetPLCState *st, const void *data, int len) {
+int oaci_lpcnet_plc_load_model(LPCNetPLCState *st, const void *data, int len) {
     WeightArray *list;
     int ret;
-    parse_weights(&list, data, len);
-    ret = init_plcmodel(&st->model, list);
+    oaci_parse_weights(&list, data, len);
+    ret = oaci_init_plcmodel(&st->model, list);
     oac_free(list);
     if (ret == 0) {
-        ret = lpcnet_encoder_load_model(&st->enc, data, len);
+        ret = oaci_lpcnet_encoder_load_model(&st->enc, data, len);
     }
     if (ret == 0) {
-        ret = fargan_load_model(&st->fargan, data, len);
+        ret = oaci_fargan_load_model(&st->fargan, data, len);
     }
     if (ret == 0) st->loaded = 1;
     return ret;
 }
 
-void lpcnet_plc_fec_add(LPCNetPLCState *st, const float *features) {
+void oaci_lpcnet_plc_fec_add(LPCNetPLCState *st, const float *features) {
     if (features == NULL) {
         st->fec_skip++;
         return;
@@ -98,7 +98,7 @@ void lpcnet_plc_fec_add(LPCNetPLCState *st, const float *features) {
     st->fec_fill_pos++;
 }
 
-void lpcnet_plc_fec_clear(LPCNetPLCState *st) {
+void oaci_lpcnet_plc_fec_clear(LPCNetPLCState *st) {
     st->fec_read_pos = st->fec_fill_pos = st->fec_skip = 0;
 }
 
@@ -108,10 +108,10 @@ static void compute_plc_pred(LPCNetPLCState *st, float *out, const float *in) {
     PLCModel *model = &st->model;
     PLCNetState *net = &st->plc_net;
     celt_assert(st->loaded);
-    compute_generic_dense(&model->plc_dense_in, tmp, in, ACTIVATION_TANH, st->arch);
-    compute_generic_gru(&model->plc_gru1_input, &model->plc_gru1_recurrent, net->gru1_state, tmp, st->arch);
-    compute_generic_gru(&model->plc_gru2_input, &model->plc_gru2_recurrent, net->gru2_state, net->gru1_state, st->arch);
-    compute_generic_dense(&model->plc_dense_out, out, net->gru2_state, ACTIVATION_LINEAR, st->arch);
+    oaci_compute_generic_dense(&model->plc_dense_in, tmp, in, ACTIVATION_TANH, st->arch);
+    oaci_compute_generic_gru(&model->plc_gru1_input, &model->plc_gru1_recurrent, net->gru1_state, tmp, st->arch);
+    oaci_compute_generic_gru(&model->plc_gru2_input, &model->plc_gru2_recurrent, net->gru2_state, net->gru1_state, st->arch);
+    oaci_compute_generic_dense(&model->plc_dense_out, out, net->gru2_state, ACTIVATION_LINEAR, st->arch);
 }
 
 static int get_fec_or_pred(LPCNetPLCState *st, float *out) {
@@ -141,7 +141,7 @@ static void queue_features(LPCNetPLCState *st, const float *features) {
 /* In this causal version of the code, the DNN model implemented by compute_plc_pred()
    needs to generate two feature vectors to conceal the first lost packet.*/
 
-int lpcnet_plc_update(LPCNetPLCState *st, oac_int16 *pcm) {
+int oaci_lpcnet_plc_update(LPCNetPLCState *st, oac_int16 *pcm) {
     int i;
     if (st->analysis_pos - FRAME_SIZE >= 0) st->analysis_pos -= FRAME_SIZE;
     else st->analysis_gap = 1;
@@ -154,7 +154,7 @@ int lpcnet_plc_update(LPCNetPLCState *st, oac_int16 *pcm) {
 }
 
 static const float att_table[10] = {0, 0,  -.2, -.2,  -.4, -.4,  -.8, -.8, -1.6, -1.6};
-int lpcnet_plc_conceal(LPCNetPLCState *st, oac_int16 *pcm) {
+int oaci_lpcnet_plc_conceal(LPCNetPLCState *st, oac_int16 *pcm) {
     int i;
     celt_assert(st->loaded);
     if (st->blend == 0) {
@@ -165,8 +165,8 @@ int lpcnet_plc_conceal(LPCNetPLCState *st, oac_int16 *pcm) {
             float plc_features[2*NB_BANDS + NB_FEATURES + 1];
             celt_assert(st->analysis_pos >= 0);
             for (i = 0; i < FRAME_SIZE; i++) x[i] = 32768.f*st->pcm[st->analysis_pos + i];
-            burg_cepstral_analysis(plc_features, x);
-            lpcnet_compute_single_frame_features_float(&st->enc, x, st->features, st->arch);
+            oaci_burg_cepstral_analysis(plc_features, x);
+            oaci_lpcnet_compute_single_frame_features_float(&st->enc, x, st->features, st->arch);
             if ((!st->analysis_gap || count > 0) && st->analysis_pos >= st->predict_pos) {
                 queue_features(st, st->features);
                 OAC_COPY(&plc_features[2*NB_BANDS], st->features, NB_FEATURES);
@@ -186,7 +186,7 @@ int lpcnet_plc_conceal(LPCNetPLCState *st, oac_int16 *pcm) {
         st->plc_bak[1] = st->plc_net;
         get_fec_or_pred(st, st->features);
         queue_features(st, st->features);
-        fargan_cont(&st->fargan, &st->pcm[PLC_BUF_SIZE - FARGAN_CONT_SAMPLES], st->cont_features);
+        oaci_fargan_cont(&st->fargan, &st->pcm[PLC_BUF_SIZE - FARGAN_CONT_SAMPLES], st->cont_features);
         st->analysis_gap = 0;
     }
     st->plc_bak[0] = st->plc_bak[1];
@@ -195,7 +195,7 @@ int lpcnet_plc_conceal(LPCNetPLCState *st, oac_int16 *pcm) {
     else st->loss_count++;
     if (st->loss_count >= 10) st->features[0] = MAX16(-15, st->features[0] + att_table[9] - 2*(st->loss_count - 9));
     else st->features[0] = MAX16(-15, st->features[0] + att_table[st->loss_count]);
-    fargan_synthesize_int(&st->fargan, pcm, &st->features[0]);
+    oaci_fargan_synthesize_int(&st->fargan, pcm, &st->features[0]);
     queue_features(st, st->features);
     if (st->analysis_pos - FRAME_SIZE >= 0) st->analysis_pos -= FRAME_SIZE;
     else st->analysis_gap = 1;

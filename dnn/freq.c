@@ -118,7 +118,7 @@ static float lpcn_lpc(
 
 
 
-void lpcn_compute_band_energy(float *bandE, const kiss_fft_cpx *X) {
+void oaci_lpcn_compute_band_energy(float *bandE, const kiss_fft_cpx *X) {
     int i;
     float sum[NB_BANDS] = {0};
     for (i = 0; i < NB_BANDS - 1; i++) {
@@ -155,12 +155,12 @@ static void compute_burg_cepstrum(const float *pcm, float *burg_cepstrum, int le
     assert(order <= LPC_ORDER);
     assert(len <= FRAME_SIZE);
     for (i = 0; i < len - 1; i++) burg_in[i] = pcm[i + 1] - PREEMPHASIS*pcm[i];
-    g = silk_burg_analysis(burg_lpc, burg_in, 1e-3, len - 1, 1, order);
+    g = oaci_silk_burg_analysis(burg_lpc, burg_in, 1e-3, len - 1, 1, order);
     g /= len - 2*(order - 1);
     OAC_CLEAR(x, WINDOW_SIZE);
     x[0] = 1;
     for (i = 0; i < order; i++) x[i + 1] = -burg_lpc[i]*pow(.995, i + 1);
-    forward_transform(LPC, x);
+    oaci_forward_transform(LPC, x);
     compute_band_energy_inverse(Eburg, LPC);
     for (i = 0; i < NB_BANDS; i++) Eburg[i] *= .45*g*(1.f/((float)WINDOW_SIZE*WINDOW_SIZE*WINDOW_SIZE));
     for (i = 0; i < NB_BANDS; i++) {
@@ -169,11 +169,11 @@ static void compute_burg_cepstrum(const float *pcm, float *burg_cepstrum, int le
         logMax = MAX16(logMax, Ly[i]);
         follow = MAX16(follow - 2.5, Ly[i]);
     }
-    dct(burg_cepstrum, Ly);
+    oaci_dct(burg_cepstrum, Ly);
     burg_cepstrum[0] += -4;
 }
 
-void burg_cepstral_analysis(float *ceps, const float *x) {
+void oaci_burg_cepstral_analysis(float *ceps, const float *x) {
     int i;
     compute_burg_cepstrum(x,                &ceps[0       ], FRAME_SIZE/2, LPC_ORDER);
     compute_burg_cepstrum(&x[FRAME_SIZE/2], &ceps[NB_BANDS], FRAME_SIZE/2, LPC_ORDER);
@@ -202,13 +202,13 @@ static void interp_band_gain(float *g, const float *bandE) {
 }
 
 
-void dct(float *out, const float *in) {
+void oaci_dct(float *out, const float *in) {
     int i;
     for (i = 0; i < NB_BANDS; i++) {
         int j;
         float sum = 0;
         for (j = 0; j < NB_BANDS; j++) {
-            sum += in[j]*dct_table[j*NB_BANDS + i];
+            sum += in[j]*oaci_dct_table[j*NB_BANDS + i];
         }
         out[i] = sum*sqrt(2./NB_BANDS);
     }
@@ -220,13 +220,13 @@ static void idct(float *out, const float *in) {
         int j;
         float sum = 0;
         for (j = 0; j < NB_BANDS; j++) {
-            sum += in[j]*dct_table[i*NB_BANDS + j];
+            sum += in[j]*oaci_dct_table[i*NB_BANDS + j];
         }
         out[i] = sum*sqrt(2./NB_BANDS);
     }
 }
 
-void forward_transform(kiss_fft_cpx *out, const float *in) {
+void oaci_forward_transform(kiss_fft_cpx *out, const float *in) {
     int i;
     kiss_fft_cpx x[WINDOW_SIZE];
     kiss_fft_cpx y[WINDOW_SIZE];
@@ -234,7 +234,7 @@ void forward_transform(kiss_fft_cpx *out, const float *in) {
         x[i].r = in[i];
         x[i].i = 0;
     }
-    oac_fft(&kfft, x, y, 0);
+    oac_fft(&oaci_kfft, x, y, 0);
     for (i = 0; i < FREQ_SIZE; i++) {
         out[i] = y[i];
     }
@@ -251,7 +251,7 @@ static void inverse_transform(float *out, const kiss_fft_cpx *in) {
         x[i].r = x[WINDOW_SIZE - i].r;
         x[i].i = -x[WINDOW_SIZE - i].i;
     }
-    oac_fft(&kfft, x, y, 0);
+    oac_fft(&oaci_kfft, x, y, 0);
     /* output in reverse order for IFFT. */
     out[0] = WINDOW_SIZE*y[0].r;
     for (i = 1; i < WINDOW_SIZE; i++) {
@@ -282,7 +282,7 @@ static float lpc_from_bands(float *lpc, const float *Ex) {
     return e;
 }
 
-void lpc_weighting(float *lpc, float gamma) {
+void oaci_lpc_weighting(float *lpc, float gamma) {
     int i;
     float gamma_i = gamma;
     for (i = 0; i < LPC_ORDER; i++) {
@@ -291,7 +291,7 @@ void lpc_weighting(float *lpc, float gamma) {
     }
 }
 
-float lpc_from_cepstrum(float *lpc, const float *cepstrum) {
+float oaci_lpc_from_cepstrum(float *lpc, const float *cepstrum) {
     int i;
     float Ex[NB_BANDS];
     float tmp[NB_BANDS];
@@ -302,10 +302,10 @@ float lpc_from_cepstrum(float *lpc, const float *cepstrum) {
     return lpc_from_bands(lpc, Ex);
 }
 
-void apply_window(float *x) {
+void oaci_apply_window(float *x) {
     int i;
     for (i = 0; i < OVERLAP_SIZE; i++) {
-        x[i] *= half_window[i];
-        x[WINDOW_SIZE - 1 - i] *= half_window[i];
+        x[i] *= oaci_half_window[i];
+        x[WINDOW_SIZE - 1 - i] *= oaci_half_window[i];
     }
 }

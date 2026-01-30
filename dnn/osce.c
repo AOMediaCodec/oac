@@ -120,9 +120,9 @@ static void print_linear_layer(FILE *fid, const char *name, LinearLayer *layer) 
 
 #define CLIP(a, min, max) (((a) < (min) ? (min) : (a)) > (max) ? (max) : (a))
 
-extern const WeightArray lacelayers_arrays[];
-extern const WeightArray nolacelayers_arrays[];
-extern const WeightArray bbwenetlayers_arrays[];
+extern const WeightArray oaci_lacelayers_arrays[];
+extern const WeightArray oaci_nolacelayers_arrays[];
+extern const WeightArray oaci_bbwenetlayers_arrays[];
 
 /* LACE */
 
@@ -152,9 +152,9 @@ static int init_lace(LACE *hLACE, const WeightArray *weights) {
     OAC_CLEAR(hLACE, 1);
     celt_assert(weights != NULL);
 
-    ret = init_lacelayers(&hLACE->layers, weights);
+    ret = oaci_init_lacelayers(&hLACE->layers, weights);
 
-    compute_overlap_window(hLACE->window, LACE_OVERLAP_SIZE);
+    oaci_compute_overlap_window(hLACE->window, LACE_OVERLAP_SIZE);
 
     return ret;
 }
@@ -162,9 +162,9 @@ static int init_lace(LACE *hLACE, const WeightArray *weights) {
 static void reset_lace_state(LACEState *state) {
     OAC_CLEAR(state, 1);
 
-    init_adacomb_state(&state->cf1_state);
-    init_adacomb_state(&state->cf2_state);
-    init_adaconv_state(&state->af1_state);
+    oaci_init_adacomb_state(&state->cf1_state);
+    oaci_init_adacomb_state(&state->cf2_state);
+    oaci_init_adaconv_state(&state->af1_state);
 }
 
 static void lace_feature_net(
@@ -196,7 +196,7 @@ static void lace_feature_net(
         OAC_COPY(input_buffer + LACE_NUM_FEATURES + LACE_PITCH_EMBEDDING_DIM, numbits_embedded,
         2*LACE_NUMBITS_EMBEDDING_DIM);
 
-        compute_generic_conv1d(
+        oaci_compute_generic_conv1d(
             &hLACE->layers.lace_fnet_conv1,
             output_buffer + i_subframe*LACE_HIDDEN_FEATURE_DIM,
             NULL,
@@ -208,7 +208,7 @@ static void lace_feature_net(
 
     /* subframe accumulation */
     OAC_COPY(input_buffer, output_buffer, 4*LACE_HIDDEN_FEATURE_DIM);
-    compute_generic_conv1d(
+    oaci_compute_generic_conv1d(
         &hLACE->layers.lace_fnet_conv2,
         output_buffer,
         state->feature_net_conv2_state,
@@ -220,7 +220,7 @@ static void lace_feature_net(
 
     /* tconv upsampling */
     OAC_COPY(input_buffer, output_buffer, 4*LACE_COND_DIM);
-    compute_generic_dense(
+    oaci_compute_generic_dense(
         &hLACE->layers.lace_fnet_tconv,
         output_buffer,
         input_buffer,
@@ -231,7 +231,7 @@ static void lace_feature_net(
     /* GRU */
     OAC_COPY(input_buffer, output_buffer, 4*LACE_COND_DIM);
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
-        compute_generic_gru(
+        oaci_compute_generic_gru(
             &hLACE->layers.lace_fnet_gru_input,
             &hLACE->layers.lace_fnet_gru_recurrent,
             state->feature_net_gru_state,
@@ -293,7 +293,7 @@ static void lace_process_20ms_frame(
 
     /* 1st comb filtering stage */
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
-        adacomb_process_frame(
+        oaci_adacomb_process_frame(
             &state->cf1_state,
             output_buffer + i_subframe*LACE_FRAME_SIZE,
             output_buffer + i_subframe*LACE_FRAME_SIZE,
@@ -320,7 +320,7 @@ static void lace_process_20ms_frame(
 
     /* 2nd comb filtering stage */
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
-        adacomb_process_frame(
+        oaci_adacomb_process_frame(
             &state->cf2_state,
             output_buffer + i_subframe*LACE_FRAME_SIZE,
             output_buffer + i_subframe*LACE_FRAME_SIZE,
@@ -346,7 +346,7 @@ static void lace_process_20ms_frame(
 
     /* final adaptive filtering stage */
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
-        adaconv_process_frame(
+        oaci_adaconv_process_frame(
             &state->af1_state,
             output_buffer + i_subframe*LACE_FRAME_SIZE,
             output_buffer + i_subframe*LACE_FRAME_SIZE,
@@ -409,9 +409,9 @@ static int init_nolace(NoLACE *hNoLACE, const WeightArray *weights) {
     OAC_CLEAR(hNoLACE, 1);
     celt_assert(weights != NULL);
 
-    ret = init_nolacelayers(&hNoLACE->layers, weights);
+    ret = oaci_init_nolacelayers(&hNoLACE->layers, weights);
 
-    compute_overlap_window(hNoLACE->window, NOLACE_OVERLAP_SIZE);
+    oaci_compute_overlap_window(hNoLACE->window, NOLACE_OVERLAP_SIZE);
 
     return ret;
 }
@@ -419,15 +419,15 @@ static int init_nolace(NoLACE *hNoLACE, const WeightArray *weights) {
 static void reset_nolace_state(NoLACEState *state) {
     OAC_CLEAR(state, 1);
 
-    init_adacomb_state(&state->cf1_state);
-    init_adacomb_state(&state->cf2_state);
-    init_adaconv_state(&state->af1_state);
-    init_adaconv_state(&state->af2_state);
-    init_adaconv_state(&state->af3_state);
-    init_adaconv_state(&state->af4_state);
-    init_adashape_state(&state->tdshape1_state);
-    init_adashape_state(&state->tdshape2_state);
-    init_adashape_state(&state->tdshape3_state);
+    oaci_init_adacomb_state(&state->cf1_state);
+    oaci_init_adacomb_state(&state->cf2_state);
+    oaci_init_adaconv_state(&state->af1_state);
+    oaci_init_adaconv_state(&state->af2_state);
+    oaci_init_adaconv_state(&state->af3_state);
+    oaci_init_adaconv_state(&state->af4_state);
+    oaci_init_adashape_state(&state->tdshape1_state);
+    oaci_init_adashape_state(&state->tdshape2_state);
+    oaci_init_adashape_state(&state->tdshape3_state);
 }
 
 static void nolace_feature_net(
@@ -458,7 +458,7 @@ static void nolace_feature_net(
         OAC_COPY(input_buffer + NOLACE_NUM_FEATURES + NOLACE_PITCH_EMBEDDING_DIM, numbits_embedded,
         2*NOLACE_NUMBITS_EMBEDDING_DIM);
 
-        compute_generic_conv1d(
+        oaci_compute_generic_conv1d(
             &hNoLACE->layers.nolace_fnet_conv1,
             output_buffer + i_subframe*NOLACE_HIDDEN_FEATURE_DIM,
             NULL,
@@ -470,7 +470,7 @@ static void nolace_feature_net(
 
     /* subframe accumulation */
     OAC_COPY(input_buffer, output_buffer, 4*NOLACE_HIDDEN_FEATURE_DIM);
-    compute_generic_conv1d(
+    oaci_compute_generic_conv1d(
         &hNoLACE->layers.nolace_fnet_conv2,
         output_buffer,
         state->feature_net_conv2_state,
@@ -482,7 +482,7 @@ static void nolace_feature_net(
 
     /* tconv upsampling */
     OAC_COPY(input_buffer, output_buffer, 4*NOLACE_COND_DIM);
-    compute_generic_dense(
+    oaci_compute_generic_dense(
         &hNoLACE->layers.nolace_fnet_tconv,
         output_buffer,
         input_buffer,
@@ -493,7 +493,7 @@ static void nolace_feature_net(
     /* GRU */
     OAC_COPY(input_buffer, output_buffer, 4*NOLACE_COND_DIM);
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
-        compute_generic_gru(
+        oaci_compute_generic_gru(
             &hNoLACE->layers.nolace_fnet_gru_input,
             &hNoLACE->layers.nolace_fnet_gru_recurrent,
             state->feature_net_gru_state,
@@ -560,7 +560,7 @@ static void nolace_process_20ms_frame(
     /* 1st comb filtering stage */
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
         /* modifies signal in place */
-        adacomb_process_frame(
+        oaci_adacomb_process_frame(
             &state->cf1_state,
             x_buffer1 + i_subframe*NOLACE_FRAME_SIZE,
             x_buffer1 + i_subframe*NOLACE_FRAME_SIZE,
@@ -580,7 +580,7 @@ static void nolace_process_20ms_frame(
             hNoLACE->window,
             arch);
 
-        compute_generic_conv1d(
+        oaci_compute_generic_conv1d(
             &layers->nolace_post_cf1,
             feature_transform_buffer + i_subframe*NOLACE_COND_DIM,
             state->post_cf1_state,
@@ -600,7 +600,7 @@ static void nolace_process_20ms_frame(
     /* 2nd comb filtering stage */
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
         /* modifies signal in place */
-        adacomb_process_frame(
+        oaci_adacomb_process_frame(
             &state->cf2_state,
             x_buffer1 + i_subframe*NOLACE_FRAME_SIZE,
             x_buffer1 + i_subframe*NOLACE_FRAME_SIZE,
@@ -620,7 +620,7 @@ static void nolace_process_20ms_frame(
             hNoLACE->window,
             arch);
 
-        compute_generic_conv1d(
+        oaci_compute_generic_conv1d(
             &layers->nolace_post_cf2,
             feature_transform_buffer + i_subframe*NOLACE_COND_DIM,
             state->post_cf2_state,
@@ -639,7 +639,7 @@ static void nolace_process_20ms_frame(
 
     /* final adaptive filtering stage */
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
-        adaconv_process_frame(
+        oaci_adaconv_process_frame(
             &state->af1_state,
             x_buffer2 + i_subframe*NOLACE_FRAME_SIZE*NOLACE_AF1_OUT_CHANNELS,
             x_buffer1 + i_subframe*NOLACE_FRAME_SIZE,
@@ -659,7 +659,7 @@ static void nolace_process_20ms_frame(
             hNoLACE->window,
             arch);
 
-        compute_generic_conv1d(
+        oaci_compute_generic_conv1d(
             &layers->nolace_post_af1,
             feature_transform_buffer + i_subframe*NOLACE_COND_DIM,
             state->post_af1_state,
@@ -680,7 +680,7 @@ static void nolace_process_20ms_frame(
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
         celt_assert(NOLACE_AF1_OUT_CHANNELS == 2);
         /* modifies second channel in place */
-        adashape_process_frame(
+        oaci_adashape_process_frame(
             &state->tdshape1_state,
             x_buffer2 + i_subframe*NOLACE_AF1_OUT_CHANNELS*NOLACE_FRAME_SIZE + NOLACE_FRAME_SIZE,
             x_buffer2 + i_subframe*NOLACE_AF1_OUT_CHANNELS*NOLACE_FRAME_SIZE + NOLACE_FRAME_SIZE,
@@ -695,7 +695,7 @@ static void nolace_process_20ms_frame(
             arch
             );
 
-        adaconv_process_frame(
+        oaci_adaconv_process_frame(
             &state->af2_state,
             x_buffer1 + i_subframe*NOLACE_FRAME_SIZE*NOLACE_AF2_OUT_CHANNELS,
             x_buffer2 + i_subframe*NOLACE_FRAME_SIZE*NOLACE_AF2_IN_CHANNELS,
@@ -715,7 +715,7 @@ static void nolace_process_20ms_frame(
             hNoLACE->window,
             arch);
 
-        compute_generic_conv1d(
+        oaci_compute_generic_conv1d(
             &layers->nolace_post_af2,
             feature_transform_buffer + i_subframe*NOLACE_COND_DIM,
             state->post_af2_state,
@@ -736,7 +736,7 @@ static void nolace_process_20ms_frame(
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
         celt_assert(NOLACE_AF2_OUT_CHANNELS == 2);
         /* modifies second channel in place */
-        adashape_process_frame(
+        oaci_adashape_process_frame(
             &state->tdshape2_state,
             x_buffer1 + i_subframe*NOLACE_AF2_OUT_CHANNELS*NOLACE_FRAME_SIZE + NOLACE_FRAME_SIZE,
             x_buffer1 + i_subframe*NOLACE_AF2_OUT_CHANNELS*NOLACE_FRAME_SIZE + NOLACE_FRAME_SIZE,
@@ -751,7 +751,7 @@ static void nolace_process_20ms_frame(
             arch
             );
 
-        adaconv_process_frame(
+        oaci_adaconv_process_frame(
             &state->af3_state,
             x_buffer2 + i_subframe*NOLACE_FRAME_SIZE*NOLACE_AF3_OUT_CHANNELS,
             x_buffer1 + i_subframe*NOLACE_FRAME_SIZE*NOLACE_AF3_IN_CHANNELS,
@@ -771,7 +771,7 @@ static void nolace_process_20ms_frame(
             hNoLACE->window,
             arch);
 
-        compute_generic_conv1d(
+        oaci_compute_generic_conv1d(
             &layers->nolace_post_af3,
             feature_transform_buffer + i_subframe*NOLACE_COND_DIM,
             state->post_af3_state,
@@ -788,7 +788,7 @@ static void nolace_process_20ms_frame(
     for (i_subframe = 0; i_subframe < 4; i_subframe++) {
         celt_assert(NOLACE_AF3_OUT_CHANNELS == 2);
         /* modifies second channel in place */
-        adashape_process_frame(
+        oaci_adashape_process_frame(
             &state->tdshape3_state,
             x_buffer2 + i_subframe*NOLACE_AF3_OUT_CHANNELS*NOLACE_FRAME_SIZE + NOLACE_FRAME_SIZE,
             x_buffer2 + i_subframe*NOLACE_AF3_OUT_CHANNELS*NOLACE_FRAME_SIZE + NOLACE_FRAME_SIZE,
@@ -803,7 +803,7 @@ static void nolace_process_20ms_frame(
             arch
             );
 
-        adaconv_process_frame(
+        oaci_adaconv_process_frame(
             &state->af4_state,
             x_buffer1 + i_subframe*NOLACE_FRAME_SIZE*NOLACE_AF4_OUT_CHANNELS,
             x_buffer2 + i_subframe*NOLACE_FRAME_SIZE*NOLACE_AF4_IN_CHANNELS,
@@ -872,7 +872,7 @@ static void bbwe_feature_net(
 
     /* first conv layer */
     for (i_frame = 0; i_frame < num_frames; i_frame++) {
-        compute_generic_conv1d(
+        oaci_compute_generic_conv1d(
             &hBBWENET->layers.bbwenet_fnet_conv1,
             output_buffer + i_frame*BBWENET_FNET_CONV1_OUT_SIZE,
             state->feature_net_conv1_state,
@@ -890,7 +890,7 @@ static void bbwe_feature_net(
 
     /* second conv layer */
     for (i_frame = 0; i_frame < num_frames; i_frame++) {
-        compute_generic_conv1d(
+        oaci_compute_generic_conv1d(
             &hBBWENET->layers.bbwenet_fnet_conv2,
             output_buffer + i_frame*BBWENET_FNET_CONV2_OUT_SIZE,
             state->feature_net_conv2_state,
@@ -908,7 +908,7 @@ static void bbwe_feature_net(
 
     /* tconv upsampling*/
     for (i_frame = 0; i_frame < num_frames; i_frame++) {
-        compute_generic_dense(
+        oaci_compute_generic_dense(
             &hBBWENET->layers.bbwenet_fnet_tconv,
             output_buffer + i_frame*BBWENET_FNET_TCONV_OUT_CHANNELS*BBWENET_FNET_TCONV_STRIDE,
             input_buffer + i_frame*BBWENET_FNET_CONV2_OUT_SIZE,
@@ -925,7 +925,7 @@ static void bbwe_feature_net(
     /* GRU */
     celt_assert(BBWENET_FNET_TCONV_STRIDE == 2);
     for (i_subframe = 0; i_subframe < BBWENET_FNET_TCONV_STRIDE*num_frames; i_subframe++) {
-        compute_generic_gru(
+        oaci_compute_generic_gru(
             &hBBWENET->layers.bbwenet_fnet_gru_input,
             &hBBWENET->layers.bbwenet_fnet_gru_recurrent,
             state->feature_net_gru_state,
@@ -1131,7 +1131,7 @@ static void bbwenet_process_frames(
     /* signal net
      * first adaptive filtering stage, three output channels */
     for (i_subframe = 0; i_subframe < num_subframes; i_subframe++) {
-        adaconv_process_frame(
+        oaci_adaconv_process_frame(
             &state->af1_state,
             x_buffer1 + i_subframe*BBWENET_AF1_FRAME_SIZE*BBWENET_AF1_OUT_CHANNELS,
             x_in + i_subframe*BBWENET_AF1_FRAME_SIZE,
@@ -1188,7 +1188,7 @@ static void bbwenet_process_frames(
 #  endif
 
         /* tdshape on second channel (in place) */
-        adashape_process_frame(
+        oaci_adashape_process_frame(
             &state->tdshape1_state,
             x_buffer2 + i_subframe*BBWENET_AF1_OUT_CHANNELS*BBWENET_TDSHAPE1_FRAME_SIZE + BBWENET_TDSHAPE1_FRAME_SIZE,
             x_buffer2 + i_subframe*BBWENET_AF1_OUT_CHANNELS*BBWENET_TDSHAPE1_FRAME_SIZE + BBWENET_TDSHAPE1_FRAME_SIZE,
@@ -1222,7 +1222,7 @@ static void bbwenet_process_frames(
 
     /* mixing */
     for (i_subframe = 0; i_subframe < num_subframes; i_subframe++) {
-        adaconv_process_frame(
+        oaci_adaconv_process_frame(
             &state->af2_state,
             x_buffer1 + i_subframe*BBWENET_AF2_FRAME_SIZE*BBWENET_AF2_OUT_CHANNELS,
             x_buffer2 + i_subframe*BBWENET_AF2_FRAME_SIZE*BBWENET_AF1_OUT_CHANNELS,
@@ -1277,7 +1277,7 @@ static void bbwenet_process_frames(
 #  endif
 
         /* tdshape on second channel (in place) */
-        adashape_process_frame(
+        oaci_adashape_process_frame(
             &state->tdshape2_state,
             x_buffer2 + i_subframe*BBWENET_AF2_OUT_CHANNELS*BBWENET_TDSHAPE2_FRAME_SIZE + BBWENET_TDSHAPE2_FRAME_SIZE,
             x_buffer2 + i_subframe*BBWENET_AF2_OUT_CHANNELS*BBWENET_TDSHAPE2_FRAME_SIZE + BBWENET_TDSHAPE2_FRAME_SIZE,
@@ -1311,7 +1311,7 @@ static void bbwenet_process_frames(
     /* final mixing */
     celt_assert(BBWENET_AF3_OUT_CHANNELS == 1);
     for (i_subframe = 0; i_subframe < num_subframes; i_subframe++) {
-        adaconv_process_frame(
+        oaci_adaconv_process_frame(
             &state->af3_state,
             x_out + i_subframe*BBWENET_AF3_FRAME_SIZE,
             x_buffer2 + i_subframe*BBWENET_TDSHAPE2_FRAME_SIZE*BBWENET_AF2_OUT_CHANNELS,
@@ -1340,11 +1340,11 @@ static void bbwenet_process_frames(
 static void reset_bbwenet_state(BBWENetState *state) {
     OAC_CLEAR(state, 1);
 
-    init_adaconv_state(&state->af1_state);
-    init_adaconv_state(&state->af2_state);
-    init_adaconv_state(&state->af3_state);
-    init_adashape_state(&state->tdshape1_state);
-    init_adashape_state(&state->tdshape2_state);
+    oaci_init_adaconv_state(&state->af1_state);
+    oaci_init_adaconv_state(&state->af2_state);
+    oaci_init_adaconv_state(&state->af3_state);
+    oaci_init_adashape_state(&state->tdshape1_state);
+    oaci_init_adashape_state(&state->tdshape2_state);
 }
 
 static int init_bbwenet(BBWENet *hBBWENET, const WeightArray *weights) {
@@ -1352,11 +1352,11 @@ static int init_bbwenet(BBWENet *hBBWENET, const WeightArray *weights) {
     OAC_CLEAR(hBBWENET, 1);
     celt_assert(weights != NULL);
 
-    ret = init_bbwenetlayers(&hBBWENET->layers, weights);
+    ret = oaci_init_bbwenetlayers(&hBBWENET->layers, weights);
 
-    compute_overlap_window(hBBWENET->window16, BBWENET_AF1_OVERLAP_SIZE);
-    compute_overlap_window(hBBWENET->window32, BBWENET_AF2_OVERLAP_SIZE);
-    compute_overlap_window(hBBWENET->window48, BBWENET_AF3_OVERLAP_SIZE);
+    oaci_compute_overlap_window(hBBWENET->window16, BBWENET_AF1_OVERLAP_SIZE);
+    oaci_compute_overlap_window(hBBWENET->window32, BBWENET_AF2_OVERLAP_SIZE);
+    oaci_compute_overlap_window(hBBWENET->window48, BBWENET_AF3_OVERLAP_SIZE);
 
     return ret;
 }
@@ -1366,7 +1366,7 @@ static int init_bbwenet(BBWENet *hBBWENET, const WeightArray *weights) {
 
 /* API */
 
-void osce_reset(silk_OSCE_struct *hOSCE, int method) {
+void oaci_osce_reset(silk_OSCE_struct *hOSCE, int method) {
     OSCEState *state = &hOSCE->state;
 
     OAC_CLEAR(&hOSCE->features, 1);
@@ -1393,7 +1393,7 @@ void osce_reset(silk_OSCE_struct *hOSCE, int method) {
 
 #ifdef ENABLE_OSCE_BWE
 
-void osce_bwe_reset(silk_OSCE_BWE_struct *hOSCEBWE) {
+void oaci_osce_bwe_reset(silk_OSCE_BWE_struct *hOSCEBWE) {
     int k;
     OAC_CLEAR(&hOSCEBWE->features, 1);
 # if 1
@@ -1409,13 +1409,13 @@ void osce_bwe_reset(silk_OSCE_BWE_struct *hOSCEBWE) {
 
 
 
-int osce_load_models(OSCEModel *model, const void *data, int len) {
+int oaci_osce_load_models(OSCEModel *model, const void *data, int len) {
     int ret = 0;
     WeightArray *list;
 
     if (data != NULL  && len) {
         /* init from buffer */
-        parse_weights(&list, data, len);
+        oaci_parse_weights(&list, data, len);
 
 #ifndef DISABLE_LACE
         if (ret == 0) {
@@ -1443,20 +1443,20 @@ int osce_load_models(OSCEModel *model, const void *data, int len) {
 #else
 # ifndef DISABLE_LACE
         if (ret == 0) {
-            ret = init_lace(&model->lace, lacelayers_arrays);
+            ret = init_lace(&model->lace, oaci_lacelayers_arrays);
         }
 # endif
 
 # ifndef DISABLE_NOLACE
         if (ret == 0) {
-            ret = init_nolace(&model->nolace, nolacelayers_arrays);
+            ret = init_nolace(&model->nolace, oaci_nolacelayers_arrays);
         }
 # endif
 
 # ifdef ENABLE_OSCE_BWE
 #  ifndef DISABLE_BBWENET
         if (ret == 0) {
-            ret = init_bbwenet(&model->bbwenet, bbwenetlayers_arrays);
+            ret = init_bbwenet(&model->bbwenet, oaci_bbwenetlayers_arrays);
         }
 #  endif
 # endif /* ENABLE_OSCE_BWE */
@@ -1468,7 +1468,7 @@ int osce_load_models(OSCEModel *model, const void *data, int len) {
 }
 
 #ifdef ENABLE_OSCE_BWE
-void osce_bwe(
+void oaci_osce_bwe(
     OSCEModel                   *model,                         /* I    OSCE model struct                           */
     silk_OSCE_BWE_struct        *psOSCEBWE,                     /* I/O  OSCE BWE state                              */
     oac_int16 xq48[],                                          /* O    bandwidth-extended speech                   */
@@ -1491,7 +1491,7 @@ void osce_bwe(
         in_buffer[i] = ((float) xq16[i])*(1.f/32768.f);
     }
 
-    osce_bwe_calculate_features(&psOSCEBWE->features, features, xq16, xq16_len);
+    oaci_osce_bwe_calculate_features(&psOSCEBWE->features, features, xq16, xq16_len);
 
 # if 0
     /* just upsampling for now */
@@ -1532,7 +1532,7 @@ void osce_bwe(
 
 #endif
 
-void osce_enhance_frame(
+void oaci_osce_enhance_frame(
     OSCEModel                   *model,                         /* I    OSCE model struct                           */
     silk_decoder_state          *psDec,                         /* I/O  Decoder state                               */
     silk_decoder_control        *psDecCtrl,                     /* I    Decoder control                             */
@@ -1550,11 +1550,11 @@ void osce_enhance_frame(
 
     /* enhancement only implemented for 20 ms frame at 16kHz */
     if (psDec->fs_kHz != 16 || psDec->nb_subfr != 4) {
-        osce_reset(&psDec->osce, psDec->osce.method);
+        oaci_osce_reset(&psDec->osce, psDec->osce.method);
         return;
     }
 
-    osce_calculate_features(psDec, psDecCtrl, features, numbits, periods, xq, num_bits);
+    oaci_osce_calculate_features(psDec, psDecCtrl, features, numbits, periods, xq, num_bits);
 
     /* scale input */
     for (i = 0; i < 320; i++) {
@@ -1660,7 +1660,7 @@ void osce_enhance_frame(
         OAC_COPY(out_buffer, in_buffer, 320);
         psDec->osce.features.reset--;
     } else if (psDec->osce.features.reset) {
-        osce_cross_fade_10ms(out_buffer, in_buffer, 320);
+        oaci_osce_cross_fade_10ms(out_buffer, in_buffer, 320);
         psDec->osce.features.reset = 0;
     }
 

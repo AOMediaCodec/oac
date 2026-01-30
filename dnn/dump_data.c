@@ -264,7 +264,7 @@ int main(int argc, char **argv) {
 #endif
     srand(getpid());
     arch = oac_select_arch();
-    st = lpcnet_encoder_create();
+    st = oaci_lpcnet_encoder_create();
     argv0 = argv[0];
     if (argc == 5 && strcmp(argv[1], "-btrain") == 0) {
         burg = 1;
@@ -446,13 +446,13 @@ int main(int argc, char **argv) {
             float *xf = &xn[frame*FRAME_SIZE];
             if (burg) {
                 float ceps[2*NB_BANDS];
-                burg_cepstral_analysis(ceps, xf);
+                oaci_burg_cepstral_analysis(ceps, xf);
                 fwrite(ceps, sizeof(float), 2*NB_BANDS, ffeat);
             }
-            preemphasis(xf, &mem_preemph, xf, PREEMPHASIS, FRAME_SIZE);
+            oaci_preemphasis(xf, &mem_preemph, xf, PREEMPHASIS, FRAME_SIZE);
             /* PCM is delayed by 1/2 frame to make the features centered on the frames. */
             for (i = 0; i < FRAME_SIZE - TRAINING_OFFSET; i++) pcm[i + TRAINING_OFFSET] = float2short(xf[i]);
-            compute_frame_features(st, xf, arch);
+            oaci_compute_frame_features(st, xf, arch);
 
             if (pitch) {
                 signed char pitch_features[PITCH_MAX_PERIOD - PITCH_MIN_PERIOD + PITCH_IF_FEATURES];
@@ -477,6 +477,6 @@ int main(int argc, char **argv) {
     fclose(f2);
     fclose(ffeat);
     if (fpcm) fclose(fpcm);
-    lpcnet_encoder_destroy(st);
+    oaci_lpcnet_encoder_destroy(st);
     return 0;
 }

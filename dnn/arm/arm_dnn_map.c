@@ -36,36 +36,36 @@
 
 # if (defined(OAC_ARM_MAY_HAVE_DOTPROD) && !defined(OAC_ARM_PRESUME_DOTPROD))
 
-void (*const DNN_COMPUTE_LINEAR_IMPL[OAC_ARCHMASK + 1])(
+void (*const oaci_DNN_COMPUTE_LINEAR_IMPL[OAC_ARCHMASK + 1])(
          const LinearLayer *linear,
          float *out,
          const float *in
     ) = {
-    compute_linear_c,              /* default */
-    compute_linear_c,
-    compute_linear_c,
-    MAY_HAVE_NEON(compute_linear), /* neon  */
-    MAY_HAVE_DOTPROD(compute_linear) /* dotprod  */
+    oaci_compute_linear_c,              /* default */
+    oaci_compute_linear_c,
+    oaci_compute_linear_c,
+    MAY_HAVE_NEON(oaci_compute_linear), /* neon  */
+    MAY_HAVE_DOTPROD(oaci_compute_linear) /* dotprod  */
 };
 
 # endif
 
 # if (defined(OAC_ARM_MAY_HAVE_DOTPROD) || defined(OAC_ARM_MAY_HAVE_NEON)) && !defined(OAC_ARM_PRESUME_NEON)
 
-void (*const DNN_COMPUTE_ACTIVATION_IMPL[OAC_ARCHMASK + 1])(
+void (*const oaci_DNN_COMPUTE_ACTIVATION_IMPL[OAC_ARCHMASK + 1])(
          float *output,
          const float *input,
          int N,
          int activation
     ) = {
-    compute_activation_c,                /* default */
-    compute_activation_c,
-    compute_activation_c,
-    MAY_HAVE_NEON(compute_activation),   /* neon  */
-    MAY_HAVE_DOTPROD(compute_activation) /* dotprod  */
+    oaci_compute_activation_c,                /* default */
+    oaci_compute_activation_c,
+    oaci_compute_activation_c,
+    MAY_HAVE_NEON(oaci_compute_activation),   /* neon  */
+    MAY_HAVE_DOTPROD(oaci_compute_activation) /* dotprod  */
 };
 
-void (*const DNN_COMPUTE_CONV2D_IMPL[OAC_ARCHMASK + 1])(
+void (*const oaci_DNN_COMPUTE_CONV2D_IMPL[OAC_ARCHMASK + 1])(
          const Conv2dLayer *conv,
          float *out,
          float *mem,
@@ -74,11 +74,11 @@ void (*const DNN_COMPUTE_CONV2D_IMPL[OAC_ARCHMASK + 1])(
          int hstride,
          int activation
     ) = {
-    compute_conv2d_c,                /* default */
-    compute_conv2d_c,
-    compute_conv2d_c,
-    MAY_HAVE_NEON(compute_conv2d),   /* neon  */
-    MAY_HAVE_DOTPROD(compute_conv2d) /* dotprod  */
+    oaci_compute_conv2d_c,                /* default */
+    oaci_compute_conv2d_c,
+    oaci_compute_conv2d_c,
+    MAY_HAVE_NEON(oaci_compute_conv2d),   /* neon  */
+    MAY_HAVE_DOTPROD(oaci_compute_conv2d) /* dotprod  */
 };
 
 

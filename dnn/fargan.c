@@ -54,10 +54,10 @@ static void compute_fargan_cond(FARGANState *st, float *cond, const float *featu
     COND_NET_PEMBED_OUT_SIZE);
     OAC_COPY(dense_in, features, NB_FEATURES);
 
-    compute_generic_dense(&model->cond_net_fdense1, conv1_in, dense_in, ACTIVATION_TANH, st->arch);
-    compute_generic_conv1d(&model->cond_net_fconv1, fdense2_in, st->cond_conv1_state, conv1_in, COND_NET_FCONV1_IN_SIZE,
+    oaci_compute_generic_dense(&model->cond_net_fdense1, conv1_in, dense_in, ACTIVATION_TANH, st->arch);
+    oaci_compute_generic_conv1d(&model->cond_net_fconv1, fdense2_in, st->cond_conv1_state, conv1_in, COND_NET_FCONV1_IN_SIZE,
     ACTIVATION_TANH, st->arch);
-    compute_generic_dense(&model->cond_net_fdense2, cond, fdense2_in, ACTIVATION_TANH, st->arch);
+    oaci_compute_generic_dense(&model->cond_net_fdense2, cond, fdense2_in, ACTIVATION_TANH, st->arch);
 }
 
 static void fargan_deemphasis(float *pcm, float *deemph_mem) {
@@ -86,7 +86,7 @@ static void run_fargan_subframe(FARGANState *st, float *pcm, const float *cond, 
     celt_assert(st->cont_initialized);
     model = &st->model;
 
-    compute_generic_dense(&model->sig_net_cond_gain_dense, &gain, cond, ACTIVATION_LINEAR, st->arch);
+    oaci_compute_generic_dense(&model->sig_net_cond_gain_dense, &gain, cond, ACTIVATION_LINEAR, st->arch);
     gain = exp(gain);
     gain_1 = 1.f/(1e-5f + gain);
 
@@ -103,27 +103,27 @@ static void run_fargan_subframe(FARGANState *st, float *pcm, const float *cond, 
     OAC_COPY(&fwc0_in[FARGAN_COND_SIZE], pred, FARGAN_SUBFRAME_SIZE + 4);
     OAC_COPY(&fwc0_in[FARGAN_COND_SIZE + FARGAN_SUBFRAME_SIZE + 4], prev, FARGAN_SUBFRAME_SIZE);
 
-    compute_generic_conv1d(&model->sig_net_fwc0_conv, gru1_in, st->fwc0_mem, fwc0_in, SIG_NET_INPUT_SIZE,
+    oaci_compute_generic_conv1d(&model->sig_net_fwc0_conv, gru1_in, st->fwc0_mem, fwc0_in, SIG_NET_INPUT_SIZE,
     ACTIVATION_TANH, st->arch);
     celt_assert(SIG_NET_FWC0_GLU_GATE_OUT_SIZE == model->sig_net_fwc0_glu_gate.nb_outputs);
-    compute_glu(&model->sig_net_fwc0_glu_gate, gru1_in, gru1_in, st->arch);
+    oaci_compute_glu(&model->sig_net_fwc0_glu_gate, gru1_in, gru1_in, st->arch);
 
-    compute_generic_dense(&model->sig_net_gain_dense_out, pitch_gate, gru1_in, ACTIVATION_SIGMOID, st->arch);
+    oaci_compute_generic_dense(&model->sig_net_gain_dense_out, pitch_gate, gru1_in, ACTIVATION_SIGMOID, st->arch);
 
     for (i = 0; i < FARGAN_SUBFRAME_SIZE; i++) gru1_in[SIG_NET_FWC0_GLU_GATE_OUT_SIZE + i] = pitch_gate[0]*pred[i + 2];
     OAC_COPY(&gru1_in[SIG_NET_FWC0_GLU_GATE_OUT_SIZE + FARGAN_SUBFRAME_SIZE], prev, FARGAN_SUBFRAME_SIZE);
-    compute_generic_gru(&model->sig_net_gru1_input, &model->sig_net_gru1_recurrent, st->gru1_state, gru1_in, st->arch);
-    compute_glu(&model->sig_net_gru1_glu_gate, gru2_in, st->gru1_state, st->arch);
+    oaci_compute_generic_gru(&model->sig_net_gru1_input, &model->sig_net_gru1_recurrent, st->gru1_state, gru1_in, st->arch);
+    oaci_compute_glu(&model->sig_net_gru1_glu_gate, gru2_in, st->gru1_state, st->arch);
 
     for (i = 0; i < FARGAN_SUBFRAME_SIZE; i++) gru2_in[SIG_NET_GRU1_OUT_SIZE + i] = pitch_gate[1]*pred[i + 2];
     OAC_COPY(&gru2_in[SIG_NET_GRU1_OUT_SIZE + FARGAN_SUBFRAME_SIZE], prev, FARGAN_SUBFRAME_SIZE);
-    compute_generic_gru(&model->sig_net_gru2_input, &model->sig_net_gru2_recurrent, st->gru2_state, gru2_in, st->arch);
-    compute_glu(&model->sig_net_gru2_glu_gate, gru3_in, st->gru2_state, st->arch);
+    oaci_compute_generic_gru(&model->sig_net_gru2_input, &model->sig_net_gru2_recurrent, st->gru2_state, gru2_in, st->arch);
+    oaci_compute_glu(&model->sig_net_gru2_glu_gate, gru3_in, st->gru2_state, st->arch);
 
     for (i = 0; i < FARGAN_SUBFRAME_SIZE; i++) gru3_in[SIG_NET_GRU2_OUT_SIZE + i] = pitch_gate[2]*pred[i + 2];
     OAC_COPY(&gru3_in[SIG_NET_GRU2_OUT_SIZE + FARGAN_SUBFRAME_SIZE], prev, FARGAN_SUBFRAME_SIZE);
-    compute_generic_gru(&model->sig_net_gru3_input, &model->sig_net_gru3_recurrent, st->gru3_state, gru3_in, st->arch);
-    compute_glu(&model->sig_net_gru3_glu_gate, &skip_cat[SIG_NET_GRU1_OUT_SIZE + SIG_NET_GRU2_OUT_SIZE], st->gru3_state,
+    oaci_compute_generic_gru(&model->sig_net_gru3_input, &model->sig_net_gru3_recurrent, st->gru3_state, gru3_in, st->arch);
+    oaci_compute_glu(&model->sig_net_gru3_glu_gate, &skip_cat[SIG_NET_GRU1_OUT_SIZE + SIG_NET_GRU2_OUT_SIZE], st->gru3_state,
     st->arch);
 
     OAC_COPY(skip_cat, gru2_in, SIG_NET_GRU1_OUT_SIZE);
@@ -136,10 +136,10 @@ static void run_fargan_subframe(FARGANState *st, float *pcm, const float *cond, 
     OAC_COPY(&skip_cat[SIG_NET_GRU1_OUT_SIZE + SIG_NET_GRU2_OUT_SIZE + SIG_NET_GRU3_OUT_SIZE
                        + SIG_NET_FWC0_CONV_OUT_SIZE + FARGAN_SUBFRAME_SIZE], prev, FARGAN_SUBFRAME_SIZE);
 
-    compute_generic_dense(&model->sig_net_skip_dense, skip_out, skip_cat, ACTIVATION_TANH, st->arch);
-    compute_glu(&model->sig_net_skip_glu_gate, skip_out, skip_out, st->arch);
+    oaci_compute_generic_dense(&model->sig_net_skip_dense, skip_out, skip_cat, ACTIVATION_TANH, st->arch);
+    oaci_compute_glu(&model->sig_net_skip_glu_gate, skip_out, skip_out, st->arch);
 
-    compute_generic_dense(&model->sig_net_sig_dense_out, pcm, skip_out, ACTIVATION_TANH, st->arch);
+    oaci_compute_generic_dense(&model->sig_net_sig_dense_out, pcm, skip_out, ACTIVATION_TANH, st->arch);
     for (i = 0; i < FARGAN_SUBFRAME_SIZE; i++) pcm[i] *= gain;
 
     OAC_MOVE(st->pitch_buf, &st->pitch_buf[FARGAN_SUBFRAME_SIZE], PITCH_MAX_PERIOD - FARGAN_SUBFRAME_SIZE);
@@ -147,7 +147,7 @@ static void run_fargan_subframe(FARGANState *st, float *pcm, const float *cond, 
     fargan_deemphasis(pcm, &st->deemph_mem);
 }
 
-void fargan_cont(FARGANState *st, const float *pcm0, const float *features0) {
+void oaci_fargan_cont(FARGANState *st, const float *pcm0, const float *features0) {
     int i;
     float cond[COND_NET_FDENSE2_OUT_SIZE];
     float x0[FARGAN_CONT_SAMPLES];
@@ -179,23 +179,23 @@ void fargan_cont(FARGANState *st, const float *pcm0, const float *features0) {
 }
 
 
-void fargan_init(FARGANState *st) {
+void oaci_fargan_init(FARGANState *st) {
     int ret;
     OAC_CLEAR(st, 1);
     st->arch = oac_select_arch();
 #ifndef USE_WEIGHTS_FILE
-    ret = init_fargan(&st->model, fargan_arrays);
+    ret = oaci_init_fargan(&st->model, oaci_fargan_arrays);
 #else
     ret = 0;
 #endif
     celt_assert(ret == 0);
 }
 
-int fargan_load_model(FARGANState *st, const void *data, int len) {
+int oaci_fargan_load_model(FARGANState *st, const void *data, int len) {
     WeightArray *list;
     int ret;
-    parse_weights(&list, data, len);
-    ret = init_fargan(&st->model, list);
+    oaci_parse_weights(&list, data, len);
+    ret = oaci_init_fargan(&st->model, list);
     oac_free(list);
     if (ret == 0) return 0;
     else return -1;
@@ -217,13 +217,13 @@ static void fargan_synthesize_impl(FARGANState *st, float *pcm, const float *fea
     st->last_period = period;
 }
 
-void fargan_synthesize(FARGANState *st, float *pcm, const float *features) {
+void oaci_fargan_synthesize(FARGANState *st, float *pcm, const float *features) {
     fargan_synthesize_impl(st, pcm, features);
 }
 
-void fargan_synthesize_int(FARGANState *st, oac_int16 *pcm, const float *features) {
+void oaci_fargan_synthesize_int(FARGANState *st, oac_int16 *pcm, const float *features) {
     int i;
     float fpcm[FARGAN_FRAME_SIZE];
-    fargan_synthesize(st, fpcm, features);
+    oaci_fargan_synthesize(st, fpcm, features);
     for (i = 0; i < LPCNET_FRAME_SIZE; i++) pcm[i] = (int)floor(.5 + MIN32(32767, MAX32(-32767, 32768.f*fpcm[i])));
 }

@@ -9,8 +9,8 @@
 #include <math.h>
 
 
-extern const WeightArray lacelayers_arrays[];
-extern const WeightArray nolacelayers_arrays[];
+extern const WeightArray oaci_lacelayers_arrays[];
+extern const WeightArray oaci_nolacelayers_arrays[];
 
 void adaconv_compare(
     const char * prefix,
@@ -40,8 +40,8 @@ void adaconv_compare(
     float x_out[512];
     float window[40];
 
-    init_adaconv_state(hAdaConv);
-    compute_overlap_window(window, 40);
+    oaci_init_adaconv_state(hAdaConv);
+    oaci_compute_overlap_window(window, 40);
 
     FILE *f_features, *f_x_in, *f_x_out;
 
@@ -88,7 +88,7 @@ void adaconv_compare(
             exit(1);
         }
 
-        adaconv_process_frame(hAdaConv, x_out, x_in, features, kernel_layer, gain_layer, feature_dim,
+        oaci_adaconv_process_frame(hAdaConv, x_out, x_in, features, kernel_layer, gain_layer, feature_dim,
             frame_size, overlap_size, in_channels, out_channels, kernel_size, left_padding,
             filter_gain_a, filter_gain_b, shape_gain, window, 0);
 
@@ -132,8 +132,8 @@ void adacomb_compare(
     int pitch_lag;
     float window[40];
 
-    init_adacomb_state(hAdaComb);
-    compute_overlap_window(window, 40);
+    oaci_init_adacomb_state(hAdaComb);
+    oaci_compute_overlap_window(window, 40);
 
     FILE *f_features, *f_x_in, *f_p_in, *f_x_out;
 
@@ -194,7 +194,7 @@ void adacomb_compare(
             exit(1);
         }
 
-        adacomb_process_frame(hAdaComb, x_out, x_in, features, kernel_layer, gain_layer, global_gain_layer,
+        oaci_adacomb_process_frame(hAdaComb, x_out, x_in, features, kernel_layer, gain_layer, global_gain_layer,
             pitch_lag, feature_dim, frame_size, overlap_size, kernel_size, left_padding, filter_gain_a, filter_gain_b,
         log_gain_limit, window, 0);
 
@@ -229,7 +229,7 @@ void adashape_compare(
     float x_out_ref[512];
     float x_out[512];
 
-    init_adashape_state(hAdaShape);
+    oaci_init_adashape_state(hAdaShape);
 
     FILE *f_features, *f_x_in, *f_x_out;
 
@@ -276,7 +276,7 @@ void adashape_compare(
             exit(1);
         }
 
-        adashape_process_frame(hAdaShape, x_out, x_in, features, alpha1, alpha2, feature_dim,
+        oaci_adashape_process_frame(hAdaShape, x_out, x_in, features, alpha1, alpha2, feature_dim,
             frame_size, avg_pool_k, 0);
 
         mse = 0;
@@ -298,10 +298,10 @@ int main() {
     AdaCombState hAdaComb;
     AdaShapeState hAdaShape;
 
-    init_adaconv_state(&hAdaConv);
+    oaci_init_adaconv_state(&hAdaConv);
 
-    init_lacelayers(&hLACE, lacelayers_arrays);
-    init_nolacelayers(&hNoLACE, nolacelayers_arrays);
+    oaci_init_lacelayers(&hLACE, oaci_lacelayers_arrays);
+    oaci_init_nolacelayers(&hNoLACE, oaci_nolacelayers_arrays);
 
     printf("\ntesting lace.af1 (1 in, 1 out)...\n");
     adaconv_compare(

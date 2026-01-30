@@ -76,7 +76,7 @@
 /* API */
 
 
-void osce_enhance_frame(
+void oaci_osce_enhance_frame(
     OSCEModel                   *model,                         /* I    OSCE model struct                           */
     silk_decoder_state          *psDec,                         /* I/O  Decoder state                               */
     silk_decoder_control        *psDecCtrl,                     /* I    Decoder control                             */
@@ -86,11 +86,11 @@ void osce_enhance_frame(
     );
 
 
-int osce_load_models(OSCEModel *hModel, const void *data, int len);
-void osce_reset(silk_OSCE_struct *hOSCE, int method);
+int oaci_osce_load_models(OSCEModel *hModel, const void *data, int len);
+void oaci_osce_reset(silk_OSCE_struct *hOSCE, int method);
 
 #ifdef ENABLE_OSCE_BWE
-void osce_bwe(
+void oaci_osce_bwe(
     OSCEModel                   *model,                        /* I    OSCE model struct                           */
     silk_OSCE_BWE_struct        *psOSCEBWE,                    /* I/O  OSCE BWE state                              */
     oac_int16 xq48[],                                         /* O    bandwidth-extended speech                   */
@@ -99,7 +99,7 @@ void osce_bwe(
     int arch                                                   /* I    Run-time architecture                       */
     );
 
-void osce_bwe_reset(silk_OSCE_BWE_struct *hOSCEBWE);
+void oaci_osce_bwe_reset(silk_OSCE_BWE_struct *hOSCEBWE);
 #endif /* ENABLE_OSCE_BWE */
 
 

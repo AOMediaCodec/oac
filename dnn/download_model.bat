@@ -7,3 +7,5 @@ if not exist %model% (
 )
 
 tar -xvzf %model%
+
+call dnn\rename_downloads.bat

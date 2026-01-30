@@ -210,7 +210,7 @@ static void mag_spec_320_onesided(float *out, float *in) {
     celt_assert(OSCE_SPEC_WINDOW_SIZE == 320);
     kiss_fft_cpx buffer[OSCE_SPEC_WINDOW_SIZE];
     int k;
-    forward_transform(buffer, in);
+    oaci_forward_transform(buffer, in);
 
     for (k = 0; k < OSCE_SPEC_NUM_FREQS; k++) {
         out[k] = OSCE_SPEC_WINDOW_SIZE*sqrt(buffer[k].r*buffer[k].r + buffer[k].i*buffer[k].i);
@@ -274,7 +274,7 @@ static void calculate_cepstrum(float *cepstrum, float *signal) {
 
     /* DCT-II (orthonormal) */
     celt_assert(OSCE_NOISY_SPEC_NUM_BANDS == NB_BANDS);
-    dct(cepstrum, spec);
+    oaci_dct(cepstrum, spec);
 }
 
 static void calculate_acorr(float *acorr, float *signal, int lag) {
@@ -341,7 +341,7 @@ static int pitch_postprocessing(OSCEFeatureState *psFeatures, int lag, int type)
     return new_lag;
 }
 
-void osce_calculate_features(
+void oaci_osce_calculate_features(
     silk_decoder_state          *psDec,                         /* I/O  Decoder state                               */
     silk_decoder_control        *psDecCtrl,                     /* I    Decoder control                             */
     float                       *features,                      /* O    input features                              */
@@ -427,7 +427,7 @@ void osce_calculate_features(
 
 
 #ifdef ENABLE_OSCE_BWE
-void osce_bwe_calculate_features(
+void oaci_osce_bwe_calculate_features(
     OSCEBWEFeatureState         *psFeatures,                    /* I/O  BWE feature state                          */
     float                       *features,                      /* O    input features                              */
     const oac_int16 xq[],                                      /* I    Decoded speech                              */
@@ -467,7 +467,7 @@ void osce_bwe_calculate_features(
         }
 
         /* DFT */
-        forward_transform(fft_buffer, buffer);
+        oaci_forward_transform(fft_buffer, buffer);
 
         /* instafreq */
         for (k = 0; k <= OSCE_BWE_MAX_INSTAFREQ_BIN; k++) {
@@ -503,7 +503,7 @@ void osce_bwe_calculate_features(
 }
 #endif /* ENABLE_OSCE_BWE */
 
-void osce_cross_fade_10ms(float *x_enhanced, float *x_in, int length) {
+void oaci_osce_cross_fade_10ms(float *x_enhanced, float *x_in, int length) {
     int i;
     celt_assert(length >= 160);
 
@@ -513,7 +513,7 @@ void osce_cross_fade_10ms(float *x_enhanced, float *x_in, int length) {
 }
 
 
-void osce_bwe_cross_fade_10ms(oac_int16 *x_fadein, oac_int16 *x_fadeout, int length) {
+void oaci_osce_bwe_cross_fade_10ms(oac_int16 *x_fadein, oac_int16 *x_fadeout, int length) {
     int i;
     celt_assert(length >= 480);
     float f = 1.f/3;

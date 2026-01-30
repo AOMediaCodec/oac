@@ -70,13 +70,13 @@
 #include "parse_lpcnet_weights.c"
 #include "nnet_arch.h"
 
-#undef compute_linear
-#undef compute_activation
+#undef oaci_compute_linear
+#undef oaci_compute_activation
 
 /* Force the C version since the SIMD versions may be hidden. */
-#define compute_linear(linear, out, in, arch) ((void)(arch), compute_linear_c(linear, out, in))
-#define compute_activation(output, input, N, activation, arch) ((void)(arch), \
-                                                                compute_activation_c(output, input, N, activation))
+#define oaci_compute_linear(linear, out, in, arch) ((void)(arch), oaci_compute_linear_c(linear, out, in))
+#define oaci_compute_activation(output, input, N, activation, arch) ((void)(arch), \
+                                                                oaci_compute_activation_c(output, input, N, activation))
 
 #define MAX_RNN_NEURONS_ALL IMAX(LOSSGEN_GRU1_STATE_SIZE, LOSSGEN_GRU2_STATE_SIZE)
 
@@ -98,14 +98,14 @@ void compute_generic_gru_lossgen(const LinearLayer *input_weights, const LinearL
     h = &zrh[2*N];
     celt_assert(recurrent_weights->nb_outputs <= 3*MAX_RNN_NEURONS_ALL);
     celt_assert(in != state);
-    compute_linear(input_weights, zrh, in, arch);
-    compute_linear(recurrent_weights, recur, state, arch);
+    oaci_compute_linear(input_weights, zrh, in, arch);
+    oaci_compute_linear(recurrent_weights, recur, state, arch);
     for (i = 0; i < 2*N; i++)
         zrh[i] += recur[i];
-    compute_activation(zrh, zrh, 2*N, ACTIVATION_SIGMOID, arch);
+    oaci_compute_activation(zrh, zrh, 2*N, ACTIVATION_SIGMOID, arch);
     for (i = 0; i < N; i++)
         h[i] += recur[2*N + i]*r[i];
-    compute_activation(h, h, N, ACTIVATION_TANH, arch);
+    oaci_compute_activation(h, h, N, ACTIVATION_TANH, arch);
     for (i = 0; i < N; i++)
         h[i] = z[i]*state[i] + (1 - z[i])*h[i];
     for (i = 0; i < N; i++)
@@ -115,8 +115,8 @@ void compute_generic_gru_lossgen(const LinearLayer *input_weights, const LinearL
 
 void compute_generic_dense_lossgen(const LinearLayer *layer, float *output, const float *input, int activation,
                                    int arch) {
-    compute_linear(layer, output, input, arch);
-    compute_activation(output, output, layer->nb_outputs, activation, arch);
+    oaci_compute_linear(layer, output, input, arch);
+    oaci_compute_activation(output, output, layer->nb_outputs, activation, arch);
 }
 
 
@@ -156,7 +156,7 @@ int sample_loss(
 void lossgen_init(LossGenState *st) {
     int ret;
     OAC_CLEAR(st, 1);
-    ret = init_lossgen(&st->model, lossgen_arrays);
+    ret = oaci_init_lossgen(&st->model, oaci_lossgen_arrays);
     celt_assert(ret == 0);
     (void)ret;
 }
@@ -164,8 +164,8 @@ void lossgen_init(LossGenState *st) {
 int lossgen_load_model(LossGenState *st, const void *data, int len) {
     WeightArray *list;
     int ret;
-    parse_weights(&list, data, len);
-    ret = init_lossgen(&st->model, list);
+    oaci_parse_weights(&list, data, len);
+    ret = oaci_init_lossgen(&st->model, list);
     oac_free(list);
     if (ret == 0) return 0;
     else return -1;

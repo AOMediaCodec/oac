@@ -196,7 +196,7 @@ static const kiss_twiddle_cpx fft_twiddles[320] = {
     {0.999229014f, 0.0392598175f}, {0.999807239f, 0.0196336918f},
 };
 
-const kiss_fft_state kfft = {
+const kiss_fft_state oaci_kfft = {
     320, /* nfft */
     0.0031250000f, /* scale */
     -1, /* shift */
@@ -206,7 +206,7 @@ const kiss_fft_state kfft = {
     (arch_fft_state *)&arch_fft, /* arch_fft*/
 };
 
-const float half_window[] = {
+const float oaci_half_window[] = {
     3.78491532e-05f, 0.000340620492f, 0.000946046319f, 0.00185389258f, 0.00306380726f,
     0.00457531959f, 0.00638783723f, 0.00850064680f, 0.0109129101f, 0.0136236614f,
     0.0166318044f, 0.0199361145f, 0.0235352255f, 0.0274276342f, 0.0316116922f,
@@ -241,7 +241,7 @@ const float half_window[] = {
     0.999995291f, 0.999998271f, 0.999999523f, 0.999999940f, 1.00000000f,
 };
 
-const float dct_table[] = {
+const float oaci_dct_table[] = {
     0.707106769f, 0.996194720f, 0.984807730f, 0.965925813f, 0.939692616f,
     0.906307817f, 0.866025388f, 0.819152057f, 0.766044438f, 0.707106769f,
     0.642787635f, 0.573576450f, 0.500000000f, 0.422618270f, 0.342020154f,

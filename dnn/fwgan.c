@@ -74,7 +74,7 @@ static void pitch_embeddings(float *pembed, float *phase, double w0) {
 static void compute_wlpc(float lpc[LPC_ORDER], const float *features) {
     float lpc_weight;
     int i;
-    lpc_from_cepstrum(lpc, features);
+    oaci_lpc_from_cepstrum(lpc, features);
     lpc_weight = 1.f;
     for (i = 0; i < LPC_ORDER; i++) {
         lpc_weight *= FWGAN_GAMMA;
@@ -87,7 +87,7 @@ static void run_fwgan_upsampler(FWGANState *st, float *cond, const float *featur
     model = &st->model;
     celt_assert(FWGAN_FEATURES == model->bfcc_with_corr_upsampler_fc.nb_inputs);
     celt_assert(BFCC_WITH_CORR_UPSAMPLER_FC_OUT_SIZE == model->bfcc_with_corr_upsampler_fc.nb_outputs);
-    compute_generic_dense(&model->bfcc_with_corr_upsampler_fc, cond, features, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->bfcc_with_corr_upsampler_fc, cond, features, ACTIVATION_TANH);
 }
 
 static void fwgan_synthesize_impl(FWGANState *st, float *pcm, const float *lpc, const float *features);
@@ -107,7 +107,7 @@ void fwgan_cont(FWGANState *st, const float *pcm0, const float *features0) {
     /* Deemphasis memory is just the last continuation sample. */
     st->deemph_mem = pcm0[CONT_PCM_INPUTS - 1];
 
-    /* Apply analysis filter, considering that the preemphasis and deemphasis filter
+    /* Apply analysis filter, considering that the oaci_preemphasis and deemphasis filter
        cancel each other in this case since the LPC filter is constant across that boundary.
      */
     for (i = LPC_ORDER; i < CONT_PCM_INPUTS; i++) {
@@ -119,44 +119,44 @@ void fwgan_cont(FWGANState *st, const float *pcm0, const float *features0) {
     for (i = 0; i < LPC_ORDER; i++) wpcm0[i] = wpcm0[LPC_ORDER];
 
     /* The memory of the pre-empahsis is the last sample of the weighted signal
-       (ignoring preemphasis+deemphasis combination). */
+       (ignoring oaci_preemphasis+deemphasis combination). */
     st->preemph_mem = wpcm0[CONT_PCM_INPUTS - 1];
     /* The memory of the synthesis filter is the pre-emphasized continuation. */
     for (i = 0; i < LPC_ORDER;
          i++) st->syn_mem[i] = pcm0[CONT_PCM_INPUTS - 1 - i] - FWGAN_DEEMPHASIS*pcm0[CONT_PCM_INPUTS - 2 - i];
 
-    norm2 = celt_inner_prod(wpcm0, wpcm0, CONT_PCM_INPUTS, st->arch);
+    norm2 = oaci_celt_inner_prod(wpcm0, wpcm0, CONT_PCM_INPUTS, st->arch);
     norm_1 = 1.f/sqrt(1e-8f + norm2);
     for (i = 0; i < CONT_PCM_INPUTS; i++) cont_inputs[i + 1] = norm_1*wpcm0[i];
     cont_inputs[0] = log(sqrt(norm2) + 1e-7f);
 
     /* Continuation network */
-    compute_generic_dense(&model->cont_net_0, tmp1, cont_inputs, ACTIVATION_TANH);
-    compute_generic_dense(&model->cont_net_2, tmp2, tmp1, ACTIVATION_TANH);
-    compute_generic_dense(&model->cont_net_4, tmp1, tmp2, ACTIVATION_TANH);
-    compute_generic_dense(&model->cont_net_6, tmp2, tmp1, ACTIVATION_TANH);
-    compute_generic_dense(&model->cont_net_8, tmp1, tmp2, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->cont_net_0, tmp1, cont_inputs, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->cont_net_2, tmp2, tmp1, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->cont_net_4, tmp1, tmp2, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->cont_net_6, tmp2, tmp1, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->cont_net_8, tmp1, tmp2, ACTIVATION_TANH);
     celt_assert(CONT_NET_10_OUT_SIZE == model->cont_net_10.nb_outputs);
-    compute_generic_dense(&model->cont_net_10, st->cont, tmp1, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->cont_net_10, st->cont, tmp1, ACTIVATION_TANH);
 
     /* Computing continuation for each layer. */
     celt_assert(RNN_GRU_STATE_SIZE == model->rnn_cont_fc_0.nb_outputs);
-    compute_generic_dense(&model->rnn_cont_fc_0, st->rnn_state, st->cont, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->rnn_cont_fc_0, st->rnn_state, st->cont, ACTIVATION_TANH);
 
     celt_assert(FWC1_STATE_SIZE == model->fwc1_cont_fc_0.nb_outputs);
-    compute_generic_dense(&model->fwc1_cont_fc_0, st->fwc1_state, st->cont, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->fwc1_cont_fc_0, st->fwc1_state, st->cont, ACTIVATION_TANH);
     celt_assert(FWC2_STATE_SIZE == model->fwc2_cont_fc_0.nb_outputs);
-    compute_generic_dense(&model->fwc2_cont_fc_0, st->fwc2_state, st->cont, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->fwc2_cont_fc_0, st->fwc2_state, st->cont, ACTIVATION_TANH);
     celt_assert(FWC3_STATE_SIZE == model->fwc3_cont_fc_0.nb_outputs);
-    compute_generic_dense(&model->fwc3_cont_fc_0, st->fwc3_state, st->cont, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->fwc3_cont_fc_0, st->fwc3_state, st->cont, ACTIVATION_TANH);
     celt_assert(FWC4_STATE_SIZE == model->fwc4_cont_fc_0.nb_outputs);
-    compute_generic_dense(&model->fwc4_cont_fc_0, st->fwc4_state, st->cont, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->fwc4_cont_fc_0, st->fwc4_state, st->cont, ACTIVATION_TANH);
     celt_assert(FWC5_STATE_SIZE == model->fwc5_cont_fc_0.nb_outputs);
-    compute_generic_dense(&model->fwc5_cont_fc_0, st->fwc5_state, st->cont, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->fwc5_cont_fc_0, st->fwc5_state, st->cont, ACTIVATION_TANH);
     celt_assert(FWC6_STATE_SIZE == model->fwc6_cont_fc_0.nb_outputs);
-    compute_generic_dense(&model->fwc6_cont_fc_0, st->fwc6_state, st->cont, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->fwc6_cont_fc_0, st->fwc6_state, st->cont, ACTIVATION_TANH);
     celt_assert(FWC7_STATE_SIZE == model->fwc7_cont_fc_0.nb_outputs);
-    compute_generic_dense(&model->fwc7_cont_fc_0, st->fwc7_state, st->cont, ACTIVATION_TANH);
+    oaci_compute_generic_dense(&model->fwc7_cont_fc_0, st->fwc7_state, st->cont, ACTIVATION_TANH);
 
     st->cont_initialized = 1;
     /* Process the first frame, discard the first subframe, and keep the rest for the first
@@ -214,7 +214,7 @@ static void run_fwgan_subframe(FWGANState *st, float *pcm, const float *cond, do
     OAC_COPY(&feat_in[BFCC_WITH_CORR_UPSAMPLER_FC_OUT_SIZE/4], &cond[0], BFCC_WITH_CORR_UPSAMPLER_FC_OUT_SIZE/4);
     OAC_COPY(&feat_in[0], &pembed[0], FWGAN_FRAME_SIZE/2);
 
-    compute_generic_conv1d(&model->feat_in_conv1_conv, rnn_in, st->cont_conv1_mem, feat_in, FEAT_IN_CONV1_CONV_IN_SIZE,
+    oaci_compute_generic_conv1d(&model->feat_in_conv1_conv, rnn_in, st->cont_conv1_mem, feat_in, FEAT_IN_CONV1_CONV_IN_SIZE,
     ACTIVATION_LINEAR);
     celt_assert(FEAT_IN_NL1_GATE_OUT_SIZE == model->feat_in_nl1_gate.nb_outputs);
     compute_gated_activation(&model->feat_in_nl1_gate, rnn_in, rnn_in, ACTIVATION_TANH);
@@ -229,29 +229,29 @@ static void run_fwgan_subframe(FWGANState *st, float *pcm, const float *cond, do
         return;
     }
 
-    compute_generic_gru(&model->rnn_gru_input, &model->rnn_gru_recurrent, st->rnn_state, rnn_in);
+    oaci_compute_generic_gru(&model->rnn_gru_input, &model->rnn_gru_recurrent, st->rnn_state, rnn_in);
     celt_assert(IMAX(RNN_GRU_STATE_SIZE, FWC2_FC_0_OUT_SIZE) >= model->rnn_nl_gate.nb_outputs);
     compute_gated_activation(&model->rnn_nl_gate, tmp2, st->rnn_state, ACTIVATION_TANH);
 
-    compute_generic_conv1d(&model->fwc1_fc_0, tmp1, st->fwc1_state, tmp2, RNN_GRU_STATE_SIZE, ACTIVATION_LINEAR);
+    oaci_compute_generic_conv1d(&model->fwc1_fc_0, tmp1, st->fwc1_state, tmp2, RNN_GRU_STATE_SIZE, ACTIVATION_LINEAR);
     compute_gated_activation(&model->fwc1_fc_1_gate, tmp1, tmp1, ACTIVATION_TANH);
 
-    compute_generic_conv1d(&model->fwc2_fc_0, tmp2, st->fwc2_state, tmp1, FWC1_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
+    oaci_compute_generic_conv1d(&model->fwc2_fc_0, tmp2, st->fwc2_state, tmp1, FWC1_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
     compute_gated_activation(&model->fwc2_fc_1_gate, tmp2, tmp2, ACTIVATION_TANH);
 
-    compute_generic_conv1d(&model->fwc3_fc_0, tmp1, st->fwc3_state, tmp2, FWC2_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
+    oaci_compute_generic_conv1d(&model->fwc3_fc_0, tmp1, st->fwc3_state, tmp2, FWC2_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
     compute_gated_activation(&model->fwc3_fc_1_gate, tmp1, tmp1, ACTIVATION_TANH);
 
-    compute_generic_conv1d(&model->fwc4_fc_0, tmp2, st->fwc4_state, tmp1, FWC3_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
+    oaci_compute_generic_conv1d(&model->fwc4_fc_0, tmp2, st->fwc4_state, tmp1, FWC3_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
     compute_gated_activation(&model->fwc4_fc_1_gate, tmp2, tmp2, ACTIVATION_TANH);
 
-    compute_generic_conv1d(&model->fwc5_fc_0, tmp1, st->fwc5_state, tmp2, FWC4_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
+    oaci_compute_generic_conv1d(&model->fwc5_fc_0, tmp1, st->fwc5_state, tmp2, FWC4_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
     compute_gated_activation(&model->fwc5_fc_1_gate, tmp1, tmp1, ACTIVATION_TANH);
 
-    compute_generic_conv1d(&model->fwc6_fc_0, tmp2, st->fwc6_state, tmp1, FWC5_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
+    oaci_compute_generic_conv1d(&model->fwc6_fc_0, tmp2, st->fwc6_state, tmp1, FWC5_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
     compute_gated_activation(&model->fwc6_fc_1_gate, tmp2, tmp2, ACTIVATION_TANH);
 
-    compute_generic_conv1d(&model->fwc7_fc_0, tmp1, st->fwc7_state, tmp2, FWC6_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
+    oaci_compute_generic_conv1d(&model->fwc7_fc_0, tmp1, st->fwc7_state, tmp2, FWC6_FC_0_OUT_SIZE, ACTIVATION_LINEAR);
     compute_gated_activation(&model->fwc7_fc_1_gate, pcm, tmp1, ACTIVATION_TANH);
 
     apply_gain(pcm, c0, &st->last_gain);
@@ -271,7 +271,7 @@ void fwgan_init(FWGANState *st) {
 int fwgan_load_model(FWGANState *st, const unsigned char *data, int len) {
     WeightArray *list;
     int ret;
-    parse_weights(&list, data, len);
+    oaci_parse_weights(&list, data, len);
     ret = init_fwgan(&st->model, list);
     oac_free(list);
     if (ret == 0) return 0;

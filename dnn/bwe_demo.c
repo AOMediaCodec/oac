@@ -59,8 +59,8 @@ int main(int argc, char **argv) {
     arch = oac_select_arch();
     hOSCEBWE = (silk_OSCE_BWE_struct *)calloc(1, sizeof(*hOSCEBWE));
     osce = (OSCEModel *)calloc(1, sizeof(*osce));
-    osce_load_models(osce, NULL, arch);
-    osce_bwe_reset(hOSCEBWE);
+    oaci_osce_load_models(osce, NULL, arch);
+    oaci_osce_bwe_reset(hOSCEBWE);
 
     if (argc != 3) usage();
     fin = fopen(argv[1], "rb");
@@ -80,7 +80,7 @@ int main(int argc, char **argv) {
 
 
     while (fread(x_in, sizeof(x_in[0]), BWE_FRAME_SIZE, fin) == BWE_FRAME_SIZE) {
-        osce_bwe(
+        oaci_osce_bwe(
             osce,
             hOSCEBWE,
             x_out,

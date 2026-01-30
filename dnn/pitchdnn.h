@@ -21,10 +21,10 @@ typedef struct {
 } PitchDNNState;
 
 
-void pitchdnn_init(PitchDNNState *st);
-int pitchdnn_load_model(PitchDNNState *st, const void *data, int len);
+void oaci_pitchdnn_init(PitchDNNState *st);
+int oaci_pitchdnn_load_model(PitchDNNState *st, const void *data, int len);
 
-float compute_pitchdnn(
+float oaci_compute_pitchdnn(
     PitchDNNState *st,
     const float *if_features,
     const float *xcorr_features,

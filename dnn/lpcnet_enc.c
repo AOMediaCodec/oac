@@ -46,28 +46,28 @@
 #include "mathops.h"
 
 
-int lpcnet_encoder_get_size(void) {
+int oaci_lpcnet_encoder_get_size(void) {
     return sizeof(LPCNetEncState);
 }
 
-int lpcnet_encoder_init(LPCNetEncState *st) {
+int oaci_lpcnet_encoder_init(LPCNetEncState *st) {
     memset(st, 0, sizeof(*st));
-    pitchdnn_init(&st->pitchdnn);
+    oaci_pitchdnn_init(&st->pitchdnn);
     return 0;
 }
 
-int lpcnet_encoder_load_model(LPCNetEncState *st, const void *data, int len) {
-    return pitchdnn_load_model(&st->pitchdnn, data, len);
+int oaci_lpcnet_encoder_load_model(LPCNetEncState *st, const void *data, int len) {
+    return oaci_pitchdnn_load_model(&st->pitchdnn, data, len);
 }
 
-LPCNetEncState *lpcnet_encoder_create(void) {
+LPCNetEncState *oaci_lpcnet_encoder_create(void) {
     LPCNetEncState *st;
-    st = (LPCNetEncState*)oac_alloc(lpcnet_encoder_get_size());
-    lpcnet_encoder_init(st);
+    st = (LPCNetEncState*)oac_alloc(oaci_lpcnet_encoder_get_size());
+    oaci_lpcnet_encoder_init(st);
     return st;
 }
 
-void lpcnet_encoder_destroy(LPCNetEncState *st) {
+void oaci_lpcnet_encoder_destroy(LPCNetEncState *st) {
     oac_free(st);
 }
 
@@ -76,9 +76,9 @@ static void frame_analysis(LPCNetEncState *st, kiss_fft_cpx *X, float *Ex, const
     OAC_COPY(x, st->analysis_mem, OVERLAP_SIZE);
     OAC_COPY(&x[OVERLAP_SIZE], in, FRAME_SIZE);
     OAC_COPY(st->analysis_mem, &in[FRAME_SIZE - OVERLAP_SIZE], OVERLAP_SIZE);
-    apply_window(x);
-    forward_transform(X, x);
-    lpcn_compute_band_energy(Ex, X);
+    oaci_apply_window(x);
+    oaci_forward_transform(X, x);
+    oaci_lpcn_compute_band_energy(Ex, X);
 }
 
 static void biquad(float *y, float mem[2], const float *x, const float *b, const float *a, int N) {
@@ -106,7 +106,7 @@ static void biquad(float *y, float mem[2], const float *x, const float *b, const
 
 #define celt_log10(x) (0.3010299957f*celt_log2(x))
 
-void compute_frame_features(LPCNetEncState *st, const float *in, int arch) {
+void oaci_compute_frame_features(LPCNetEncState *st, const float *in, int arch) {
     float aligned_in[FRAME_SIZE];
     int i;
     float Ly[NB_BANDS];
@@ -148,9 +148,9 @@ void compute_frame_features(LPCNetEncState *st, const float *in, int arch) {
         logMax = MAX16(logMax, Ly[i]);
         follow = MAX16(follow - 2.5f, Ly[i]);
     }
-    dct(st->features, Ly);
+    oaci_dct(st->features, Ly);
     st->features[0] -= 4;
-    lpc_from_cepstrum(st->lpc, st->features);
+    oaci_lpc_from_cepstrum(st->lpc, st->features);
     for (i = 0; i < LPC_ORDER; i++) st->features[NB_BANDS + 2 + i] = st->lpc[i];
     OAC_MOVE(st->exc_buf, &st->exc_buf[FRAME_SIZE], PITCH_MAX_PERIOD);
     OAC_MOVE(st->lp_buf, &st->lp_buf[FRAME_SIZE], PITCH_MAX_PERIOD);
@@ -158,7 +158,7 @@ void compute_frame_features(LPCNetEncState *st, const float *in, int arch) {
     OAC_COPY(&x[0], st->pitch_mem, LPC_ORDER);
     OAC_COPY(&x[LPC_ORDER], aligned_in, FRAME_SIZE);
     OAC_COPY(st->pitch_mem, &aligned_in[FRAME_SIZE - LPC_ORDER], LPC_ORDER);
-    celt_fir(&x[LPC_ORDER], st->lpc, &st->lp_buf[PITCH_MAX_PERIOD], FRAME_SIZE, LPC_ORDER, arch);
+    oaci_celt_fir(&x[LPC_ORDER], st->lpc, &st->lp_buf[PITCH_MAX_PERIOD], FRAME_SIZE, LPC_ORDER, arch);
     for (i = 0; i < FRAME_SIZE; i++) {
         st->exc_buf[PITCH_MAX_PERIOD + i] = st->lp_buf[PITCH_MAX_PERIOD + i] + .7f*st->pitch_filt;
         st->pitch_filt = st->lp_buf[PITCH_MAX_PERIOD + i];
@@ -168,9 +168,9 @@ void compute_frame_features(LPCNetEncState *st, const float *in, int arch) {
     {
         double ener1;
         float *buf = st->exc_buf;
-        celt_pitch_xcorr(&buf[PITCH_MAX_PERIOD], buf, xcorr, FRAME_SIZE, PITCH_MAX_PERIOD - PITCH_MIN_PERIOD, arch);
-        ener0 = celt_inner_prod(&buf[PITCH_MAX_PERIOD], &buf[PITCH_MAX_PERIOD], FRAME_SIZE, arch);
-        ener1 = celt_inner_prod(&buf[0], &buf[0], FRAME_SIZE, arch);
+        oaci_celt_pitch_xcorr(&buf[PITCH_MAX_PERIOD], buf, xcorr, FRAME_SIZE, PITCH_MAX_PERIOD - PITCH_MIN_PERIOD, arch);
+        ener0 = oaci_celt_inner_prod(&buf[PITCH_MAX_PERIOD], &buf[PITCH_MAX_PERIOD], FRAME_SIZE, arch);
+        ener1 = oaci_celt_inner_prod(&buf[0], &buf[0], FRAME_SIZE, arch);
         /*printf("%f\n", st->frame_weight[sub]);*/
         for (i = 0; i < PITCH_MAX_PERIOD - PITCH_MIN_PERIOD; i++) {
             ener = 1 + ener0 + ener1;
@@ -185,12 +185,12 @@ void compute_frame_features(LPCNetEncState *st, const float *in, int arch) {
         }
         /*printf("\n");*/
     }
-    st->dnn_pitch = compute_pitchdnn(&st->pitchdnn, st->if_features, st->xcorr_features, arch);
+    st->dnn_pitch = oaci_compute_pitchdnn(&st->pitchdnn, st->if_features, st->xcorr_features, arch);
     pitch = (int)floor(.5 + 256./pow(2.f, ((1./60.)*((st->dnn_pitch + 1.5)*60))));
-    xx = celt_inner_prod(&st->lp_buf[PITCH_MAX_PERIOD], &st->lp_buf[PITCH_MAX_PERIOD], FRAME_SIZE, arch);
-    yy = celt_inner_prod(&st->lp_buf[PITCH_MAX_PERIOD - pitch], &st->lp_buf[PITCH_MAX_PERIOD - pitch], FRAME_SIZE,
+    xx = oaci_celt_inner_prod(&st->lp_buf[PITCH_MAX_PERIOD], &st->lp_buf[PITCH_MAX_PERIOD], FRAME_SIZE, arch);
+    yy = oaci_celt_inner_prod(&st->lp_buf[PITCH_MAX_PERIOD - pitch], &st->lp_buf[PITCH_MAX_PERIOD - pitch], FRAME_SIZE,
     arch);
-    xy = celt_inner_prod(&st->lp_buf[PITCH_MAX_PERIOD], &st->lp_buf[PITCH_MAX_PERIOD - pitch], FRAME_SIZE, arch);
+    xy = oaci_celt_inner_prod(&st->lp_buf[PITCH_MAX_PERIOD], &st->lp_buf[PITCH_MAX_PERIOD - pitch], FRAME_SIZE, arch);
     /*printf("%f %f\n", frame_corr, xy/sqrt(1e-15+xx*yy));*/
     frame_corr = xy/sqrt(1 + xx*yy);
     frame_corr = log(1.f + exp(5.f*frame_corr))/log(1 + exp(5.f));
@@ -198,7 +198,7 @@ void compute_frame_features(LPCNetEncState *st, const float *in, int arch) {
     st->features[NB_BANDS + 1] = frame_corr - .5f;
 }
 
-void preemphasis(float *y, float *mem, const float *x, float coef, int N) {
+void oaci_preemphasis(float *y, float *mem, const float *x, float coef, int N) {
     int i;
     for (i = 0; i < N; i++) {
         float yi;
@@ -210,13 +210,13 @@ void preemphasis(float *y, float *mem, const float *x, float coef, int N) {
 
 static int lpcnet_compute_single_frame_features_impl(LPCNetEncState *st, float *x, float features[NB_TOTAL_FEATURES],
                                                      int arch) {
-    preemphasis(x, &st->mem_preemph, x, PREEMPHASIS, FRAME_SIZE);
-    compute_frame_features(st, x, arch);
+    oaci_preemphasis(x, &st->mem_preemph, x, PREEMPHASIS, FRAME_SIZE);
+    oaci_compute_frame_features(st, x, arch);
     OAC_COPY(features, &st->features[0], NB_TOTAL_FEATURES);
     return 0;
 }
 
-int lpcnet_compute_single_frame_features(LPCNetEncState *st, const oac_int16 *pcm, float features[NB_TOTAL_FEATURES],
+int oaci_lpcnet_compute_single_frame_features(LPCNetEncState *st, const oac_int16 *pcm, float features[NB_TOTAL_FEATURES],
                                          int arch) {
     int i;
     float x[FRAME_SIZE];
@@ -225,7 +225,7 @@ int lpcnet_compute_single_frame_features(LPCNetEncState *st, const oac_int16 *pc
     return 0;
 }
 
-int lpcnet_compute_single_frame_features_float(LPCNetEncState *st, const float *pcm, float features[NB_TOTAL_FEATURES],
+int oaci_lpcnet_compute_single_frame_features_float(LPCNetEncState *st, const float *pcm, float features[NB_TOTAL_FEATURES],
                                                int arch) {
     int i;
     float x[FRAME_SIZE];

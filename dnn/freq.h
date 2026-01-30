@@ -48,18 +48,18 @@
 #define NB_BANDS 18
 #define NB_BANDS_1 (NB_BANDS - 1)
 
-extern const kiss_fft_state kfft;
-extern const float half_window[OVERLAP_SIZE];
-extern const float dct_table[NB_BANDS*NB_BANDS];
+extern const kiss_fft_state oaci_kfft;
+extern const float oaci_half_window[OVERLAP_SIZE];
+extern const float oaci_dct_table[NB_BANDS*NB_BANDS];
 
-void lpcn_compute_band_energy(float *bandE, const kiss_fft_cpx *X);
-void burg_cepstral_analysis(float *ceps, const float *x);
+void oaci_lpcn_compute_band_energy(float *bandE, const kiss_fft_cpx *X);
+void oaci_burg_cepstral_analysis(float *ceps, const float *x);
 
-void apply_window(float *x);
-void dct(float *out, const float *in);
-void forward_transform(kiss_fft_cpx *out, const float *in);
-float lpc_from_cepstrum(float *lpc, const float *cepstrum);
-void apply_window(float *x);
-void lpc_weighting(float *lpc, float gamma);
+void oaci_apply_window(float *x);
+void oaci_dct(float *out, const float *in);
+void oaci_forward_transform(kiss_fft_cpx *out, const float *in);
+float oaci_lpc_from_cepstrum(float *lpc, const float *cepstrum);
+void oaci_apply_window(float *x);
+void oaci_lpc_weighting(float *lpc, float gamma);
 
 #endif

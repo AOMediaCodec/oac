@@ -51,36 +51,36 @@ static void DRED_rdovae_init_encoder(RDOVAEEncState *enc_state) {
     memset(enc_state, 0, sizeof(*enc_state));
 }
 
-int dred_encoder_load_model(DREDEnc* enc, const void *data, int len) {
+int oaci_dred_encoder_load_model(DREDEnc* enc, const void *data, int len) {
     WeightArray *list;
     int ret;
-    parse_weights(&list, data, len);
-    ret = init_rdovaeenc(&enc->model, list);
+    oaci_parse_weights(&list, data, len);
+    ret = oaci_init_rdovaeenc(&enc->model, list);
     oac_free(list);
     if (ret == 0) {
-        ret = lpcnet_encoder_load_model(&enc->lpcnet_enc_state, data, len);
+        ret = oaci_lpcnet_encoder_load_model(&enc->lpcnet_enc_state, data, len);
     }
     if (ret == 0) enc->loaded = 1;
     return (ret == 0) ? OAC_OK : OAC_BAD_ARG;
 }
 
-void dred_encoder_reset(DREDEnc* enc) {
+void oaci_dred_encoder_reset(DREDEnc* enc) {
     OAC_CLEAR((char*)&enc->DREDENC_RESET_START,
               sizeof(DREDEnc)
         - ((char*)&enc->DREDENC_RESET_START - (char*)enc));
     enc->input_buffer_fill = DRED_SILK_ENCODER_DELAY;
-    lpcnet_encoder_init(&enc->lpcnet_enc_state);
+    oaci_lpcnet_encoder_init(&enc->lpcnet_enc_state);
     DRED_rdovae_init_encoder(&enc->rdovae_enc);
 }
 
-void dred_encoder_init(DREDEnc* enc, oac_int32 Fs, int channels) {
+void oaci_dred_encoder_init(DREDEnc* enc, oac_int32 Fs, int channels) {
     enc->Fs = Fs;
     enc->channels = channels;
     enc->loaded = 0;
 #ifndef USE_WEIGHTS_FILE
-    if (init_rdovaeenc(&enc->model, rdovaeenc_arrays) == 0) enc->loaded = 1;
+    if (oaci_init_rdovaeenc(&enc->model, oaci_rdovaeenc_arrays) == 0) enc->loaded = 1;
 #endif
-    dred_encoder_reset(enc);
+    oaci_dred_encoder_reset(enc);
 }
 
 static void dred_process_frame(DREDEnc *enc, int arch) {
@@ -93,8 +93,8 @@ static void dred_process_frame(DREDEnc *enc, int arch) {
     OAC_MOVE(enc->state_buffer + DRED_STATE_DIM, enc->state_buffer, (DRED_MAX_FRAMES - 1)*DRED_STATE_DIM);
 
     /* calculate LPCNet features */
-    lpcnet_compute_single_frame_features_float(&enc->lpcnet_enc_state, enc->input_buffer, feature_buffer, arch);
-    lpcnet_compute_single_frame_features_float(&enc->lpcnet_enc_state, enc->input_buffer + DRED_FRAME_SIZE,
+    oaci_lpcnet_compute_single_frame_features_float(&enc->lpcnet_enc_state, enc->input_buffer, feature_buffer, arch);
+    oaci_lpcnet_compute_single_frame_features_float(&enc->lpcnet_enc_state, enc->input_buffer + DRED_FRAME_SIZE,
     feature_buffer + 36, arch);
 
     /* prepare input buffer (discard LPC coefficients) */
@@ -102,12 +102,12 @@ static void dred_process_frame(DREDEnc *enc, int arch) {
     OAC_COPY(input_buffer + DRED_NUM_FEATURES, feature_buffer + 36, DRED_NUM_FEATURES);
 
     /* run RDOVAE encoder */
-    dred_rdovae_encode_dframe(&enc->rdovae_enc, &enc->model, enc->latents_buffer, enc->state_buffer, input_buffer,
+    oaci_dred_rdovae_encode_dframe(&enc->rdovae_enc, &enc->model, enc->latents_buffer, enc->state_buffer, input_buffer,
     arch);
     enc->latents_buffer_fill = IMIN(enc->latents_buffer_fill + 1, DRED_NUM_REDUNDANCY_FRAMES);
 }
 
-void filter_df2t(const float *in, float *out, int len, float b0, const float *b, const float *a, int order,
+void oaci_filter_df2t(const float *in, float *out, int len, float b0, const float *b, const float *a, int order,
                  float *mem) {
     int i;
     for (i = 0; i < len; i++) {
@@ -130,7 +130,7 @@ void filter_df2t(const float *in, float *out, int len, float b0, const float *b,
 # define MAX_DOWNMIX_BUFFER (960*2)
 #endif
 static void dred_convert_to_16k(DREDEnc *enc, const float *in, int in_len, float *out, int out_len) {
-    float downmix[MAX_DOWNMIX_BUFFER];
+    float oaci_downmix[MAX_DOWNMIX_BUFFER];
     int i;
     int up;
     celt_assert(enc->channels*in_len <= MAX_DOWNMIX_BUFFER);
@@ -160,14 +160,14 @@ static void dred_convert_to_16k(DREDEnc *enc, const float *in, int in_len, float
             celt_assert(0);
     }
     celt_assert(up*in_len <= MAX_DOWNMIX_BUFFER);
-    OAC_CLEAR(downmix, up*in_len);
+    OAC_CLEAR(oaci_downmix, up*in_len);
     if (enc->channels == 1) {
-        for (i = 0; i < in_len; i++)downmix[up*i] = FLOAT2INT16(up*in[i]) + VERY_SMALL;
+        for (i = 0; i < in_len; i++)oaci_downmix[up*i] = FLOAT2INT16(up*in[i]) + VERY_SMALL;
     } else {
-        for (i = 0; i < in_len; i++)downmix[up*i] = FLOAT2INT16(.5*up*(in[2*i] + in[2*i + 1])) + VERY_SMALL;
+        for (i = 0; i < in_len; i++)oaci_downmix[up*i] = FLOAT2INT16(.5*up*(in[2*i] + in[2*i + 1])) + VERY_SMALL;
     }
     if (enc->Fs == 16000) {
-        OAC_COPY(out, downmix, out_len);
+        OAC_COPY(out, oaci_downmix, out_len);
     } else if (enc->Fs == 48000 || enc->Fs == 24000) {
         /* ellip(7, .2, 70, 7750/24000) */
 
@@ -176,8 +176,8 @@ static void dred_convert_to_16k(DREDEnc *enc, const float *in, int in_len, float
         static const float filter_a[8] = {-3.878718597768f, 7.748834257468f, -9.653651699533f, 8.007342726666f,
                                           -4.379450178552f, 1.463182111810f, -0.231720677804f, 0.f};
         float b0 = 0.004523418224f;
-        filter_df2t(downmix, downmix, up*in_len, b0, filter_b, filter_a, RESAMPLING_ORDER, enc->resample_mem);
-        for (i = 0; i < out_len; i++)out[i] = downmix[3*i];
+        oaci_filter_df2t(oaci_downmix, oaci_downmix, up*in_len, b0, filter_b, filter_a, RESAMPLING_ORDER, enc->resample_mem);
+        for (i = 0; i < out_len; i++)out[i] = oaci_downmix[3*i];
     } else if (enc->Fs == 12000) {
         /* ellip(7, .2, 70, 5800/24000) */
         static const float filter_b[8] = {-0.001017101081f,  0.003673127243f,   0.001009165267f,  0.001009165267f,
@@ -185,8 +185,8 @@ static void dred_convert_to_16k(DREDEnc *enc, const float *in, int in_len, float
         static const float filter_a[8] = {-4.930414411612f, 11.291643096504f, -15.322037343815f, 13.216403930898f,
                                           -7.220409219553f,  2.310550142771f, -0.334338618782f, 0.f};
         float b0 = 0.002033596776f;
-        filter_df2t(downmix, downmix, up*in_len, b0, filter_b, filter_a, RESAMPLING_ORDER, enc->resample_mem);
-        for (i = 0; i < out_len; i++)out[i] = downmix[3*i];
+        oaci_filter_df2t(oaci_downmix, oaci_downmix, up*in_len, b0, filter_b, filter_a, RESAMPLING_ORDER, enc->resample_mem);
+        for (i = 0; i < out_len; i++)out[i] = oaci_downmix[3*i];
     } else if (enc->Fs == 8000) {
         /* ellip(7, .2, 70, 3900/8000) */
         static const float filter_b[8] = { 0.081670120929f, 0.180401598565f,  0.259391051971f, 0.259391051971f,
@@ -194,7 +194,7 @@ static void dred_convert_to_16k(DREDEnc *enc, const float *in, int in_len, float
         static const float filter_a[8] = {-1.393651933659f, 2.609789872676f, -2.403541968806f, 2.056814957331f,
                                           -1.148908574570f, 0.473001413788f, -0.110359852412f, 0.f};
         float b0 = 0.020109185709f;
-        filter_df2t(downmix, out, out_len, b0, filter_b, filter_a, RESAMPLING_ORDER, enc->resample_mem);
+        oaci_filter_df2t(oaci_downmix, out, out_len, b0, filter_b, filter_a, RESAMPLING_ORDER, enc->resample_mem);
 #ifdef ENABLE_QEXT
     } else if (enc->Fs == 96000) {
         /* ellip(7, .2, 70, 7750/48000) */
@@ -203,15 +203,15 @@ static void dred_convert_to_16k(DREDEnc *enc, const float *in, int in_len, float
         static const float filter_a[8] = {-5.813483928050f, 14.932091805554f, -21.900933283269f, 19.774128964756f,
                                           -10.978028462771f, 3.467650469467f, -0.480641240411f, 0.f};
         float b0 = 0.000880286074f;
-        filter_df2t(downmix, downmix, up*in_len, b0, filter_b, filter_a, RESAMPLING_ORDER, enc->resample_mem);
-        for (i = 0; i < out_len; i++)out[i] = downmix[6*i];
+        oaci_filter_df2t(oaci_downmix, oaci_downmix, up*in_len, b0, filter_b, filter_a, RESAMPLING_ORDER, enc->resample_mem);
+        for (i = 0; i < out_len; i++)out[i] = oaci_downmix[6*i];
 #endif
     } else {
         celt_assert(0);
     }
 }
 
-void dred_compute_latents(DREDEnc *enc, const float *pcm, int frame_size, int extra_delay, int arch) {
+void oaci_dred_compute_latents(DREDEnc *enc, const float *pcm, int frame_size, int extra_delay, int arch) {
     int curr_offset16k;
     int frame_size16k = frame_size*16000/enc->Fs;
     celt_assert(enc->loaded);
@@ -258,7 +258,7 @@ static void dred_encode_latents(ec_enc *enc, const float *x, const oac_uint8 *sc
         xq[i] = x[i]*scale[i]*(1.f/256.f);
         deadzone[i] = xq[i]/(delta[i] + eps);
     }
-    compute_activation(deadzone, deadzone, dim, ACTIVATION_TANH, arch);
+    oaci_compute_activation(deadzone, deadzone, dim, ACTIVATION_TANH, arch);
     for (i = 0; i < dim; i++) {
         xq[i] = xq[i] - delta[i]*deadzone[i];
         q[i] = (int)floor(.5f + xq[i]);
@@ -266,7 +266,7 @@ static void dred_encode_latents(ec_enc *enc, const float *x, const oac_uint8 *sc
     for (i = 0; i < dim; i++) {
         /* Make the impossible actually impossible. */
         if (r[i] == 0 || p0[i] == 255) q[i] = 0;
-        else ec_laplace_encode_p0(enc, q[i], p0[i]<<7, r[i]<<7);
+        else oaci_ec_laplace_encode_p0(enc, q[i], p0[i]<<7, r[i]<<7);
     }
 }
 
@@ -278,7 +278,7 @@ static int dred_voice_active(const unsigned char *activity_mem, int offset) {
     return 0;
 }
 
-int dred_encode_silk_frame(DREDEnc *enc, unsigned char *buf, int max_chunks, int max_bytes, int q0, int dQ, int qmax,
+int oaci_dred_encode_silk_frame(DREDEnc *enc, unsigned char *buf, int max_chunks, int max_bytes, int q0, int dQ, int qmax,
                            unsigned char *activity_mem, int arch) {
     ec_enc ec_encoder;
 
@@ -310,18 +310,18 @@ int dred_encode_silk_frame(DREDEnc *enc, unsigned char *buf, int max_chunks, int
     if (!delayed_dred) enc->last_extra_dred_offset = extra_dred_offset;
 
     /* entropy coding of state and latents */
-    ec_enc_init(&ec_encoder, buf, max_bytes);
-    ec_enc_uint(&ec_encoder, q0, 16);
-    ec_enc_uint(&ec_encoder, dQ, 8);
+    oaci_ec_enc_init(&ec_encoder, buf, max_bytes);
+    oaci_ec_enc_uint(&ec_encoder, q0, 16);
+    oaci_ec_enc_uint(&ec_encoder, dQ, 8);
     total_offset = 16 - (enc->dred_offset - extra_dred_offset*8);
     celt_assert(total_offset >= 0);
     if (total_offset > 31) {
-        ec_enc_uint(&ec_encoder, 1, 2);
-        ec_enc_uint(&ec_encoder, total_offset>>5, 256);
-        ec_enc_uint(&ec_encoder, total_offset&31, 32);
+        oaci_ec_enc_uint(&ec_encoder, 1, 2);
+        oaci_ec_enc_uint(&ec_encoder, total_offset>>5, 256);
+        oaci_ec_enc_uint(&ec_encoder, total_offset&31, 32);
     } else {
-        ec_enc_uint(&ec_encoder, 0, 2);
-        ec_enc_uint(&ec_encoder, total_offset, 32);
+        oaci_ec_enc_uint(&ec_encoder, 0, 2);
+        oaci_ec_enc_uint(&ec_encoder, total_offset, 32);
     }
     celt_assert(qmax >= q0);
     if (q0 < 14 && dQ > 0) {
@@ -329,17 +329,17 @@ int dred_encode_silk_frame(DREDEnc *enc, unsigned char *buf, int max_chunks, int
         /* If you want to use qmax == q0, you should have set dQ = 0. */
         celt_assert(qmax > q0);
         nvals = 15 - (q0 + 1);
-        ec_encode(&ec_encoder, qmax >= 15 ? 0 : nvals + qmax - (q0 + 1),
+        oaci_ec_encode(&ec_encoder, qmax >= 15 ? 0 : nvals + qmax - (q0 + 1),
         qmax >= 15 ? nvals : nvals + qmax - q0, 2*nvals);
     }
     state_qoffset = q0*DRED_STATE_DIM;
     dred_encode_latents(
         &ec_encoder,
         &enc->state_buffer[latent_offset*DRED_STATE_DIM],
-        dred_state_quant_scales_q8 + state_qoffset,
-        dred_state_dead_zone_q8 + state_qoffset,
-        dred_state_r_q8 + state_qoffset,
-        dred_state_p0_q8 + state_qoffset,
+        oaci_dred_state_quant_scales_q8 + state_qoffset,
+        oaci_dred_state_dead_zone_q8 + state_qoffset,
+        oaci_dred_state_r_q8 + state_qoffset,
+        oaci_dred_state_p0_q8 + state_qoffset,
         DRED_STATE_DIM,
         arch);
     if (ec_tell(&ec_encoder) > 8*max_bytes) {
@@ -348,16 +348,16 @@ int dred_encode_silk_frame(DREDEnc *enc, unsigned char *buf, int max_chunks, int
     ec_bak = ec_encoder;
     for (i = 0; i < IMIN(2*max_chunks, enc->latents_buffer_fill - latent_offset - 1); i += 2) {
         int active;
-        q_level = compute_quantizer(q0, dQ, qmax, i/2);
+        q_level = oaci_compute_quantizer(q0, dQ, qmax, i/2);
         offset = q_level*DRED_LATENT_DIM;
 
         dred_encode_latents(
             &ec_encoder,
             enc->latents_buffer + (i + latent_offset)*DRED_LATENT_DIM,
-            dred_latent_quant_scales_q8 + offset,
-            dred_latent_dead_zone_q8 + offset,
-            dred_latent_r_q8 + offset,
-            dred_latent_p0_q8 + offset,
+            oaci_dred_latent_quant_scales_q8 + offset,
+            oaci_dred_latent_dead_zone_q8 + offset,
+            oaci_dred_latent_r_q8 + offset,
+            oaci_dred_latent_p0_q8 + offset,
             DRED_LATENT_DIM,
             arch
             );
@@ -378,7 +378,7 @@ int dred_encode_silk_frame(DREDEnc *enc, unsigned char *buf, int max_chunks, int
     ec_encoder = ec_bak;
 
     ec_buffer_fill = (ec_tell(&ec_encoder) + 7)/8;
-    ec_enc_shrink(&ec_encoder, ec_buffer_fill);
-    ec_enc_done(&ec_encoder);
+    oaci_ec_enc_shrink(&ec_encoder, ec_buffer_fill);
+    oaci_ec_enc_done(&ec_encoder);
     return ec_buffer_fill;
 }

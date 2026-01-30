@@ -35,7 +35,7 @@
 
 #define SPARSE_BLOCK_SIZE 32
 
-int parse_record(const void **data, int *len, WeightArray *array) {
+int oaci_parse_record(const void **data, int *len, WeightArray *array) {
     WeightHead *h = (WeightHead *)*data;
     if (*len < WEIGHT_BLOCK_SIZE) return -1;
     if (h->block_size < h->size) return -1;
@@ -52,14 +52,14 @@ int parse_record(const void **data, int *len, WeightArray *array) {
     return array->size;
 }
 
-int parse_weights(WeightArray **list, const void *data, int len) {
+int oaci_parse_weights(WeightArray **list, const void *data, int len) {
     int nb_arrays = 0;
     int capacity = 20;
     *list = (WeightArray*)oac_alloc(capacity*sizeof(WeightArray));
     while (len > 0) {
         int ret;
         WeightArray array = {NULL, 0, 0, 0};
-        ret = parse_record(&data, &len, &array);
+        ret = oaci_parse_record(&data, &len, &array);
         if (ret > 0) {
             if (nb_arrays + 1 >= capacity) {
                 /* Make sure there's room for the ending NULL element too. */
@@ -121,7 +121,7 @@ static const void *find_idx_check(const WeightArray *arrays, const char *name, i
     return a->data;
 }
 
-int linear_init(LinearLayer *layer, const WeightArray *arrays,
+int oaci_linear_init(LinearLayer *layer, const WeightArray *arrays,
                 const char *bias,
                 const char *subias,
                 const char *weights,
@@ -184,7 +184,7 @@ int linear_init(LinearLayer *layer, const WeightArray *arrays,
     return 0;
 }
 
-int conv2d_init(Conv2dLayer *layer, const WeightArray *arrays,
+int oaci_conv2d_init(Conv2dLayer *layer, const WeightArray *arrays,
                 const char *bias,
                 const char *float_weights,
                 int in_channels,
@@ -233,7 +233,7 @@ int main() {
     fd = open(filename, O_RDONLY);
     data = mmap(NULL, len, PROT_READ, MAP_SHARED, fd, 0);
     printf("size is %d\n", len);
-    nb_arrays = parse_weights(&list, data, len);
+    nb_arrays = oaci_parse_weights(&list, data, len);
     for (i = 0; i < nb_arrays; i++) {
         printf("found %s: size %d\n", list[i].name, list[i].size);
     }

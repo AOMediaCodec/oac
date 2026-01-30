@@ -83,28 +83,28 @@ int lpcnet_decode(LPCNetDecState *st, const unsigned char *buf, oac_int16 *pcm);
 /** Gets the size of an <code>LPCNetEncState</code> structure.
  * @returns The size in bytes.
  */
-int lpcnet_encoder_get_size(void);
+int oaci_lpcnet_encoder_get_size(void);
 
 /** Initializes a previously allocated encoder state
- * The memory pointed to by st must be at least the size returned by lpcnet_encoder_get_size().
+ * The memory pointed to by st must be at least the size returned by oaci_lpcnet_encoder_get_size().
  * This is intended for applications which use their own allocator instead of malloc.
- * @see lpcnet_encoder_create(),lpcnet_encoder_get_size()
+ * @see oaci_lpcnet_encoder_create(),oaci_lpcnet_encoder_get_size()
  * @param [in] st <tt>LPCNetEncState*</tt>: Encoder state
  * @retval 0 Success
  */
-int lpcnet_encoder_init(LPCNetEncState *st);
+int oaci_lpcnet_encoder_init(LPCNetEncState *st);
 
-int lpcnet_encoder_load_model(LPCNetEncState *st, const void *data, int len);
+int oaci_lpcnet_encoder_load_model(LPCNetEncState *st, const void *data, int len);
 
 /** Allocates and initializes an encoder state.
  *  @returns The newly created state
  */
-LPCNetEncState *lpcnet_encoder_create(void);
+LPCNetEncState *oaci_lpcnet_encoder_create(void);
 
-/** Frees an <code>LPCNetEncState</code> allocated by lpcnet_encoder_create().
+/** Frees an <code>LPCNetEncState</code> allocated by oaci_lpcnet_encoder_create().
  * @param[in] st <tt>LPCNetEncState*</tt>: State to be freed.
  */
-void lpcnet_encoder_destroy(LPCNetEncState *st);
+void oaci_lpcnet_encoder_destroy(LPCNetEncState *st);
 
 /** Encodes LPCNET_PACKET_SAMPLES speech samples (currently 640) into a packet of LPCNET_COMPRESSED_SIZE bytes (currently 8).
  * @param [in] st <tt>LPCNetDecState*</tt>: Encoder state
@@ -120,7 +120,7 @@ int lpcnet_encode(LPCNetEncState *st, const oac_int16 *pcm, unsigned char *buf);
  * @param [out] features <tt>float[NB_TOTAL_FEATURES]</tt>: Four feature vectors
  * @retval 0 Success
  */
-int lpcnet_compute_single_frame_features(LPCNetEncState *st, const oac_int16 *pcm, float features[NB_TOTAL_FEATURES],
+int oaci_lpcnet_compute_single_frame_features(LPCNetEncState *st, const oac_int16 *pcm, float features[NB_TOTAL_FEATURES],
     int arch);
 
 
@@ -130,7 +130,7 @@ int lpcnet_compute_single_frame_features(LPCNetEncState *st, const oac_int16 *pc
  * @param [out] features <tt>float[NB_TOTAL_FEATURES]</tt>: Four feature vectors
  * @retval 0 Success
  */
-int lpcnet_compute_single_frame_features_float(LPCNetEncState *st, const float *pcm, float features[NB_TOTAL_FEATURES],
+int oaci_lpcnet_compute_single_frame_features_float(LPCNetEncState *st, const float *pcm, float features[NB_TOTAL_FEATURES],
     int arch);
 
 /** Gets the size of an <code>LPCNetState</code> structure.
@@ -168,18 +168,18 @@ void lpcnet_synthesize(LPCNetState *st, const float *features, oac_int16 *output
 
 
 
-int lpcnet_plc_init(LPCNetPLCState *st);
-void lpcnet_plc_reset(LPCNetPLCState *st);
+int oaci_lpcnet_plc_init(LPCNetPLCState *st);
+void oaci_lpcnet_plc_reset(LPCNetPLCState *st);
 
-int lpcnet_plc_update(LPCNetPLCState *st, oac_int16 *pcm);
+int oaci_lpcnet_plc_update(LPCNetPLCState *st, oac_int16 *pcm);
 
-int lpcnet_plc_conceal(LPCNetPLCState *st, oac_int16 *pcm);
+int oaci_lpcnet_plc_conceal(LPCNetPLCState *st, oac_int16 *pcm);
 
-void lpcnet_plc_fec_add(LPCNetPLCState *st, const float *features);
+void oaci_lpcnet_plc_fec_add(LPCNetPLCState *st, const float *features);
 
-void lpcnet_plc_fec_clear(LPCNetPLCState *st);
+void oaci_lpcnet_plc_fec_clear(LPCNetPLCState *st);
 
 int lpcnet_load_model(LPCNetState *st, const void *data, int len);
-int lpcnet_plc_load_model(LPCNetPLCState *st, const void *data, int len);
+int oaci_lpcnet_plc_load_model(LPCNetPLCState *st, const void *data, int len);
 
 #endif

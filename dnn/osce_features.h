@@ -34,7 +34,7 @@
 
 #define OSCE_NUMBITS_BUGFIX
 
-void osce_calculate_features(
+void oaci_osce_calculate_features(
     silk_decoder_state          *psDec,                         /* I/O  Decoder state                               */
     silk_decoder_control        *psDecCtrl,                     /* I    Decoder control                             */
     float                       *features,                      /* O    input features                              */
@@ -45,7 +45,7 @@ void osce_calculate_features(
     );
 
 #ifdef ENABLE_OSCE_BWE
-void osce_bwe_calculate_features(
+void oaci_osce_bwe_calculate_features(
     OSCEBWEFeatureState         *psFeatures,                   /* I/O  BWE feature state                           */
     float                       *features,                     /* O    input features                              */
     const oac_int16 xq[],                                     /* I    Decoded speech                              */
@@ -53,6 +53,6 @@ void osce_bwe_calculate_features(
     );
 #endif
 
-void osce_cross_fade_10ms(float *x_enhanced, float *x_in, int length);
-void osce_bwe_cross_fade_10ms(oac_int16 *x_fadein, oac_int16* x_fadeout, int length);
+void oaci_osce_cross_fade_10ms(float *x_enhanced, float *x_in, int length);
+void oaci_osce_bwe_cross_fade_10ms(oac_int16 *x_fadein, oac_int16* x_fadeout, int length);
 #endif

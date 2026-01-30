@@ -46,19 +46,19 @@
 #define KERNEL_INDEX(i_out_channels, i_in_channels, \
                      i_kernel) ((((i_out_channels)*in_channels) + (i_in_channels))*kernel_size + (i_kernel))
 
-void init_adaconv_state(AdaConvState *hAdaConv) {
+void oaci_init_adaconv_state(AdaConvState *hAdaConv) {
     OAC_CLEAR(hAdaConv, 1);
 }
 
-void init_adacomb_state(AdaCombState *hAdaComb) {
+void oaci_init_adacomb_state(AdaCombState *hAdaComb) {
     OAC_CLEAR(hAdaComb, 1);
 }
 
-void init_adashape_state(AdaShapeState *hAdaShape) {
+void oaci_init_adashape_state(AdaShapeState *hAdaShape) {
     OAC_CLEAR(hAdaShape, 1);
 }
 
-void compute_overlap_window(float *window, int overlap_size) {
+void oaci_compute_overlap_window(float *window, int overlap_size) {
     int i_sample;
     for (i_sample = 0; i_sample < overlap_size; i_sample++) {
         window[i_sample] = 0.5f + 0.5f*cos(M_PI*(i_sample + 0.5f)/overlap_size);
@@ -115,7 +115,7 @@ static void transform_gains(
     }
 }
 
-void adaconv_process_frame(
+void oaci_adaconv_process_frame(
     AdaConvState* hAdaConv,
     float *x_out,
     const float *x_in,
@@ -170,8 +170,8 @@ void adaconv_process_frame(
 
 
     /* calculate new kernel and new gain */
-    compute_generic_dense(kernel_layer, kernel_buffer, features, ACTIVATION_LINEAR, arch);
-    compute_generic_dense(gain_layer, gain_buffer, features, ACTIVATION_TANH, arch);
+    oaci_compute_generic_dense(kernel_layer, kernel_buffer, features, ACTIVATION_LINEAR, arch);
+    oaci_compute_generic_dense(gain_layer, gain_buffer, features, ACTIVATION_TANH, arch);
 #ifdef DEBUG_NNDSP
     print_float_vector("features", features, feature_dim);
     print_float_vector("adaconv_kernel_raw", kernel_buffer, in_channels*out_channels*kernel_size);
@@ -194,9 +194,9 @@ void adaconv_process_frame(
 
             OAC_COPY(kernel0, hAdaConv->last_kernel + KERNEL_INDEX(i_out_channels, i_in_channels, 0), kernel_size);
             OAC_COPY(kernel1, kernel_buffer + KERNEL_INDEX(i_out_channels, i_in_channels, 0), kernel_size);
-            celt_pitch_xcorr(kernel0, p_input + i_in_channels*(frame_size + kernel_size) - left_padding,
+            oaci_celt_pitch_xcorr(kernel0, p_input + i_in_channels*(frame_size + kernel_size) - left_padding,
             channel_buffer0, ADACONV_MAX_KERNEL_SIZE, overlap_size, arch);
-            celt_pitch_xcorr(kernel1, p_input + i_in_channels*(frame_size + kernel_size) - left_padding,
+            oaci_celt_pitch_xcorr(kernel1, p_input + i_in_channels*(frame_size + kernel_size) - left_padding,
             channel_buffer1, ADACONV_MAX_KERNEL_SIZE, frame_size, arch);
             for (i_sample = 0; i_sample < overlap_size; i_sample++) {
                 output_buffer[i_sample + i_out_channels*frame_size] +=  window[i_sample]*channel_buffer0[i_sample];
@@ -223,7 +223,7 @@ void adaconv_process_frame(
     OAC_COPY(hAdaConv->last_kernel, kernel_buffer, kernel_size*in_channels*out_channels);
 }
 
-void adacomb_process_frame(
+void oaci_adacomb_process_frame(
     AdaCombState* hAdaComb,
     float *x_out,
     const float *x_in,
@@ -263,9 +263,9 @@ void adacomb_process_frame(
     p_input = input_buffer + kernel_size + ADACOMB_MAX_LAG;
 
     /* calculate new kernel and new gain */
-    compute_generic_dense(kernel_layer, kernel_buffer, features, ACTIVATION_LINEAR, arch);
-    compute_generic_dense(gain_layer, &gain, features, ACTIVATION_RELU, arch);
-    compute_generic_dense(global_gain_layer, &global_gain, features, ACTIVATION_TANH, arch);
+    oaci_compute_generic_dense(kernel_layer, kernel_buffer, features, ACTIVATION_LINEAR, arch);
+    oaci_compute_generic_dense(gain_layer, &gain, features, ACTIVATION_RELU, arch);
+    oaci_compute_generic_dense(global_gain_layer, &global_gain, features, ACTIVATION_TANH, arch);
 #ifdef DEBUG_NNDSP
     print_float_vector("features", features, feature_dim);
     print_float_vector("adacomb_kernel_raw", kernel_buffer, kernel_size);
@@ -286,10 +286,10 @@ void adacomb_process_frame(
     OAC_COPY(kernel, kernel_buffer, kernel_size);
     OAC_COPY(last_kernel, hAdaComb->last_kernel, kernel_size);
 
-    celt_pitch_xcorr(last_kernel, &p_input[-left_padding - hAdaComb->last_pitch_lag], output_buffer_last,
+    oaci_celt_pitch_xcorr(last_kernel, &p_input[-left_padding - hAdaComb->last_pitch_lag], output_buffer_last,
     ADACOMB_MAX_KERNEL_SIZE, overlap_size, arch);
 
-    celt_pitch_xcorr(kernel, &p_input[-left_padding - pitch_lag], output_buffer, ADACOMB_MAX_KERNEL_SIZE, frame_size,
+    oaci_celt_pitch_xcorr(kernel, &p_input[-left_padding - pitch_lag], output_buffer, ADACOMB_MAX_KERNEL_SIZE, frame_size,
     arch);
     for (i_sample = 0; i_sample < overlap_size; i_sample++) {
         output_buffer[i_sample] = hAdaComb->last_global_gain*window[i_sample]*output_buffer_last[i_sample]
@@ -318,7 +318,7 @@ void adacomb_process_frame(
 }
 
 
-void adashape_process_frame(
+void oaci_adashape_process_frame(
     AdaShapeState *hAdaShape,
     float *x_out,
     const float *x_in,
@@ -373,9 +373,9 @@ void adashape_process_frame(
 #ifdef DEBUG_NNDSP
     print_float_vector("alpha1_in", in_buffer, feature_dim + tenv_size + 1);
 #endif
-    compute_generic_conv1d(alpha1f, out_buffer, hAdaShape->conv_alpha1f_state, in_buffer, feature_dim,
+    oaci_compute_generic_conv1d(alpha1f, out_buffer, hAdaShape->conv_alpha1f_state, in_buffer, feature_dim,
     ACTIVATION_LINEAR, arch);
-    compute_generic_conv1d(alpha1t, tmp_buffer, hAdaShape->conv_alpha1t_state, tenv, tenv_size + 1, ACTIVATION_LINEAR,
+    oaci_compute_generic_conv1d(alpha1t, tmp_buffer, hAdaShape->conv_alpha1t_state, tenv, tenv_size + 1, ACTIVATION_LINEAR,
     arch);
 #ifdef DEBUG_NNDSP
     print_float_vector("alpha1_out", out_buffer, frame_size);
@@ -388,7 +388,7 @@ void adashape_process_frame(
 #ifdef DEBUG_NNDSP
     print_float_vector("post_alpha1", in_buffer, frame_size);
 #endif
-    compute_generic_conv1d(alpha2, tmp_buffer, hAdaShape->conv_alpha2_state, in_buffer, hidden_dim, ACTIVATION_LINEAR,
+    oaci_compute_generic_conv1d(alpha2, tmp_buffer, hAdaShape->conv_alpha2_state, in_buffer, hidden_dim, ACTIVATION_LINEAR,
     arch);
 
 #ifdef DEBUG_NNDSP
@@ -408,7 +408,7 @@ void adashape_process_frame(
     print_float_vector("interpolate_out", out_buffer, frame_size);
 #endif
 
-    compute_activation(out_buffer, out_buffer, frame_size, ACTIVATION_EXP, arch);
+    oaci_compute_activation(out_buffer, out_buffer, frame_size, ACTIVATION_EXP, arch);
     /* shape signal */
     for (i = 0; i < frame_size; i++) {
         x_out[i] = out_buffer[i]*x_in[i];

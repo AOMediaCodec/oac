@@ -41,7 +41,7 @@
 #define FIND_LPC_COND_FAC           1e-5f
 
 /* sum of squares of a silk_float array, with result as double */
-static double silk_energy_FLP(
+static double oaci_silk_energy_FLP(
     const float    *data,
     int dataSize)                            {
     int i;
@@ -66,7 +66,7 @@ static double silk_energy_FLP(
 }
 
 /* inner product of two silk_float arrays, with result as double */
-static double silk_inner_product_FLP(
+static double oaci_silk_inner_product_FLP(
     const float    *data1,
     const float    *data2,
     int dataSize)                            {
@@ -92,7 +92,7 @@ static double silk_inner_product_FLP(
 
 
 /* Compute reflection coefficients from input signal */
-float silk_burg_analysis(              /* O    returns residual energy                                     */
+float oaci_silk_burg_analysis(              /* O    returns residual energy                                     */
     float A[],                         /* O    prediction coefficients (length order)                      */
     const float x[],                   /* I    input signal, length: nb_subfr*(D+L_sub)                    */
     const float minInvGain,            /* I    minimum inverse prediction gain                             */
@@ -110,12 +110,12 @@ float silk_burg_analysis(              /* O    returns residual energy          
     assert( subfr_length*nb_subfr <= MAX_FRAME_SIZE );
 
     /* Compute autocorrelations, added over subframes */
-    C0 = silk_energy_FLP( x, nb_subfr*subfr_length );
+    C0 = oaci_silk_energy_FLP( x, nb_subfr*subfr_length );
     memset( C_first_row, 0, SILK_MAX_ORDER_LPC*sizeof(double));
     for (s = 0; s < nb_subfr; s++) {
         x_ptr = x + s*subfr_length;
         for (n = 1; n < D + 1; n++) {
-            C_first_row[ n - 1 ] += silk_inner_product_FLP( x_ptr, x_ptr + n, subfr_length - n );
+            C_first_row[ n - 1 ] += oaci_silk_inner_product_FLP( x_ptr, x_ptr + n, subfr_length - n );
         }
     }
     memcpy( C_last_row, C_first_row, SILK_MAX_ORDER_LPC*sizeof(double));
@@ -219,7 +219,7 @@ float silk_burg_analysis(              /* O    returns residual energy          
         }
         /* Subtract energy of preceding samples from C0 */
         for (s = 0; s < nb_subfr; s++) {
-            C0 -= silk_energy_FLP( x + s*subfr_length, D );
+            C0 -= oaci_silk_energy_FLP( x + s*subfr_length, D );
         }
         /* Approximate residual energy */
         nrg_f = C0*invGain;

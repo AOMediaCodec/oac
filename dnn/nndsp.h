@@ -77,15 +77,15 @@ typedef struct {
     float interpolate_state[1];
 } AdaShapeState;
 
-void init_adaconv_state(AdaConvState *hAdaConv);
+void oaci_init_adaconv_state(AdaConvState *hAdaConv);
 
-void init_adacomb_state(AdaCombState *hAdaComb);
+void oaci_init_adacomb_state(AdaCombState *hAdaComb);
 
-void init_adashape_state(AdaShapeState *hAdaShape);
+void oaci_init_adashape_state(AdaShapeState *hAdaShape);
 
-void compute_overlap_window(float *window, int overlap_size);
+void oaci_compute_overlap_window(float *window, int overlap_size);
 
-void adaconv_process_frame(
+void oaci_adaconv_process_frame(
     AdaConvState* hAdaConv,
     float *x_out,
     const float *x_in,
@@ -105,7 +105,7 @@ void adaconv_process_frame(
     float *window,
     int arch);
 
-void adacomb_process_frame(
+void oaci_adacomb_process_frame(
     AdaCombState* hAdaComb,
     float *x_out,
     const float *x_in,
@@ -125,7 +125,7 @@ void adacomb_process_frame(
     float *window,
     int arch);
 
-void adashape_process_frame(
+void oaci_adashape_process_frame(
     AdaShapeState *hAdaShape,
     float *x_out,
     const float *x_in,
