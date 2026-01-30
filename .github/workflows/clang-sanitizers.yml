@@ -1,0 +1,34 @@
+name: Clang/ASAN/UBSAN
+
+on:
+  push:
+    branches: [ main, wip/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test-sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm-dev libclang-dev build-essential autotools-dev automake autoconf libtool pkg-config
+
+      - name: Configure with sanitizers
+        env:
+          CC: clang
+          CFLAGS: "-g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer"
+          LDFLAGS: "-fsanitize=address,undefined"
+        run: |
+          ./autogen.sh || true
+          ./configure CC=$CC CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"
+
+      - name: Build
+        run: make -j$(nproc)
+
+      - name: Run tests
+        run: make check -j2

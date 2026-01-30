@@ -430,7 +430,6 @@ int main(int argc, char *argv[]) {
     int output_wav = 0;
     oac_uint64 wav_data_bytes = 0;
     int input_wav = 0;
-    uint32_t input_wav_data_size = 0;
     long input_wav_data_start = 0;
     int stop = 0;
     oac_int32 *in = NULL;
@@ -815,7 +814,6 @@ int main(int argc, char *argv[]) {
                     }
                     uint32_t cs = chunk[4] | (chunk[5]<<8) | (chunk[6]<<16) | (chunk[7]<<24);
                     if (memcmp(chunk, "data", 4) == 0) {
-                        input_wav_data_size = cs;
                         input_wav_data_start = ftell(fin);
                         break;
                     } else {
