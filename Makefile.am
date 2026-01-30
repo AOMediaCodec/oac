@@ -149,7 +149,7 @@ if OAC_ARM_EXTERNAL_ASM
 liboac_la_LIBADD += libarmasm.la
 endif
 
-pkginclude_HEADERS = include/oac.h include/oac_multistream.h include/oac_types.h include/oac_defines.h include/oac_projection.h
+pkginclude_HEADERS = include/oac.h include/oac_multistream.h include/oac_types.h include/opus_types.h include/oac_defines.h include/oac_projection.h
 
 noinst_HEADERS = $(OAC_HEAD) $(SILK_HEAD) $(CELT_HEAD) $(LPCNET_HEAD)
 

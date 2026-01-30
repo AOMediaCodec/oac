@@ -273,7 +273,8 @@ set(Oac_PUBLIC_HEADER
     ${CMAKE_CURRENT_SOURCE_DIR}/include/oac_defines.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/oac_multistream.h
     ${CMAKE_CURRENT_SOURCE_DIR}/include/oac_projection.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/oac_types.h)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/oac_types.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/opus_types.h)
 
 if(OAC_CUSTOM_MODES)
   list(APPEND Oac_PUBLIC_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/include/oac_custom.h)
