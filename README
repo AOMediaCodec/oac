@@ -82,8 +82,8 @@ options:
   -dtx              : enable SILK DTX
   -loss <perc>      : simulate packet loss, in percent (0-100); default: 0
 
-input and output are little-endian signed 16-bit PCM files or OAC
-bitstreams with simple oac_demo custom framing.
+input and output are little-endian signed 16-bit PCM files, WAV files (for encoding), or OAC
+bitstreams with simple oac_demo custom framing. WAV input now auto-detects 16-bit, 24-bit, and 32-bit PCM formats from the header.
 
 == Testing ==
 

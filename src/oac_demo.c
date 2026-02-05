@@ -30,15 +30,15 @@
 # include "config.h"
 #endif
 
+#include "debug.h"
+#include "oac.h"
+#include "oac_multistream.h"
+#include "oac_private.h"
+#include "oac_types.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
 #include <string.h>
-#include "oac.h"
-#include "debug.h"
-#include "oac_types.h"
-#include "oac_private.h"
-#include "oac_multistream.h"
 #ifdef ENABLE_LOSSGEN
 # include "lossgen.h"
 #endif
@@ -176,6 +176,11 @@ static void int_to_char(oac_uint32 i, unsigned char ch[4]) {
 static oac_uint32 char_to_int(unsigned char ch[4]) {
     return ((oac_uint32)ch[0]<<24)|((oac_uint32)ch[1]<<16)
            |((oac_uint32)ch[2]<<8)|(oac_uint32)ch[3];
+}
+
+// Helper function for little-endian 16-bit
+static short char_to_short(unsigned char ch[2]) {
+  return (short)(((unsigned short)ch[1] << 8) | (unsigned short)ch[0]);
 }
 
 #define check_encoder_option(decode_only, \
@@ -762,17 +767,93 @@ int main(int argc, char *argv[]) {
         fprintf (stderr, "Could not open input file %s\n", argv[argc - 2]);
         goto failure;
     }
+    const char *ext;
+    ext = strrchr(inFile, '.');
+
+    if (!decode_only && ext && strcmp(ext, ".wav") == 0) {
+      char header[44];
+      unsigned char chunk_size_bytes[4];
+      unsigned char data_size_bytes[4];
+      oac_int32 riff_chunk_size;
+      oac_int32 data_chunk_size;
+      short bits_per_sample;
+
+      if (fread(header, 1, 44, fin) != 44) {
+        fprintf(stderr, "Error reading WAV header from %s\n", inFile);
+        goto failure;
+      }
+
+        if (strncmp(header, "RIFF", 4) != 0 ||
+            strncmp(header + 8, "WAVE", 4) != 0 ||
+            strncmp(header + 12, "fmt ", 4) != 0 ||
+            strncmp(header + 36, "data", 4) != 0) {
+          fprintf(stderr,
+                  "Input file %s is not a valid PCM WAV file or has unexpected "
+                  "chunk order\n",
+                  inFile);
+          goto failure;
+        }
+
+        memcpy(chunk_size_bytes, header + 4, 4);
+        riff_chunk_size = char_to_int(chunk_size_bytes);
+        memcpy(data_size_bytes, header + 40, 4);
+        data_chunk_size = char_to_int(data_size_bytes);
+
+        if (riff_chunk_size - 36 > data_chunk_size) {
+          fprintf(stderr,
+                  "Warning: WAV file %s contains additional chunks after the "
+                  "data chunk, which are not supported and will be ignored.\n",
+                  inFile);
+        }
+
+        bits_per_sample = char_to_short((unsigned char *)header + 34);
+        switch (bits_per_sample) {
+        case 16:
+          format = FORMAT_S16_LE;
+          break;
+        case 24:
+          format = FORMAT_S24_LE;
+          break;
+        case 32: // Assuming float for 32-bit
+          format = FORMAT_F32_LE;
+          break;
+        default:
+          fprintf(stderr,
+                  "Warning: Unsupported bits per sample in WAV header: %d. "
+                  "Assuming 16-bit PCM.\n",
+                  bits_per_sample);
+          format = FORMAT_S16_LE;
+        }
+        fprintf(stderr, "Detected WAV format: %d bits per sample.\n",
+                bits_per_sample);
+
+        oac_int32 wav_format_samplerate =
+            char_to_int((unsigned char *)header + 24);
+        short wav_format_channels = char_to_short((unsigned char *)header + 22);
+        if (wav_format_samplerate != sampling_rate ||
+            wav_format_channels != channels) {
+          fprintf(stderr,
+                  "Warning: WAV header parameters (%d Hz, %d ch) do not match "
+                  "command line parameters (%d Hz, %d ch).\n",
+                  wav_format_samplerate, wav_format_channels, sampling_rate,
+                  channels);
+          fprintf(stderr, "Using parameters from command line.\n");
+        }
+    }
+
     if (mode_list) {
-        int size;
-        int sample_size = 2;
-        if (format == FORMAT_S24_LE) sample_size = 3;
-        else if (format == FORMAT_F32_LE) sample_size = 4;
-        fseek(fin, 0, SEEK_END);
-        size = ftell(fin);
-        fprintf(stderr, "File size is %d bytes\n", size);
-        fseek(fin, 0, SEEK_SET);
-        mode_switch_time = size/sample_size/channels/nb_modes_in_list;
-        fprintf(stderr, "Switching mode every %d samples\n", mode_switch_time);
+      int size;
+      int sample_size = 2;
+      if (format == FORMAT_S24_LE)
+        sample_size = 3;
+      else if (format == FORMAT_F32_LE)
+        sample_size = 4;
+      fseek(fin, 0, SEEK_END);
+      size = ftell(fin);
+      fprintf(stderr, "File size is %d bytes\n", size);
+      fseek(fin, 0, SEEK_SET);
+      mode_switch_time = size / sample_size / channels / nb_modes_in_list;
+      fprintf(stderr, "Switching mode every %d samples\n", mode_switch_time);
     }
 
     outFile = argv[argc - 1];
@@ -799,7 +880,12 @@ int main(int argc, char *argv[]) {
         oac_encoder_ctl(enc, OAC_SET_PACKET_LOSS_PERC(packet_loss_perc));
 
         oac_encoder_ctl(enc, OAC_GET_LOOKAHEAD(&skip));
-        oac_encoder_ctl(enc, OAC_SET_LSB_DEPTH((format == FORMAT_S16_LE) ? 16 : 24));
+        int lsb_depth = 16;
+        if (format == FORMAT_S24_LE)
+          lsb_depth = 24;
+        else if (format == FORMAT_F32_LE)
+          lsb_depth = 24; // Typically use 24 for float as well
+        oac_encoder_ctl(enc, OAC_SET_LSB_DEPTH(lsb_depth));
         oac_encoder_ctl(enc, OAC_SET_EXPERT_FRAME_DURATION(variable_duration));
         if (dred_duration > 0) {
             oac_encoder_ctl(enc, OAC_SET_DRED_DURATION(dred_duration));
