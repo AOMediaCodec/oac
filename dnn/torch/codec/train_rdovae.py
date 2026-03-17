@@ -33,7 +33,7 @@ import argparse
 import torch
 import tqdm
 
-from rdovae import RDOVAE, RDOVAEDataset, dist_func, hard_rate_estimate, soft_rate_estimate, IDCT
+from rdovae import RDOVAE, RDOVAEDataset, dist_func, soft_rate_estimate, IDCT, scale_regularizer, cepstral_distortion_loss
 
 
 parser = argparse.ArgumentParser()
@@ -157,6 +157,7 @@ if __name__ == '__main__':
     model.to(device)
     idct = IDCT(18, device=device)
     distortion_loss = dist_func(idct)
+    #distortion_loss = cepstral_distortion_loss
 
     # training loop
 
@@ -167,14 +168,14 @@ if __name__ == '__main__':
 
         # running stats
         running_rate_loss       = 0
-        running_soft_dist_loss  = 0
         running_hard_dist_loss  = 0
-        running_hard_rate_loss  = 0
+        running_soft_dist_loss  = 0
         running_soft_rate_loss  = 0
         running_total_loss      = 0
         running_rate_metric     = 0
         previous_total_loss     = 0
         running_first_frame_loss = 0
+        running_scale_reg       = 0
 
         with tqdm.tqdm(dataloader, unit='batch') as tepoch:
             for i, (features, rate_lambda, q_ids) in enumerate(tepoch):
@@ -200,17 +201,15 @@ if __name__ == '__main__':
                 statistical_model   = model_output['statistical_model']
 
                 if type(args.initial_checkpoint) == type(None):
-                    latent_lambda = (1. - .9/(1.+batch/1000))
+                    latent_lambda = (1. - .9/(1.+batch/5000))
                 else:
                     latent_lambda = 1.
 
                 # rate loss
-                hard_rate = hard_rate_estimate(z, statistical_model['r_hard'][:,:,:latent_dim], statistical_model['theta_hard'][:,:,:latent_dim], reduce=False)
-                soft_rate = soft_rate_estimate(z, statistical_model['r_soft'][:,:,:latent_dim], reduce=False)
+                soft_rate = soft_rate_estimate(statistical_model['quant_scale'][:,:,:latent_dim], reduce=False)
                 soft_rate_loss = torch.mean(torch.sqrt(rate_lambda) * (latent_lambda*soft_rate))
-                hard_rate_loss = torch.mean(torch.sqrt(rate_lambda) * (latent_lambda*hard_rate))
-                rate_loss = (soft_rate_loss + 0.1 * hard_rate_loss)
-                hard_rate_metric = torch.mean(hard_rate)
+                rate_loss = (soft_rate_loss)
+                rate_metric = torch.mean(soft_rate)
 
                 ## distortion losses
                 distortion_loss_hard_quant = distortion_loss(features, outputs_hard_quant, rate_lambda_upsamp)
@@ -223,6 +222,8 @@ if __name__ == '__main__':
                 if args.enable_first_frame_loss:
                     total_loss = .97*total_loss + 0.03 * first_frame_loss
 
+                scale_reg = scale_regularizer(statistical_model['quant_scale'][:,:,:latent_dim])
+                total_loss = total_loss + 3e-7*batch*scale_reg
 
                 total_loss.backward()
 
@@ -237,11 +238,11 @@ if __name__ == '__main__':
                 running_hard_dist_loss  += float(distortion_loss_hard_quant.detach().cpu())
                 running_soft_dist_loss  += float(distortion_loss_soft_quant.detach().cpu())
                 running_rate_loss       += float(rate_loss.detach().cpu())
-                running_rate_metric     += float(hard_rate_metric.detach().cpu())
+                running_rate_metric     += float(rate_metric.detach().cpu())
                 running_total_loss      += float(total_loss.detach().cpu())
                 running_first_frame_loss += float(first_frame_loss.detach().cpu())
                 running_soft_rate_loss += float(soft_rate_loss.detach().cpu())
-                running_hard_rate_loss += float(hard_rate_loss.detach().cpu())
+                running_scale_reg += float(scale_reg.detach().cpu())
 
                 if (i + 1) % log_interval == 0:
                     current_loss = (running_total_loss - previous_total_loss) / log_interval
@@ -253,8 +254,8 @@ if __name__ == '__main__':
                         rate_loss=running_rate_loss / (i + 1),
                         rate=running_rate_metric / (i + 1),
                         ffloss=running_first_frame_loss / (i + 1),
-                        rateloss_hard=running_hard_rate_loss / (i + 1),
-                        rateloss_soft=running_soft_rate_loss / (i + 1)
+                        rateloss_soft=running_soft_rate_loss / (i + 1),
+                        scale_reg=running_scale_reg / (i + 1)
                     )
                     previous_total_loss = running_total_loss
                 batch = batch+1

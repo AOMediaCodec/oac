@@ -34,7 +34,7 @@ import numpy as np
 import torch
 import tqdm
 
-from rdovae import RDOVAE, dist_func, hard_rate_estimate
+from rdovae import RDOVAE, dist_func, soft_rate_estimate
 
 
 parser = argparse.ArgumentParser()
@@ -89,7 +89,8 @@ if __name__ == '__main__':
     outputs_hard_quant  = model_output['outputs_hard_quant']
     outputs_soft_quant  = model_output['outputs_soft_quant']
     statistical_model   = model_output['statistical_model']
-    hard_rate = hard_rate_estimate(z, statistical_model['r_hard'][:,:,:latent_dim], statistical_model['theta_hard'][:,:,:latent_dim], reduce=False)
+    print(statistical_model['quant_scale'][0,0,:latent_dim])
+    hard_rate = soft_rate_estimate(statistical_model['quant_scale'][:,:,:latent_dim], reduce=False)
     print("rate = ", np.mean(hard_rate.detach().numpy()))
 
     outputs_hard_quant.detach().numpy().tofile(args.output)

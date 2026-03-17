@@ -110,13 +110,10 @@ def pvq_codebook_size(n, k):
     return pvq_codebook_size(n - 1, k) + pvq_codebook_size(n, k - 1) + pvq_codebook_size(n - 1, k - 1)
 
 
-def soft_rate_estimate(z, r, reduce=True):
+def soft_rate_estimate(scale, reduce=True):
     """ rate approximation with dependent theta Eq. (7)"""
 
-    rate = torch.sum(
-        - torch.log2((1 - r)/(1 + r) * r ** torch.abs(z) + 1e-6),
-        dim=-1
-    )
+    rate = torch.sum(1.4427*torch.min(scale, 1/(4*scale) + torch.log(1e-15 + 2*scale)), dim=-1)
 
     if reduce:
         rate = torch.mean(rate)
@@ -124,7 +121,7 @@ def soft_rate_estimate(z, r, reduce=True):
     return rate
 
 
-def hard_rate_estimate(z, r, theta, reduce=True):
+def hard_rate_estimate0(z, r, theta, reduce=True):
     """ hard rate approximation """
 
     z_q = torch.round(z)
@@ -149,15 +146,22 @@ def soft_dead_zone(x, dead_zone):
     return x - d * torch.tanh(x / (0.1 + d))
 
 
-def hard_quantize(x):
+def hard_quantize(x, scale):
     """ round with copy gradient trick """
-    return x + (torch.round(x) - x).detach()
+    sign = torch.sign(torch.randn_like(scale))
+    offset = sign*(scale-.5)
+    xq = torch.round(x+offset)-offset
+    return x + (xq - x).detach()
 
 
 def noise_quantize(x):
     """ simulates quantization with addition of random uniform noise """
     return x + (torch.rand_like(x) - 0.5)
 
+def scale_regularizer(s):
+    xx = torch.min(.5*s**2, torch.clamp(s-.5, min=.5))
+    return torch.mean(1-torch.cos(2*torch.pi*xx)**2)
+    #return torch.mean(1-torch.cos(torch.pi*torch.clamp(2*(s-.5), min=0))**6)
 
 # loss functions
 class IDCT(nn.Module):
@@ -210,6 +214,26 @@ def dist_func(idct):
 
     return loss
   return distortion_loss
+
+def cepstral_distortion_loss(y_true, y_pred, rate_lambda=None):
+    """ custom distortion loss for LPCNet features """
+
+    if y_true.size(-1) != 20:
+        raise ValueError('distortion loss is designed to work with 20 features')
+
+    ceps_error   = y_pred[..., :18] - y_true[..., :18]
+    pitch_error  = 2*(y_pred[..., 18:19] - y_true[..., 18:19])
+    corr_error   = y_pred[..., 19:] - y_true[..., 19:]
+    pitch_weight = torch.relu(y_true[..., 19:] + 0.5) ** 2
+
+    loss = torch.mean(ceps_error ** 2 + (10/18) * torch.abs(pitch_error) * pitch_weight + (1/18) * corr_error ** 2, dim=-1)
+
+    if type(rate_lambda) != type(None):
+        loss = loss / torch.sqrt(rate_lambda)
+
+    loss = torch.mean(loss)
+
+    return loss
 
 # sampling functions
 
@@ -449,7 +473,7 @@ class CoreEncoder(nn.Module):
         x = torch.cat([x, n(self.conv4(x))], -1)
         x = torch.cat([x, n(self.gru5(x)[0])], -1)
         x = torch.cat([x, n(self.conv5(x))], -1)
-        z = self.z_dense(x)
+        z = torch.tanh(self.z_dense(x))
 
         return z
 
@@ -561,22 +585,14 @@ class StatisticalModel(nn.Module):
         x = self.quant_embedding(quant_ids)
 
         # CAVE: theta_soft is not used anymore. Kick it out?
-        quant_scale = F.softplus(x[..., 0 * self.total_dim : 1 * self.total_dim])
+        quant_scale = F.softplus(2+x[..., 0 * self.total_dim : 1 * self.total_dim])
         dead_zone   = F.softplus(x[..., 1 * self.total_dim : 2 * self.total_dim])
-        theta_soft  = torch.sigmoid(x[..., 2 * self.total_dim : 3 * self.total_dim])
-        r_soft      = torch.sigmoid(x[..., 3 * self.total_dim : 4 * self.total_dim])
-        theta_hard  = torch.sigmoid(x[..., 4 * self.total_dim : 5 * self.total_dim])
-        r_hard      = torch.sigmoid(x[..., 5 * self.total_dim : 6 * self.total_dim])
 
 
         return {
             'quant_embedding'   : x,
             'quant_scale'       : quant_scale,
             'dead_zone'         : dead_zone,
-            'r_hard'            : r_hard,
-            'theta_hard'        : theta_hard,
-            'r_soft'            : r_soft,
-            'theta_soft'        : theta_soft
         }
 
 
@@ -633,10 +649,10 @@ class RDOVAE(nn.Module):
 
         # scaling, dead-zone and quantization
         z = z * statistical_model['quant_scale'][:,:,:self.latent_dim]
-        z = soft_dead_zone(z, statistical_model['dead_zone'][:,:,:self.latent_dim])
+        #z = soft_dead_zone(z, statistical_model['dead_zone'][:,:,:self.latent_dim])
 
         # quantization
-        z_q = hard_quantize(z) / statistical_model['quant_scale'][:,:,:self.latent_dim]
+        z_q = hard_quantize(z, statistical_model['quant_scale'][:,:,:self.latent_dim]) / statistical_model['quant_scale'][:,:,:self.latent_dim]
         z_n = noise_quantize(z) / statistical_model['quant_scale'][:,:,:self.latent_dim]
         z_q = torch.cat([z_q, q_id[:,:,None]*.125-1], -1)
         z_n = torch.cat([z_n, q_id[:,:,None]*.125-1], -1)

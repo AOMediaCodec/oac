@@ -1,2 +1,2 @@
-from .rdovae import RDOVAE, dist_func, hard_rate_estimate, soft_rate_estimate, IDCT
+from .rdovae import RDOVAE, dist_func, soft_rate_estimate, IDCT, scale_regularizer
 from .dataset import RDOVAEDataset
