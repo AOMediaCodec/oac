@@ -61,7 +61,7 @@ void test_overflow(void) {
     memset(in + 2, 0xff, PACKETSIZE - 3);
     in[PACKETSIZE - 1] = 0x0b;
 
-    decoder = oac_decoder_create(48000, CHANNELS, &error);
+    decoder = oac_decoder_create(48000, CHANNELS, OAC_FORMAT_STANDARD, &error);
     result = oac_decode(decoder, in, PACKETSIZE, out, FRAMESIZE, 0);
     oac_decoder_destroy(decoder);
 

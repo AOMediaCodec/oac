@@ -165,7 +165,7 @@ int test_encode(TestCustomParams params) {
         decC_copy = malloc(size);
         memcpy(decC_copy, decC, size);
     } else {
-        int size = oac_decoder_get_size(params.num_channels);
+        int size = oac_decoder_get_size(params.num_channels, OAC_FORMAT_STANDARD);
         dec = (OacDecoder*)params.decoder;
         dec_copy = malloc(size);
         memcpy(dec_copy, dec, size);
@@ -531,7 +531,7 @@ void test_oac_custom(const int num_encoders, const int num_setting_changes) {
             }
             params.decoder = (void*)decC;
         } else {
-            dec = oac_decoder_create(params.sample_rate, params.num_channels, &err);
+            dec = oac_decoder_create(params.sample_rate, params.num_channels, OAC_FORMAT_STANDARD, &err);
             if (err != OAC_OK || dec == NULL) {
                 fprintf(stderr,
                     "test_oac_custom error: %d kHz, %d ch, "
@@ -555,7 +555,7 @@ void test_oac_custom(const int num_encoders, const int num_setting_changes) {
             }
             params.encoder = (void*)encC;
         } else {
-            enc = oac_encoder_create(params.sample_rate, params.num_channels, OAC_APPLICATION_RESTRICTED_LOWDELAY,
+            enc = oac_encoder_create(params.sample_rate, params.num_channels, OAC_FORMAT_STANDARD, OAC_APPLICATION_RESTRICTED_LOWDELAY,
             &err);
             if (err != OAC_OK || enc == NULL) {
                 fprintf(stderr,

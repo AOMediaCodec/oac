@@ -54,8 +54,8 @@ oac_int32 oac_multistream_decoder_get_size(int nb_streams, int nb_coupled_stream
     int mono_size;
 
     if (nb_streams < 1 || nb_coupled_streams > nb_streams || nb_coupled_streams < 0) return 0;
-    coupled_size = oac_decoder_get_size(2);
-    mono_size = oac_decoder_get_size(1);
+    coupled_size = oac_decoder_get_size(2, OAC_FORMAT_STANDARD);
+    mono_size = oac_decoder_get_size(1, OAC_FORMAT_STANDARD);
     return oaci_align(sizeof(OacMSDecoder))
            + nb_coupled_streams*oaci_align(coupled_size)
            + (nb_streams - nb_coupled_streams)*oaci_align(mono_size);
@@ -87,16 +87,16 @@ int oac_multistream_decoder_init(
         return OAC_BAD_ARG;
 
     ptr = (char*)st + oaci_align(sizeof(OacMSDecoder));
-    coupled_size = oac_decoder_get_size(2);
-    mono_size = oac_decoder_get_size(1);
+    coupled_size = oac_decoder_get_size(2, OAC_FORMAT_STANDARD);
+    mono_size = oac_decoder_get_size(1, OAC_FORMAT_STANDARD);
 
     for (i = 0; i < st->layout.nb_coupled_streams; i++) {
-        ret = oac_decoder_init((OacDecoder*)ptr, Fs, 2);
+        ret = oac_decoder_init((OacDecoder*)ptr, Fs, 2, OAC_FORMAT_STANDARD);
         if (ret != OAC_OK) return ret;
         ptr += oaci_align(coupled_size);
     }
     for (; i < st->layout.nb_streams; i++) {
-        ret = oac_decoder_init((OacDecoder*)ptr, Fs, 1);
+        ret = oac_decoder_init((OacDecoder*)ptr, Fs, 1, OAC_FORMAT_STANDARD);
         if (ret != OAC_OK) return ret;
         ptr += oaci_align(mono_size);
     }
@@ -191,8 +191,8 @@ int oac_multistream_decode_native(
     frame_size = IMIN(frame_size, Fs/25*3);
     ALLOC(buf, 2*frame_size, oac_res);
     ptr = (char*)st + oaci_align(sizeof(OacMSDecoder));
-    coupled_size = oac_decoder_get_size(2);
-    mono_size = oac_decoder_get_size(1);
+    coupled_size = oac_decoder_get_size(2, OAC_FORMAT_STANDARD);
+    mono_size = oac_decoder_get_size(1, OAC_FORMAT_STANDARD);
 
     if (len == 0)
         do_plc = 1;
@@ -383,8 +383,8 @@ int oac_multistream_decoder_ctl_va_list(OacMSDecoder *st, int request,
     char *ptr;
     int ret = OAC_OK;
 
-    coupled_size = oac_decoder_get_size(2);
-    mono_size = oac_decoder_get_size(1);
+    coupled_size = oac_decoder_get_size(2, OAC_FORMAT_STANDARD);
+    mono_size = oac_decoder_get_size(1, OAC_FORMAT_STANDARD);
     ptr = (char*)st + oaci_align(sizeof(OacMSDecoder));
     switch (request) {
         case OAC_GET_BANDWIDTH_REQUEST:

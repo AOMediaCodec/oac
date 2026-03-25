@@ -241,7 +241,6 @@ static OAC_INLINE int oaci_interp_bits2pulses(const CELTMode *m, int start, int 
     int lo, hi;
     int i, j;
     int logM;
-    int stereo;
     int codedBands = -1;
     int alloc_floor;
     oac_int32 left, percoeff;
@@ -250,7 +249,6 @@ static OAC_INLINE int oaci_interp_bits2pulses(const CELTMode *m, int start, int 
     SAVE_STACK;
 
     alloc_floor = C<<BITRES;
-    stereo = C > 1;
 
     logM = LM<<BITRES;
     lo = 0;
@@ -445,7 +443,7 @@ static OAC_INLINE int oaci_interp_bits2pulses(const CELTMode *m, int start, int 
 
             /* Make sure not to bust */
             if (C*ebits[j] > (bits[j]>>BITRES))
-                ebits[j] = bits[j]>>stereo>>BITRES;
+                ebits[j] = bits[j] / C >> BITRES;
 
             /* More than that is useless because that's about as far as PVQ can go */
             ebits[j] = IMIN(ebits[j], MAX_FINE_BITS);
@@ -471,7 +469,7 @@ static OAC_INLINE int oaci_interp_bits2pulses(const CELTMode *m, int start, int 
         if (excess > 0) {
             int extra_fine;
             int extra_bits;
-            extra_fine = IMIN(excess>>(stereo + BITRES), MAX_FINE_BITS - ebits[j]);
+            extra_fine = IMIN(excess / C >> BITRES, MAX_FINE_BITS - ebits[j]);
             ebits[j] += extra_fine;
             extra_bits = extra_fine*C<<BITRES;
             fine_priority[j] = extra_bits >= excess - balance;
@@ -488,7 +486,7 @@ static OAC_INLINE int oaci_interp_bits2pulses(const CELTMode *m, int start, int 
 
     /* The skipped bands use all their bits for fine energy. */
     for (; j < end; j++) {
-        ebits[j] = bits[j]>>stereo>>BITRES;
+        ebits[j] = bits[j] / C >> BITRES;
         celt_assert(C*ebits[j]<<BITRES == bits[j]);
         bits[j] = 0;
         fine_priority[j] = ebits[j] < 1;

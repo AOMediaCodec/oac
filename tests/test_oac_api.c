@@ -99,7 +99,7 @@ oac_int32 test_dec_api(void) {
     fprintf(stdout, "\n  Decoder basic API tests\n");
     fprintf(stdout, "  ---------------------------------------------------\n");
     for (c = 0; c < 4; c++) {
-        i = oac_decoder_get_size(c);
+        i = oac_decoder_get_size(c, OAC_FORMAT_STANDARD);
         if (((c == 1 || c == 2) && (i <= 2048 || i > 1<<18)) || ((c != 1 && c != 2) && i != 0)) test_failed();
         fprintf(stdout, "    oac_decoder_get_size(%d)=%d ...............%s OK.\n", c, i, i > 0?"":"....");
         cfgs++;
@@ -122,15 +122,15 @@ oac_int32 test_dec_api(void) {
             }
             err = OAC_OK;
             VG_UNDEF(&err, sizeof(err));
-            dec = oac_decoder_create(fs, c, &err);
+            dec = oac_decoder_create(fs, c, OAC_FORMAT_STANDARD, &err);
             if (err != OAC_BAD_ARG || dec != NULL) test_failed();
             cfgs++;
-            dec = oac_decoder_create(fs, c, 0);
+            dec = oac_decoder_create(fs, c, OAC_FORMAT_STANDARD, 0);
             if (dec != NULL) test_failed();
             cfgs++;
-            dec = (OacDecoder*)malloc(oac_decoder_get_size(2));
+            dec = (OacDecoder*)malloc(oac_decoder_get_size(2, OAC_FORMAT_STANDARD));
             if (dec == NULL) test_failed();
-            err = oac_decoder_init(dec, fs, c);
+            err = oac_decoder_init(dec, fs, c, OAC_FORMAT_STANDARD);
             if (err != OAC_BAD_ARG) test_failed();
             cfgs++;
             free(dec);
@@ -138,9 +138,9 @@ oac_int32 test_dec_api(void) {
     }
 
     VG_UNDEF(&err, sizeof(err));
-    dec = oac_decoder_create(48000, 2, &err);
+    dec = oac_decoder_create(48000, 2, OAC_FORMAT_STANDARD, &err);
     if (err != OAC_OK || dec == NULL) test_failed();
-    VG_CHECK(dec, oac_decoder_get_size(2));
+    VG_CHECK(dec, oac_decoder_get_size(2, OAC_FORMAT_STANDARD));
     cfgs++;
 
     fprintf(stdout, "    oac_decoder_create() ........................ OK.\n");
@@ -235,10 +235,10 @@ oac_int32 test_dec_api(void) {
     fprintf(stdout, "    OAC_GET_GAIN ................................ OK.\n");
 
     /*Reset the decoder*/
-    dec2 = (OacDecoder*)malloc(oac_decoder_get_size(2));
-    memcpy(dec2, dec, oac_decoder_get_size(2));
+    dec2 = (OacDecoder*)malloc(oac_decoder_get_size(2, OAC_FORMAT_STANDARD));
+    memcpy(dec2, dec, oac_decoder_get_size(2, OAC_FORMAT_STANDARD));
     if (oac_decoder_ctl(dec, OAC_RESET_STATE) != OAC_OK) test_failed();
-    if (memcmp(dec2, dec, oac_decoder_get_size(2)) == 0) test_failed();
+    if (memcmp(dec2, dec, oac_decoder_get_size(2, OAC_FORMAT_STANDARD)) == 0) test_failed();
     free(dec2);
     fprintf(stdout, "    OAC_RESET_STATE ............................. OK.\n");
     cfgs++;
@@ -324,7 +324,7 @@ oac_int32 test_dec_api(void) {
 #if 0
     /*These tests are disabled because the library crashes with null states*/
     if (oac_decoder_ctl(0, OAC_RESET_STATE)         != OAC_INVALID_STATE)test_failed();
-    if (oac_decoder_init(0, 48000, 1)                 != OAC_INVALID_STATE)test_failed();
+    if (oac_decoder_init(0, 48000, 1, OAC_FORMAT_STANDARD)                 != OAC_INVALID_STATE)test_failed();
     if (oac_decode(0, packet, 1, outbuf, 2880, 0)        != OAC_INVALID_STATE)test_failed();
     if (oac_decode_float(0, packet, 1, 0, 2880, 0)       != OAC_INVALID_STATE)test_failed();
     if (oac_decoder_get_nb_samples(0, packet, 1)      != OAC_INVALID_STATE)test_failed();
@@ -579,14 +579,14 @@ oac_int32 test_msdec_api(void) {
     cfgs++;
     err = oac_multistream_decoder_ctl(dec, OAC_MULTISTREAM_GET_DECODER_STATE(1, &streamdec));
     if (err != OAC_OK || streamdec == NULL) test_failed();
-    VG_CHECK(streamdec, oac_decoder_get_size(1));
+    VG_CHECK(streamdec, oac_decoder_get_size(1, OAC_FORMAT_STANDARD));
     cfgs++;
     err = oac_multistream_decoder_ctl(dec, OAC_MULTISTREAM_GET_DECODER_STATE(2, &streamdec));
     if (err != OAC_BAD_ARG) test_failed();
     cfgs++;
     err = oac_multistream_decoder_ctl(dec, OAC_MULTISTREAM_GET_DECODER_STATE(0, &streamdec));
     if (err != OAC_OK || streamdec == NULL) test_failed();
-    VG_CHECK(streamdec, oac_decoder_get_size(1));
+    VG_CHECK(streamdec, oac_decoder_get_size(1, OAC_FORMAT_STANDARD));
     fprintf(stdout, "    OAC_MULTISTREAM_GET_DECODER_STATE ........... OK.\n");
     cfgs++;
 
@@ -1082,7 +1082,7 @@ oac_int32 test_enc_api(void) {
     fprintf(stdout, "\n  Encoder basic API tests\n");
     fprintf(stdout, "  ---------------------------------------------------\n");
     for (c = 0; c < 4; c++) {
-        i = oac_encoder_get_size(c);
+        i = oac_encoder_get_size(c, OAC_FORMAT_STANDARD);
         if (((c == 1 || c == 2) && (i <= 2048 || i > 1<<18)) || ((c != 1 && c != 2) && i != 0)) test_failed();
         fprintf(stdout, "    oac_encoder_get_size(%d)=%d ...............%s OK.\n", c, i, i > 0?"":"....");
         cfgs++;
@@ -1105,39 +1105,39 @@ oac_int32 test_enc_api(void) {
             }
             err = OAC_OK;
             VG_UNDEF(&err, sizeof(err));
-            enc = oac_encoder_create(fs, c, OAC_APPLICATION_VOIP, &err);
+            enc = oac_encoder_create(fs, c, OAC_FORMAT_STANDARD, OAC_APPLICATION_VOIP, &err);
             if (err != OAC_BAD_ARG || enc != NULL) test_failed();
             cfgs++;
-            enc = oac_encoder_create(fs, c, OAC_APPLICATION_VOIP, 0);
+            enc = oac_encoder_create(fs, c, OAC_FORMAT_STANDARD, OAC_APPLICATION_VOIP, 0);
             if (enc != NULL) test_failed();
             cfgs++;
             oac_encoder_destroy(enc);
-            enc = (OacEncoder*)malloc(oac_encoder_get_size(2));
+            enc = (OacEncoder*)malloc(oac_encoder_get_size(2, OAC_FORMAT_STANDARD));
             if (enc == NULL) test_failed();
-            err = oac_encoder_init(enc, fs, c, OAC_APPLICATION_VOIP);
+            err = oac_encoder_init(enc, fs, c, OAC_FORMAT_STANDARD, OAC_APPLICATION_VOIP);
             if (err != OAC_BAD_ARG) test_failed();
             cfgs++;
             free(enc);
         }
     }
 
-    enc = oac_encoder_create(48000, 2, OAC_AUTO, NULL);
+    enc = oac_encoder_create(48000, 2, OAC_FORMAT_STANDARD, OAC_AUTO, NULL);
     if (enc != NULL) test_failed();
     cfgs++;
 
     VG_UNDEF(&err, sizeof(err));
-    enc = oac_encoder_create(48000, 2, OAC_AUTO, &err);
+    enc = oac_encoder_create(48000, 2, OAC_FORMAT_STANDARD, OAC_AUTO, &err);
     if (err != OAC_BAD_ARG || enc != NULL) test_failed();
     cfgs++;
 
     VG_UNDEF(&err, sizeof(err));
-    enc = oac_encoder_create(48000, 2, OAC_APPLICATION_VOIP, NULL);
+    enc = oac_encoder_create(48000, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_VOIP, NULL);
     if (enc == NULL) test_failed();
     oac_encoder_destroy(enc);
     cfgs++;
 
     VG_UNDEF(&err, sizeof(err));
-    enc = oac_encoder_create(48000, 2, OAC_APPLICATION_RESTRICTED_LOWDELAY, &err);
+    enc = oac_encoder_create(48000, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_RESTRICTED_LOWDELAY, &err);
     if (err != OAC_OK || enc == NULL) test_failed();
     cfgs++;
     err = oac_encoder_ctl(enc, OAC_GET_LOOKAHEAD(&i));
@@ -1146,7 +1146,7 @@ oac_int32 test_enc_api(void) {
     oac_encoder_destroy(enc);
 
     VG_UNDEF(&err, sizeof(err));
-    enc = oac_encoder_create(48000, 2, OAC_APPLICATION_AUDIO, &err);
+    enc = oac_encoder_create(48000, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
     if (err != OAC_OK || enc == NULL) test_failed();
     cfgs++;
     err = oac_encoder_ctl(enc, OAC_GET_LOOKAHEAD(&i));
@@ -1155,7 +1155,7 @@ oac_int32 test_enc_api(void) {
     cfgs++;
 
     VG_UNDEF(&err, sizeof(err));
-    enc = oac_encoder_create(48000, 2, OAC_APPLICATION_VOIP, &err);
+    enc = oac_encoder_create(48000, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_VOIP, &err);
     if (err != OAC_OK || enc == NULL) test_failed();
     cfgs++;
 
@@ -1432,7 +1432,7 @@ oac_int32 test_enc_api(void) {
 #if 0
     /*These tests are disabled because the library crashes with null states*/
     if (oac_encoder_ctl(0, OAC_RESET_STATE)               != OAC_INVALID_STATE)test_failed();
-    if (oac_encoder_init(0, 48000, 1, OAC_APPLICATION_VOIP) != OAC_INVALID_STATE) test_failed();
+    if (oac_encoder_init(0, 48000, 1, OAC_FORMAT_STANDARD, OAC_APPLICATION_VOIP) != OAC_INVALID_STATE) test_failed();
     if (oac_encode(0, sbuf, 960, packet, sizeof(packet))      != OAC_INVALID_STATE)test_failed();
     if (oac_encode_float(0, fbuf, 960, packet, sizeof(packet)) != OAC_INVALID_STATE) test_failed();
 #endif
@@ -1795,7 +1795,7 @@ for (useerr = 0; useerr < 2; useerr++) {
             if (useerr) {
                 VG_UNDEF(&err, sizeof(err));
             }
-            dec = oac_decoder_create(oac_rates[rate], c, ep);
+            dec = oac_decoder_create(oac_rates[rate], c, OAC_FORMAT_STANDARD, ep);
             if (dec != NULL || (useerr && err != OAC_ALLOC_FAIL)) {
                 __malloc_hook = orig_malloc;
                 test_failed();
@@ -1811,7 +1811,7 @@ for (useerr = 0; useerr < 2; useerr++) {
                 if (useerr) {
                     VG_UNDEF(&err, sizeof(err));
                 }
-                enc = oac_encoder_create(oac_rates[rate], c, oac_apps[app], ep);
+                enc = oac_encoder_create(oac_rates[rate], c, OAC_FORMAT_STANDARD, oac_apps[app], ep);
                 if (enc != NULL || (useerr && err != OAC_ALLOC_FAIL)) {
                     __malloc_hook = orig_malloc;
                     test_failed();

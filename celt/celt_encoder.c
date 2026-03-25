@@ -64,6 +64,7 @@ struct OacCustomEncoder {
     const OacCustomMode *mode;    /**< Mode used by the encoder */
     int channels;
     int stream_channels;
+    int format;                   /**< OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS */
 
     int force_intra;
     int clip;
@@ -108,8 +109,8 @@ struct OacCustomEncoder {
     AnalysisInfo analysis;
     SILKInfo silk_info;
 
-    oac_val32 preemph_memE[2];
-    oac_val32 preemph_memD[2];
+    oac_val32 preemph_memE[OAC_MAX_CHANNELS];
+    oac_val32 preemph_memD[OAC_MAX_CHANNELS];
 
     /* VBR-related parameters */
     oac_int32 vbr_reservoir;
@@ -125,10 +126,10 @@ struct OacCustomEncoder {
 #ifdef RESYNTH
 # ifdef ENABLE_QEXT
     /* +MAX_PERIOD/2 to make space for overlap */
-    celt_sig syn_mem[2][2*DEC_PITCH_BUF_SIZE + MAX_PERIOD];
+    celt_sig syn_mem[OAC_MAX_CHANNELS][2*DEC_PITCH_BUF_SIZE + MAX_PERIOD];
 # else
     /* +MAX_PERIOD/2 to make space for overlap */
-    celt_sig syn_mem[2][DEC_PITCH_BUF_SIZE + MAX_PERIOD/2];
+    celt_sig syn_mem[OAC_MAX_CHANNELS][DEC_PITCH_BUF_SIZE + MAX_PERIOD/2];
 # endif
 #endif
 
@@ -185,7 +186,7 @@ CELTEncoder *oac_custom_encoder_create(const CELTMode *mode, int channels, int *
 
 static int oac_custom_encoder_init_arch(CELTEncoder *st, const CELTMode *mode,
                                         int channels, int arch) {
-    if (channels < 0 || channels > 2)
+    if (channels < 0 || channels > OAC_MAX_CHANNELS)
         return OAC_BAD_ARG;
 
     if (st == NULL || mode == NULL)
@@ -228,13 +229,16 @@ int oac_custom_encoder_init(CELTEncoder *st, const CELTMode *mode, int channels)
 #endif
 
 int oaci_celt_encoder_init(CELTEncoder *st, oac_int32 sampling_rate, int channels,
-                      int arch) {
+                      int arch, int format) {
     int ret;
 #ifdef ENABLE_QEXT
     if (sampling_rate == 96000) {
         st->upsample = 1;
-        return oac_custom_encoder_init_arch(st,
+        ret = oac_custom_encoder_init_arch(st,
               oac_custom_mode_create(96000, 1920, NULL), channels, arch);
+        if (ret == OAC_OK)
+            st->format = format;
+        return ret;
     }
 #endif
     ret = oac_custom_encoder_init_arch(st,
@@ -242,6 +246,7 @@ int oaci_celt_encoder_init(CELTEncoder *st, oac_int32 sampling_rate, int channel
     if (ret != OAC_OK)
         return ret;
     st->upsample = oaci_resampling_factor(sampling_rate);
+    st->format = format;
     return OAC_OK;
 }
 
@@ -806,12 +811,15 @@ static int oaci_alloc_trim_analysis(const CELTMode *m, const celt_norm *X,
     int trim_index;
     oac_val16 trim = QCONST16(5.f, 8);
     oac_val16 logXC, logXC2;
+    oac_int32 trim_rate;
     /* At low bitrate, reducing the trim seems to help. At higher bitrates, it's less
        clear what's best, so we're keeping it as it was before, at least for now. */
-    if (equiv_rate < 64000) {
+    /* For C>2, we assume multi-mono processing for the time being */
+    trim_rate = C > 2 ? equiv_rate / C : equiv_rate;
+    if (trim_rate < 64000) {
         trim = QCONST16(4.f, 8);
-    } else if (equiv_rate < 80000) {
-        oac_int32 frac = (equiv_rate - 64000)>>10;
+    } else if (trim_rate < 80000) {
+        oac_int32 frac = (trim_rate - 64000)>>10;
         trim = QCONST16(4.f, 8) + QCONST16(1.f/16.f, 8)*frac;
     }
     if (C == 2) {
@@ -1319,7 +1327,7 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
                          int qext_scale) {
     int c;
     VARDECL(celt_sig, _pre);
-    celt_sig *pre[2];
+    celt_sig *pre[OAC_MAX_CHANNELS];
     const CELTMode *mode;
     int pitch_index;
     oac_val16 gain1;
@@ -1328,7 +1336,7 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
     int qg;
     int overlap;
     int min_period, max_period;
-    oac_val32 before[2] = {0}, after[2] = {0};
+    oac_val32 before[OAC_MAX_CHANNELS] = {0}, after[OAC_MAX_CHANNELS] = {0};
     int cancel_pitch = 0;
     SAVE_STACK;
 
@@ -1342,8 +1350,9 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
     overlap = mode->overlap;
     ALLOC(_pre, CC*(N + max_period), celt_sig);
 
-    pre[0] = _pre;
-    pre[1] = _pre + (N + max_period);
+    c = 0; do {
+        pre[c] = _pre + c*(N + max_period);
+    } while (++c < CC);
 
 
     c = 0; do {
@@ -1379,7 +1388,7 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
         VARDECL(oac_val16, pitch_buf);
         ALLOC(pitch_buf, (max_period + N)>>1, oac_val16);
 
-        oaci_pitch_downsample(pre, pitch_buf, (max_period + N)>>1, CC, 2, st->arch);
+        oaci_pitch_downsample(pre, pitch_buf, (max_period + N)>>1, st->format == OAC_FORMAT_AMBISONICS ? 1 : CC, 2, st->arch);
         /* Don't search for the fir last 1.5 octave of the range because
            there's too many false-positives due to short-term correlation */
         oaci_pitch_search(pitch_buf + (max_period>>1), pitch_buf, N,
@@ -1481,6 +1490,14 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
         if (after[0] - before[0] > thresh[0] || after[1] - before[1] > thresh[1]) cancel_pitch = 1;
         /* Use the filter only if at least one channel gets significantly better. */
         if (before[0] - after[0] <  thresh[0] && before[1] - after[1] < thresh[1])cancel_pitch = 1;
+    } else if (st->format == OAC_FORMAT_AMBISONICS) {
+        /* For ambisonics, sum before/after across all channels and cancel if total got worse. */
+        oac_val32 total_before = 0, total_after = 0;
+        c = 0; do {
+            total_before += before[c];
+            total_after += after[c];
+        } while (++c < CC);
+        if (total_after > total_before) cancel_pitch = 1;
     } else {
         /* Check that the mono channel actually got better. */
         if (after[0] > before[0]) cancel_pitch = 1;
@@ -1899,7 +1916,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
 
         prefilter_tapset = st->tapset_decision;
         pf_on = oaci_run_prefilter(st, in, prefilter_mem, CC, N, prefilter_tapset, &pitch_index, &gain1, &qg, enabled,
-        st->complexity, tf_estimate, nbAvailableBytes, &st->analysis, tone_freq, toneishness, qext_scale);
+            st->complexity, tf_estimate, nbAvailableBytes, &st->analysis, tone_freq, toneishness, qext_scale);
         if ((gain1 > QCONST16(.4f, 15) || st->prefilter_gain > QCONST16(.4f,
         15)) && (!st->analysis.valid || st->analysis.tonality > .3)
             && (pitch_index > 1.26*st->prefilter_period || pitch_index < .79*st->prefilter_period))
@@ -2292,6 +2309,11 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
            st->stereo_saving, tot_boost, tf_estimate, pitch_change, maxDepth,
            st->lfe, st->energy_mask != NULL, surround_masking,
            temporal_vbr);
+            /* oaci_compute_vbr was calibrated for mono/stereo (coded_bins includes
+               at most 2 channels). For C>2, scale the VBR adjustment down so that
+               it remains proportional to a per-channel budget. */
+            if (C > 2)
+                target = base_target + (target - base_target) / C;
         } else {
             target = base_target;
             /* Tonal frames (offset<100) need more bits than noisy (offset>100) ones. */
@@ -2355,6 +2377,8 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
             /*printf ("+%d\n", adjust);*/
         }
         nbCompressedBytes = IMIN(nbCompressedBytes, nbAvailableBytes);
+        /*if (C > 2) printf("VBR: vbr_rate=%d base_target=%d target_from_vbr=%d tell=%d nbAvailableBytes=%d nbCompressedBytes=%d constrained=%d reservoir=%d\n",
+            (int)vbr_rate, (int)base_target, (int)(target-tell), (int)tell, nbAvailableBytes, nbCompressedBytes, st->constrained_vbr, (int)st->vbr_reservoir);*/
         /*printf("%d\n", nbCompressedBytes*50*8);*/
         /* This moves the raw bits to take into account the new compressed size */
         oaci_ec_enc_shrink(enc, nbCompressedBytes);
@@ -2396,12 +2420,12 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     else
         st->lastCodedBands = codedBands;
 
+    /* Allocate collapse_masks here so it's visible in RESYNTH block */
+    ALLOC(collapse_masks, C*nbEBands, unsigned char);
     oaci_quant_fine_energy(mode, start, end, oldBandE, error, NULL, fine_quant, enc, C);
     OAC_CLEAR(energyError, nbEBands*CC);
 
-    /* Residual quantisation */
-    ALLOC(collapse_masks, C*nbEBands, unsigned char);
-    oaci_quant_all_bands(1, mode, start, end, X, C == 2 ? X + N : NULL, collapse_masks,
+    oaci_quant_all_bands(1, mode, start, end, X, C, collapse_masks,
          bandE, pulses, shortBlocks, st->spread_decision,
          dual_stereo, st->intensity, tf_res, nbCompressedBytes*(8<<BITRES) - anti_collapse_rsv,
          balance, enc, LM, codedBands, &st->rng, st->complexity, st->arch, st->disable_inv);
@@ -2414,7 +2438,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
         oaci_ec_enc_bits(enc, anti_collapse_on, 1);
     }
     oaci_quant_energy_finalise(mode, start, end, oldBandE, error, fine_quant, fine_priority,
-    nbCompressedBytes*8 - oaci_ec_tell(enc), enc, C);
+        nbCompressedBytes*8 - oaci_ec_tell(enc), enc, C);
     c = 0;
     do {
         for (i = start; i < end; i++) {
@@ -2430,7 +2454,8 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
 #ifdef RESYNTH
     /* Re-synthesis of the coded audio if required */
     {
-        celt_sig *out_mem[2];
+        VARDECL(celt_sig*, out_mem);
+        ALLOC(out_mem, CC, celt_sig*);
 
         if (anti_collapse_on) {
             oaci_anti_collapse(mode, X, collapse_masks, LM, C, N,
@@ -2438,7 +2463,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
         }
 
         c = 0; do {
-            OAC_MOVE(st->syn_mem[c], st->syn_mem[c] + N, QEXT_SCALE(DEC_PITCH_BUF_SIZE) - N + overlap/2);
+            OAC_MOVE(st->syn_mem[c], st->syn_mem[c] + N, QEXT_SCALE(DEC_PITCH_BUF_SIZE) - N + overlap);
         } while (++c < CC);
 
         c = 0; do {
@@ -2694,7 +2719,7 @@ int oac_custom_encoder_ctl(CELTEncoder * OAC_RESTRICT st, int request, ...) {
         case CELT_SET_CHANNELS_REQUEST:
         {
             oac_int32 value = va_arg(ap, oac_int32);
-            if (value < 1 || value > 2)
+            if (value < 1 || value > st->channels)
                 goto bad_arg;
             st->stream_channels = value;
         }

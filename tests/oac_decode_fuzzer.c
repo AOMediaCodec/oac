@@ -78,7 +78,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     /* Create decoder based on info from the first ToC available */
     ParseToc(&data[SETUP_BYTE_COUNT], &toc);
 
-    dec = oac_decoder_create(toc.fs, toc.channels, &err);
+    dec = oac_decoder_create(toc.fs, toc.channels, OAC_FORMAT_STANDARD, &err);
     if (err != OAC_OK || dec == NULL) {
         return 0;
     }

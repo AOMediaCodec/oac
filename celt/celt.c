@@ -313,10 +313,12 @@ const signed char oaci_tf_select_table[4][8] = {
 
 void oaci_init_caps(const CELTMode *m, int *cap, int LM, int C) {
     int i;
+    /* Use mono cap table for C > 2 since channels are coded independently */
+    int C_cap = C == 2 ? 2 : 1;
     for (i = 0; i < m->nbEBands; i++) {
         int N;
         N = (m->eBands[i + 1] - m->eBands[i])<<LM;
-        cap[i] = (m->cache.caps[m->nbEBands*(2*LM + C - 1) + i] + 64)*C*N>>2;
+        cap[i] = (m->cache.caps[m->nbEBands*(2*LM + C_cap - 1) + i] + 64)*C*N>>2;
     }
 }
 

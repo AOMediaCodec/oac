@@ -72,8 +72,8 @@ static oac_val32 *oaci_ms_get_preemph_mem(OacMSEncoder *st) {
     char *ptr;
     int coupled_size, mono_size;
 
-    coupled_size = oac_encoder_init(NULL, st->Fs, 2, st->application);
-    mono_size = oac_encoder_init(NULL, st->Fs, 1, st->application);
+    coupled_size = oac_encoder_init(NULL, st->Fs, 2, OAC_FORMAT_STANDARD, st->application);
+    mono_size = oac_encoder_init(NULL, st->Fs, 1, OAC_FORMAT_STANDARD, st->application);
     ptr = (char*)st + oaci_align(sizeof(OacMSEncoder));
     for (s = 0; s < st->layout.nb_streams; s++) {
         if (s < st->layout.nb_coupled_streams)
@@ -90,8 +90,8 @@ static oac_val32 *oaci_ms_get_window_mem(OacMSEncoder *st) {
     char *ptr;
     int coupled_size, mono_size;
 
-    coupled_size = oac_encoder_init(NULL, st->Fs, 2, st->application);
-    mono_size = oac_encoder_init(NULL, st->Fs, 1, st->application);
+    coupled_size = oac_encoder_init(NULL, st->Fs, 2, OAC_FORMAT_STANDARD, st->application);
+    mono_size = oac_encoder_init(NULL, st->Fs, 1, OAC_FORMAT_STANDARD, st->application);
     ptr = (char*)st + oaci_align(sizeof(OacMSEncoder));
     for (s = 0; s < st->layout.nb_streams; s++) {
         if (s < st->layout.nb_coupled_streams)
@@ -358,8 +358,8 @@ oac_int32 oac_multistream_encoder_get_size(int nb_streams, int nb_coupled_stream
     int mono_size;
 
     if (nb_streams < 1 || nb_coupled_streams > nb_streams || nb_coupled_streams < 0) return 0;
-    coupled_size = oac_encoder_get_size(2);
-    mono_size = oac_encoder_get_size(1);
+    coupled_size = oac_encoder_get_size(2, OAC_FORMAT_STANDARD);
+    mono_size = oac_encoder_get_size(1, OAC_FORMAT_STANDARD);
     return oaci_align(sizeof(OacMSEncoder))
            + nb_coupled_streams*oaci_align(coupled_size)
            + (nb_streams - nb_coupled_streams)*oaci_align(mono_size);
@@ -416,10 +416,10 @@ static int oac_multistream_encoder_init_impl(
         || (streams + coupled_streams > channels))
         return OAC_BAD_ARG;
 
-    coupled_size = oac_encoder_init(NULL, Fs, 2, application);
+    coupled_size = oac_encoder_init(NULL, Fs, 2, OAC_FORMAT_STANDARD, application);
     if (coupled_size < 0)
         return coupled_size;
-    mono_size = oac_encoder_init(NULL, Fs, 1, application);
+    mono_size = oac_encoder_init(NULL, Fs, 1, OAC_FORMAT_STANDARD, application);
     if (mono_size < 0)
         return mono_size;
     if (st == NULL) {
@@ -453,14 +453,14 @@ static int oac_multistream_encoder_init_impl(
         return OAC_BAD_ARG;
     ptr = (char*)st + oaci_align(sizeof(OacMSEncoder));
     for (i = 0; i < st->layout.nb_coupled_streams; i++) {
-        ret = oac_encoder_init((OacEncoder*)ptr, Fs, 2, application);
+        ret = oac_encoder_init((OacEncoder*)ptr, Fs, 2, OAC_FORMAT_STANDARD, application);
         if (ret != OAC_OK) return ret;
         if (i == st->lfe_stream)
             oac_encoder_ctl((OacEncoder*)ptr, OAC_SET_LFE(1));
         ptr += oaci_align(coupled_size);
     }
     for (; i < st->layout.nb_streams; i++) {
-        ret = oac_encoder_init((OacEncoder*)ptr, Fs, 1, application);
+        ret = oac_encoder_init((OacEncoder*)ptr, Fs, 1, OAC_FORMAT_STANDARD, application);
         if (ret != OAC_OK) return ret;
         if (i == st->lfe_stream)
             oac_encoder_ctl((OacEncoder*)ptr, OAC_SET_LFE(1));
@@ -817,8 +817,8 @@ int oac_multistream_encode_native
         return OAC_BUFFER_TOO_SMALL;
     }
     ALLOC(buf, 2*frame_size, oac_res);
-    coupled_size = oac_encoder_init(NULL, st->Fs, 2, st->application);
-    mono_size = oac_encoder_init(NULL, st->Fs, 1, st->application);
+    coupled_size = oac_encoder_init(NULL, st->Fs, 2, OAC_FORMAT_STANDARD, st->application);
+    mono_size = oac_encoder_init(NULL, st->Fs, 1, OAC_FORMAT_STANDARD, st->application);
 
     ALLOC(bandSMR, 21*st->layout.nb_channels, celt_glog);
     if (st->mapping_type == MAPPING_TYPE_SURROUND && st->application != OAC_APPLICATION_RESTRICTED_SILK) {
@@ -1041,8 +1041,8 @@ int oac_multistream_encoder_ctl_va_list(OacMSEncoder *st, int request,
     char *ptr;
     int ret = OAC_OK;
 
-    coupled_size = oac_encoder_init(NULL, st->Fs, 2, st->application);
-    mono_size = oac_encoder_init(NULL, st->Fs, 1, st->application);
+    coupled_size = oac_encoder_init(NULL, st->Fs, 2, OAC_FORMAT_STANDARD, st->application);
+    mono_size = oac_encoder_init(NULL, st->Fs, 1, OAC_FORMAT_STANDARD, st->application);
     ptr = (char*)st + oaci_align(sizeof(OacMSEncoder));
     switch (request) {
         case OAC_SET_BITRATE_REQUEST:

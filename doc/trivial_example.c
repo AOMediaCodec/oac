@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
     }
 
     /*Create a new encoder state */
-    encoder = oac_encoder_create(SAMPLE_RATE, CHANNELS, APPLICATION, &err);
+    encoder = oac_encoder_create(SAMPLE_RATE, CHANNELS, OAC_FORMAT_STANDARD, APPLICATION, &err);
     if (err < 0) {
         fprintf(stderr, "failed to create an encoder: %s\n", oac_strerror(err));
         return EXIT_FAILURE;
@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
 
 
     /* Create a new decoder state. */
-    decoder = oac_decoder_create(SAMPLE_RATE, CHANNELS, &err);
+    decoder = oac_decoder_create(SAMPLE_RATE, CHANNELS, OAC_FORMAT_STANDARD, &err);
     if (err < 0) {
         fprintf(stderr, "failed to create decoder: %s\n", oac_strerror(err));
         return EXIT_FAILURE;

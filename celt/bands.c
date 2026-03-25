@@ -1369,7 +1369,7 @@ static void oaci_special_hybrid_folding(const CELTMode *m, celt_norm *norm, celt
         OAC_COPY(&norm2[n1], &norm2[2*n1 - n2], n2 - n1);
 }
 
-void oaci_quant_all_bands(int encode, const CELTMode *m, int start, int end,
+static void quant_all_bands_twoch(int encode, const CELTMode *m, int start, int end,
                      celt_norm *X_, celt_norm *Y_, unsigned char *collapse_masks,
                      const celt_ener *bandE, int *pulses, int shortBlocks, int spread,
                      int dual_stereo, int intensity, int *tf_res, oac_int32 total_bits,
@@ -1628,4 +1628,168 @@ void oaci_quant_all_bands(int encode, const CELTMode *m, int start, int end,
     *seed = ctx.seed;
 
     RESTORE_STACK;
+}
+/* Multi-channel multi-mono: each channel encoded independently per band.
+   collapse_masks are stored interleaved as [band*C + channel] so that
+   oaci_anti_collapse can read them correctly. */
+static void quant_all_bands_multi(int encode, const CELTMode *m, int start, int end,
+                     celt_norm *X_, int C, unsigned char *collapse_masks,
+                     const celt_ener *bandE, int *pulses, int shortBlocks, int spread,
+                     int *tf_res, oac_int32 total_bits,
+                     oac_int32 balance, ec_ctx *ec, int LM, int codedBands,
+                     oac_uint32 *seed, int arch, int disable_inv) {
+    int i, c;
+    oac_int32 remaining_bits;
+    const oac_int16 * OAC_RESTRICT eBands = m->eBands;
+    int B;
+    int M;
+    int frame_size;
+    int norm_offset;
+    int norm_size;
+    int lowband_offset;
+    int update_lowband = 1;
+    int resynth_alloc;
+    struct band_ctx ctx;
+    VARDECL(celt_norm, _norm);
+    VARDECL(celt_norm, _lowband_scratch);
+#ifdef RESYNTH
+    int resynth = 1;
+#else
+    int resynth = !encode;
+#endif
+    SAVE_STACK;
+    M = 1<<LM;
+    B = shortBlocks ? M : 1;
+    frame_size = M*m->shortMdctSize;
+    norm_offset = M*eBands[start];
+    norm_size = M*eBands[m->nbEBands - 1] - norm_offset;
+    /* One norm array per channel for spectral folding */
+    ALLOC(_norm, C*norm_size, celt_norm);
+    if (encode && resynth)
+        resynth_alloc = M*(eBands[m->nbEBands] - eBands[m->nbEBands - 1]);
+    else
+        resynth_alloc = ALLOC_NONE;
+    ALLOC(_lowband_scratch, resynth_alloc, celt_norm);
+    ctx.ec = ec;
+    ctx.encode = encode;
+    ctx.intensity = 0;
+    ctx.m = m;
+    ctx.seed = *seed;
+    ctx.spread = spread;
+    ctx.arch = arch;
+    ctx.disable_inv = disable_inv;
+    ctx.resynth = resynth;
+    ctx.theta_round = 0;
+    ctx.avoid_split_noise = B > 1;
+    lowband_offset = 0;
+    for (i = start; i < end; i++) {
+        oac_int32 tell;
+        int b;
+        int band_N;
+        oac_int32 curr_balance;
+        int effective_lowband = -1;
+        int tf_change;
+        int last = (i == end - 1);
+        ctx.i = i;
+        band_N = M*eBands[i + 1] - M*eBands[i];
+        celt_assert(band_N > 0);
+        tell = oaci_ec_tell_frac(ec);
+        if (i != start)
+            balance -= tell;
+        remaining_bits = total_bits - tell;
+        if (i <= codedBands - 1) {
+            curr_balance = oaci_celt_sudiv(balance, IMIN(3, codedBands - i));
+            b = IMAX(0, IMIN(16383, IMIN(remaining_bits, pulses[i] + curr_balance)));
+        } else {
+            b = 0;
+        }
+        /* Update lowband offset for spectral folding */
+        if (resynth && (M*eBands[i] - band_N >= M*eBands[start] || i == start + 1)
+            && (update_lowband || lowband_offset == 0))
+            lowband_offset = i;
+        /* Handle hybrid mode band boundary */
+        if (i == start + 1) {
+            int n1 = M*(eBands[start + 1] - eBands[start]);
+            int n2 = M*(eBands[start + 2] - eBands[start + 1]);
+            for (c = 0; c < C; c++) {
+                celt_norm *norm_c = _norm + c*norm_size;
+                OAC_COPY(&norm_c[n1], &norm_c[2*n1 - n2], n2 - n1);
+            }
+        }
+        tf_change = tf_res[i];
+        ctx.tf_change = tf_change;
+        /* Encode each channel independently for this band */
+        {
+            oac_int32 remaining_per_chan = remaining_bits / C;
+            for (c = 0; c < C; c++) {
+                celt_norm *X_c;
+                celt_norm *norm_c = _norm + c*norm_size;
+                celt_norm *lowband_ptr = NULL;
+                celt_norm *lowband_out;
+                celt_norm *lb_scratch;
+                unsigned x_cm;
+                int chan_b = b / C;
+                /* Each channel's PVQ budget cap: current tell + per-channel share */
+                ctx.total_bits = oaci_ec_tell_frac(ec) + remaining_per_chan;
+                ctx.bandE = bandE + c*m->nbEBands;
+            X_c = X_ + c*frame_size + M*eBands[i];
+            lowband_out = last ? NULL : norm_c + M*eBands[i] - norm_offset;
+            /* Setup lowband for folding */
+            if (lowband_offset != 0 && (spread != SPREAD_AGGRESSIVE || B > 1 || tf_change < 0)) {
+                int fold_start, fold_end, fold_i;
+                effective_lowband = IMAX(0, M*eBands[lowband_offset] - norm_offset - band_N);
+                fold_start = lowband_offset;
+                while (M*eBands[--fold_start] > effective_lowband + norm_offset) ;
+                fold_end = lowband_offset - 1;
+                while (++fold_end < i && M*eBands[fold_end] < effective_lowband + norm_offset + band_N) ;
+                x_cm = 0;
+                fold_i = fold_start; do {
+                    x_cm |= collapse_masks[fold_i*C + c];
+                } while (++fold_i < fold_end);
+                lowband_ptr = norm_c + effective_lowband;
+            } else {
+                x_cm = (1<<B) - 1;
+            }
+            if (i >= m->effEBands) {
+                X_c = norm_c;
+                lb_scratch = NULL;
+            } else if (encode && resynth) {
+                lb_scratch = _lowband_scratch;
+            } else {
+                lb_scratch = X_ + c*frame_size + M*eBands[m->effEBands - 1];
+            }
+            if (last)
+                lb_scratch = NULL;
+            x_cm = oaci_quant_band(&ctx, X_c, band_N, chan_b, B,
+                lowband_ptr, LM, lowband_out, Q31ONE, lb_scratch, x_cm);
+            collapse_masks[i*C + c] = (unsigned char)x_cm;
+            }
+        }
+        balance += pulses[i] + tell;
+        update_lowband = b > (band_N<<BITRES);
+        ctx.avoid_split_noise = 0;
+    }
+    *seed = ctx.seed;
+    RESTORE_STACK;
+}
+void oaci_quant_all_bands(int encode, const CELTMode *m, int start, int end,
+                     celt_norm *X_, int C, unsigned char *collapse_masks,
+                     const celt_ener *bandE, int *pulses, int shortBlocks, int spread,
+                     int dual_stereo, int intensity, int *tf_res, oac_int32 total_bits,
+                     oac_int32 balance, ec_ctx *ec, int LM, int codedBands,
+                     oac_uint32 *seed, int complexity, int arch, int disable_inv) {
+    if (C <= 2) {
+        int M = 1<<LM;
+        int frame_size = M*m->shortMdctSize;
+        celt_norm *Y_ = (C == 2) ? X_ + frame_size : NULL;
+        quant_all_bands_twoch(encode, m, start, end, X_, Y_, collapse_masks,
+            bandE, pulses, shortBlocks, spread, dual_stereo, intensity,
+            tf_res, total_bits, balance, ec, LM, codedBands,
+            seed, complexity, arch, disable_inv);
+    } else {
+        quant_all_bands_multi(encode, m, start, end, X_, C, collapse_masks,
+            bandE, pulses, shortBlocks, spread,
+            tf_res, total_bits, balance, ec, LM, codedBands,
+            seed, arch, disable_inv);
+    }
 }

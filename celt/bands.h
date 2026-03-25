@@ -86,15 +86,15 @@ void oaci_haar1(celt_norm *X, int N0, int stride);
  * @param m Mode data
  * @param start First band to process
  * @param end Last band to process + 1
- * @param X Residual (normalised)
- * @param Y Residual (normalised) for second channel (or NULL for mono)
- * @param collapse_masks Anti-collapse tracking mask
- * @param bandE Square root of the energy for each band
+ * @param X Residual (normalised), all C channels contiguous (channel stride = M*shortMdctSize)
+ * @param C Number of channels
+ * @param collapse_masks Anti-collapse tracking mask (C*nbEBands, interleaved as [band*C + channel])
+ * @param bandE Square root of the energy for each band (C*nbEBands, stride nbEBands per channel)
  * @param pulses Bit allocation (per band) for PVQ
  * @param shortBlocks Zero for long blocks, non-zero for short blocks
  * @param spread Amount of spreading to use
- * @param dual_stereo Zero for MS stereo, non-zero for dual stereo
- * @param intensity First band to use intensity stereo
+ * @param dual_stereo Zero for MS stereo, non-zero for dual stereo (C<=2 only)
+ * @param intensity First band to use intensity stereo (C<=2 only)
  * @param tf_res Time-frequency resolution change
  * @param total_bits Total number of bits that can be used for the frame (including the ones already spent)
  * @param balance Number of unallocated bits
@@ -105,7 +105,7 @@ void oaci_haar1(celt_norm *X, int N0, int stride);
  * @param arch Run-time architecture (see oac_select_arch())
  */
 void oaci_quant_all_bands(int encode, const CELTMode *m, int start, int end,
-    celt_norm * X, celt_norm * Y, unsigned char *collapse_masks,
+    celt_norm * X, int C, unsigned char *collapse_masks,
     const celt_ener *bandE, int *pulses, int shortBlocks, int spread,
     int dual_stereo, int intensity, int *tf_res, oac_int32 total_bits,
     oac_int32 balance, ec_ctx *ec, int M, int codedBands, oac_uint32 *seed,

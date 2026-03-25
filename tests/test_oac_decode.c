@@ -77,23 +77,23 @@ int test_decoder_code0(int no_fuzz) {
         int fs = fsv[t>>1];
         int c = (t&1) + 1;
         err = OAC_INTERNAL_ERROR;
-        dec[t] = oac_decoder_create(fs, c, &err);
+        dec[t] = oac_decoder_create(fs, c, OAC_FORMAT_STANDARD, &err);
         if (err != OAC_OK || dec[t] == NULL) test_failed();
         fprintf(stdout, "    oac_decoder_create(%5d,%d) OK. Copy ", fs, c);
         {
             OacDecoder *dec2;
             /*The oac state structures contain no pointers and can be freely copied*/
-            dec2 = (OacDecoder *)malloc(oac_decoder_get_size(c));
+            dec2 = (OacDecoder *)malloc(oac_decoder_get_size(c, OAC_FORMAT_STANDARD));
             if (dec2 == NULL) test_failed();
-            memcpy(dec2, dec[t], oac_decoder_get_size(c));
-            memset(dec[t], 255, oac_decoder_get_size(c));
+            memcpy(dec2, dec[t], oac_decoder_get_size(c, OAC_FORMAT_STANDARD));
+            memset(dec[t], 255, oac_decoder_get_size(c, OAC_FORMAT_STANDARD));
             oac_decoder_destroy(dec[t]);
             printf("OK.\n");
             dec[t] = dec2;
         }
     }
 
-    decsize = oac_decoder_get_size(1);
+    decsize = oac_decoder_get_size(1, OAC_FORMAT_STANDARD);
     decbak = (OacDecoder *)malloc(decsize);
     if (decbak == NULL) test_failed();
 

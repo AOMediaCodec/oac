@@ -232,10 +232,10 @@ void fuzz_encoder_settings(const int num_encoders, const int num_setting_changes
         int num_channels = RAND_SAMPLE(channels);
         int application = RAND_SAMPLE(applications);
 
-        dec = oac_decoder_create(sampling_rate, num_channels, &err);
+        dec = oac_decoder_create(sampling_rate, num_channels, OAC_FORMAT_STANDARD, &err);
         if (err != OAC_OK || dec == NULL) test_failed();
 
-        enc = oac_encoder_create(sampling_rate, num_channels, application, &err);
+        enc = oac_encoder_create(sampling_rate, num_channels, OAC_FORMAT_STANDARD, application, &err);
         if (err != OAC_OK || enc == NULL) test_failed();
 
         for (j = 0; j < num_setting_changes; j++) {
@@ -319,7 +319,7 @@ int run_test1(int no_fuzz) {
     fprintf(stdout, "  Encode+Decode tests.\n");
     fflush(stdout);
 
-    enc = oac_encoder_create(48000, 2, OAC_APPLICATION_VOIP, &err);
+    enc = oac_encoder_create(48000, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_VOIP, &err);
     if (err != OAC_OK || enc == NULL) test_failed();
 
     for (i = 0; i < 2; i++) {
@@ -361,7 +361,7 @@ int run_test1(int no_fuzz) {
         OAC_MULTISTREAM_GET_ENCODER_STATE(2, &tmp_enc)) != OAC_BAD_ARG) test_failed();
     }
 
-    dec = oac_decoder_create(48000, 2, &err);
+    dec = oac_decoder_create(48000, 2, OAC_FORMAT_STANDARD, &err);
     if (err != OAC_OK || dec == NULL) test_failed();
 
     MSdec = oac_multistream_decoder_create(48000, 2, 2, 0, mapping, &err);
@@ -370,25 +370,25 @@ int run_test1(int no_fuzz) {
     MSdec_err = oac_multistream_decoder_create(48000, 3, 2, 0, mapping, &err);
     if (err != OAC_OK || MSdec_err == NULL) test_failed();
 
-    dec_err[0] = (OacDecoder *)malloc(oac_decoder_get_size(2));
-    memcpy(dec_err[0], dec, oac_decoder_get_size(2));
-    dec_err[1] = oac_decoder_create(48000, 1, &err);
-    dec_err[2] = oac_decoder_create(24000, 2, &err);
-    dec_err[3] = oac_decoder_create(24000, 1, &err);
-    dec_err[4] = oac_decoder_create(16000, 2, &err);
-    dec_err[5] = oac_decoder_create(16000, 1, &err);
-    dec_err[6] = oac_decoder_create(12000, 2, &err);
-    dec_err[7] = oac_decoder_create(12000, 1, &err);
-    dec_err[8] = oac_decoder_create(8000, 2, &err);
-    dec_err[9] = oac_decoder_create(8000, 1, &err);
+    dec_err[0] = (OacDecoder *)malloc(oac_decoder_get_size(2, OAC_FORMAT_STANDARD));
+    memcpy(dec_err[0], dec, oac_decoder_get_size(2, OAC_FORMAT_STANDARD));
+    dec_err[1] = oac_decoder_create(48000, 1, OAC_FORMAT_STANDARD, &err);
+    dec_err[2] = oac_decoder_create(24000, 2, OAC_FORMAT_STANDARD, &err);
+    dec_err[3] = oac_decoder_create(24000, 1, OAC_FORMAT_STANDARD, &err);
+    dec_err[4] = oac_decoder_create(16000, 2, OAC_FORMAT_STANDARD, &err);
+    dec_err[5] = oac_decoder_create(16000, 1, OAC_FORMAT_STANDARD, &err);
+    dec_err[6] = oac_decoder_create(12000, 2, OAC_FORMAT_STANDARD, &err);
+    dec_err[7] = oac_decoder_create(12000, 1, OAC_FORMAT_STANDARD, &err);
+    dec_err[8] = oac_decoder_create(8000, 2, OAC_FORMAT_STANDARD, &err);
+    dec_err[9] = oac_decoder_create(8000, 1, OAC_FORMAT_STANDARD, &err);
     for (i = 0; i < 10; i++) if (dec_err[i] == NULL) test_failed();
 
     {
         OacEncoder *enccpy;
         /*The oac state structures contain no pointers and can be freely copied*/
-        enccpy = (OacEncoder *)malloc(oac_encoder_get_size(2));
-        memcpy(enccpy, enc, oac_encoder_get_size(2));
-        memset(enc, 255, oac_encoder_get_size(2));
+        enccpy = (OacEncoder *)malloc(oac_encoder_get_size(2, OAC_FORMAT_STANDARD));
+        memcpy(enccpy, enc, oac_encoder_get_size(2, OAC_FORMAT_STANDARD));
+        memset(enc, 255, oac_encoder_get_size(2, OAC_FORMAT_STANDARD));
         oac_encoder_destroy(enc);
         enc = enccpy;
     }

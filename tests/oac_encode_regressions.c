@@ -925,7 +925,7 @@ static int ec_enc_shrink_assert(void) {
     };
     static const short pcm3[2880] = { 0 };
 
-    enc = oac_encoder_create(48000, 1, OAC_APPLICATION_AUDIO, &err);
+    enc = oac_encoder_create(48000, 1, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
     oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
     oac_encoder_ctl(enc, OAC_SET_PACKET_LOSS_PERC(6));
     oac_encoder_ctl(enc, OAC_SET_BITRATE(6000));
@@ -955,7 +955,7 @@ static int ec_enc_shrink_assert2(void) {
     int data_len;
     unsigned char data[2000];
 
-    enc = oac_encoder_create(48000, 1, OAC_APPLICATION_AUDIO, &err);
+    enc = oac_encoder_create(48000, 1, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
     oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(6));
     oac_encoder_ctl(enc, OAC_SET_SIGNAL(OAC_SIGNAL_VOICE));
     oac_encoder_ctl(enc, OAC_SET_BANDWIDTH(OAC_BANDWIDTH_FULLBAND));
@@ -997,7 +997,7 @@ static int silk_gain_assert(void) {
         0, 0, 0, 0, 32767
     };
 
-    enc = oac_encoder_create(8000, 1, OAC_APPLICATION_AUDIO, &err);
+    enc = oac_encoder_create(8000, 1, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
     oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(3));
     oac_encoder_ctl(enc, OAC_SET_MAX_BANDWIDTH(OAC_BANDWIDTH_NARROWBAND));
     oac_encoder_ctl(enc, OAC_SET_BITRATE(6000));
@@ -1023,7 +1023,7 @@ int analysis_overflow(void) {
     int data_len;
     static const float pcm[320*2] = { 1e9, 1e9 };
 
-    enc = oac_encoder_create(16000, 2, OAC_APPLICATION_AUDIO, &err);
+    enc = oac_encoder_create(16000, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
     oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
     data_len = oac_encode_float(enc, pcm, 320, data, 200);
     oac_test_assert(data_len > 0 && data_len <= 200);
@@ -1195,7 +1195,7 @@ int qext_repacketize_fail(void) {
     static const short pcm[960] =
     { -20454, -7680, -12281,  -250, -1809, -22758, -22784, -20480,     3 };
 
-    enc = oac_encoder_create(16000, 1, OAC_APPLICATION_VOIP, &err);
+    enc = oac_encoder_create(16000, 1, OAC_FORMAT_STANDARD, OAC_APPLICATION_VOIP, &err);
     oac_encoder_ctl(enc, OAC_SET_VBR(0));
     oac_encoder_ctl(enc, OAC_SET_BITRATE(OAC_BITRATE_MAX));
     data_len = oac_encode(enc, pcm, 960, data, 9000);
@@ -1215,7 +1215,7 @@ int qext_stereo_overflow(void) {
 
     for (i = 0; i < 11520*2; ++i)
         pcm[i] = 32767;
-    enc = oac_encoder_create(96000, 2, OAC_APPLICATION_RESTRICTED_LOWDELAY, &err);
+    enc = oac_encoder_create(96000, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_RESTRICTED_LOWDELAY, &err);
     data_len = oac_encode(enc, pcm, 11520, data, 2000);
     oac_test_assert(data_len > 0 && data_len <= 2000);
     oac_encoder_destroy(enc);

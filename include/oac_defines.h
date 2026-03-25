@@ -179,6 +179,7 @@ extern "C" {
 
 #define OAC_SET_IGNORE_EXTENSIONS_REQUEST 4058
 #define OAC_GET_IGNORE_EXTENSIONS_REQUEST 4059
+#define OAC_GET_FORMAT_REQUEST 4060
 
 /** Defines for the presence of extended APIs. */
 #define OAC_HAVE_OAC_PROJECTION_H
@@ -225,6 +226,10 @@ extern "C" {
 /** Experts only: forces CELT encoding; don't allocate SILK state at all. Disables OAC_SET_APPLICATION. */
 #define OAC_APPLICATION_RESTRICTED_CELT     2053
 
+/** Standard format supporting mono and stereo (1-2 channels) @hideinitializer */
+#define OAC_FORMAT_STANDARD    0
+/** Ambisonics format supporting orders 0-5 (1, 4, 9, 16, 25, or 36 channels) @hideinitializer */
+#define OAC_FORMAT_AMBISONICS  1
 #define OAC_SIGNAL_VOICE                    3001 /**< Signal being encoded is voice */
 #define OAC_SIGNAL_MUSIC                    3002 /**< Signal being encoded is music */
 #define OAC_BANDWIDTH_NARROWBAND            1101 /**< 4 kHz bandpass @hideinitializer*/
@@ -829,6 +834,11 @@ extern "C" {
  * @hideinitializer */
 #define OAC_GET_IGNORE_EXTENSIONS(x) OAC_GET_IGNORE_EXTENSIONS_REQUEST, oac_check_int_ptr(x)
 
+/** Gets the format the encoder or decoder was initialized with.
+ * @param[out] x <tt>oac_int32 *</tt>: Returns OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS.
+ * @hideinitializer
+ */
+#define OAC_GET_FORMAT(x) OAC_GET_FORMAT_REQUEST, oac_check_int_ptr(x)
 /**@}*/
 
 /** @defgroup oac_libinfo Oac library information functions
