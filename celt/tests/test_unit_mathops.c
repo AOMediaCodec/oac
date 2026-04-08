@@ -84,6 +84,10 @@
 # define WORD "%f"
 #endif
 
+#ifndef M_PI
+# define M_PI 3.141592653589793f
+#endif
+
 int ret = 0;
 
 void testdiv(void) {
