@@ -125,7 +125,7 @@ void testsqrt(void) {
 
 #ifndef DISABLE_FLOAT_API
 static int oaci_delta_ground_truth(int itheta) {
-    return 2048*log2(tan(itheta/8192.*M_PI/4));
+    return 2048*1.442695040889*log(tan(itheta/8192.*M_PI/4));
 }
 #endif
 
