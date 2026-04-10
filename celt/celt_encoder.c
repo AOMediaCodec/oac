@@ -1524,13 +1524,8 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
         /* Use the filter only if at least one channel gets significantly better. */
         if (before[0] - after[0] <  thresh[0] && before[1] - after[1] < thresh[1])cancel_pitch = 1;
     } else if (st->format == OAC_FORMAT_AMBISONICS) {
-        /* For ambisonics, sum before/after across all channels and cancel if total got worse. */
-        oac_val32 total_before = 0, total_after = 0;
-        c = 0; do {
-            total_before += before[c];
-            total_after += after[c];
-        } while (++c < CC);
-        if (total_after > total_before) cancel_pitch = 1;
+        /* Disable cancellation for ambisonics. */
+        cancel_pitch = 0;
     } else {
         /* Check that the mono channel actually got better. */
         if (after[0] > before[0]) cancel_pitch = 1;
@@ -2351,14 +2346,6 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
            st->stereo_saving, tot_boost, tf_estimate, pitch_change, maxDepth,
            st->lfe, st->energy_mask != NULL, surround_masking,
            temporal_vbr);
-<<<<<<< Updated upstream
-            /* oaci_compute_vbr was calibrated for mono/stereo (coded_bins includes
-               at most 2 channels). For C>2, scale the VBR adjustment down so that
-               it remains proportional to a per-channel budget. */
-            if (C > 2)
-                target = base_target + (target - base_target) / C;
-=======
->>>>>>> Stashed changes
         } else {
             target = base_target;
             /* Tonal frames (offset<100) need more bits than noisy (offset>100) ones. */
