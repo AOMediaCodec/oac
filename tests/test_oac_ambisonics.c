@@ -8,13 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "oac.h"
+#include "celt.h"
 
 #define FRAME_SIZE 960
 #define MAX_PACKET 4000
-
-/* Valid ambisonics channel counts: (order+1)^2 for orders 1-5 (skip order 0 for now) */
-static const int ambisonics_channels[] = {4, 9, 16, 25, 36};
-static const int num_ambisonics_configs = 5;
 
 static int test_ambisonics_create(int channels) {
     OacEncoder *enc;
@@ -202,6 +199,11 @@ static int test_invalid_combinations(void) {
 int main(void) {
     int i;
     int passed = 0, failed = 0;
+    /* Build ambisonics channel counts from OAC_MAX_AMBISONICS_ORDER (skip order 0) */
+    int ambisonics_channels[OAC_MAX_AMBISONICS_ORDER];
+    int num_ambisonics_configs = OAC_MAX_AMBISONICS_ORDER;
+    for (i = 0; i < num_ambisonics_configs; i++)
+        ambisonics_channels[i] = (i+2)*(i+2);
 
     printf("Testing ambisonics multi-channel support\n");
     printf("=========================================\n\n");
@@ -210,8 +212,8 @@ int main(void) {
     printf("Testing encoder/decoder creation:\n");
     for (i = 0; i < num_ambisonics_configs; i++) {
         int channels = ambisonics_channels[i];
-        printf("  %d channels (order %d)... ", channels, i);
-        if (test_ambisonics_create(channels)) {
+        printf("  %d channels (order %d)... ", channels, i + 1);
+        if (test_ambisonics_create(channels))
             printf("OK\n");
             passed++;
         } else {
@@ -224,8 +226,8 @@ int main(void) {
     printf("\nTesting encode/decode round-trip:\n");
     for (i = 0; i < num_ambisonics_configs; i++) {
         int channels = ambisonics_channels[i];
-        printf("  %d channels (order %d)... ", channels, i);
-        if (test_ambisonics_encode_decode(channels)) {
+        printf("  %d channels (order %d)... ", channels, i + 1);
+        if (test_ambisonics_encode_decode(channels))
             printf("OK\n");
             passed++;
         } else {

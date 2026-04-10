@@ -261,7 +261,7 @@ extern "C" {
 
 /** Standard format supporting mono and stereo (1-2 channels) @hideinitializer */
 #define OAC_FORMAT_STANDARD    0
-/** Ambisonics format supporting orders 0-5 (1, 4, 9, 16, 25, or 36 channels) @hideinitializer */
+/** Ambisonics format supporting orders 0 to OAC_MAX_AMBISONICS_ORDER @hideinitializer */
 #define OAC_FORMAT_AMBISONICS  1
 #define OAC_SIGNAL_VOICE                    3001 /**< Signal being encoded is voice */
 #define OAC_SIGNAL_MUSIC                    3002 /**< Signal being encoded is music */

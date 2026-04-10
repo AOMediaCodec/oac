@@ -300,9 +300,13 @@ static OAC_INLINE int oaci_validate_format_channels(int format, int channels) {
     if (format == OAC_FORMAT_STANDARD) {
         return (channels == 1 || channels == 2);
     } else if (format == OAC_FORMAT_AMBISONICS) {
-        /* Valid ambisonics channel counts: (order+1)^2 for orders 0-5 */
-        return (channels == 1 || channels == 4 || channels == 9 ||
-                channels == 16 || channels == 25 || channels == 36);
+        /* Valid ambisonics channel counts: (order+1)^2 for orders 0 to OAC_MAX_AMBISONICS_ORDER */
+        int order;
+        for (order = 0; order <= OAC_MAX_AMBISONICS_ORDER; order++) {
+            if (channels == (order+1)*(order+1))
+                return 1;
+        }
+        return 0;
     }
     return 0;
 }

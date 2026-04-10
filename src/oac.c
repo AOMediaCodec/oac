@@ -64,6 +64,7 @@
 #endif
 
 #include "oac.h"
+#include "celt.h"
 #include "mathops.h"
 #include "oac_private.h"
 
@@ -360,8 +361,9 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     } else {
         /* Because it's not encoded explicitly, it's possible the size of the
            last packet (or all the packets, for the CBR case) is larger than
-           1275. Reject them here.*/
-        if (last_size > 1275)
+           1275. Reject them here. Since the parser doesn't know the format, we
+           use the system-wide maximum channel count as upper bound. */
+        if (last_size > 1275*OAC_MAX_CHANNELS)
             return OAC_INVALID_PACKET;
         size[count - 1] = (oac_int16)last_size;
     }

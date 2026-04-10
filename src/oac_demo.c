@@ -802,10 +802,14 @@ int main(int argc, char *argv[]) {
             goto failure;
         }
     } else if (oac_format == OAC_FORMAT_AMBISONICS) {
-        /* Valid ambisonics channel counts: (order+1)^2 for orders 0-5 */
-        if (channels != 1 && channels != 4 && channels != 9 &&
-            channels != 16 && channels != 25 && channels != 36) {
-            fprintf(stderr, "Ambisonics format requires 1, 4, 9, 16, 25, or 36 channels.\n");
+        /* Valid ambisonics channel counts: (order+1)^2 for orders 0 to OAC_MAX_AMBISONICS_ORDER */
+        int valid = 0, order;
+        for (order = 0; order <= OAC_MAX_AMBISONICS_ORDER; order++) {
+            if (channels == (order+1)*(order+1)) { valid = 1; break; }
+        }
+        if (!valid) {
+            fprintf(stderr, "Ambisonics format requires (order+1)^2 channels for orders 0-%d.\n",
+                    OAC_MAX_AMBISONICS_ORDER);
             goto failure;
         }
     }

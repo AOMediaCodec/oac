@@ -199,7 +199,7 @@ typedef struct OacEncoder OacEncoder;
 /** Gets the size of an <code>OacEncoder</code> structure.
  * @param[in] channels <tt>int</tt>: Number of channels.
  *                                   For OAC_FORMAT_STANDARD: 1 or 2.
- *                                   For OAC_FORMAT_AMBISONICS: 1, 4, 9, 16, 25, or 36.
+ *                                   For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
  * @param[in] format <tt>int</tt>: Format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
  * @returns The size in bytes, or 0 on error.
  * @note Since this function does not take the application as input, it will overestimate
@@ -237,7 +237,7 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_encoder_get_size(int channels, int for
  *                                     24000, or 48000.
  * @param [in] channels <tt>int</tt>: Number of channels in input signal.
  *                                    For OAC_FORMAT_STANDARD: 1 or 2.
- *                                    For OAC_FORMAT_AMBISONICS: 1, 4, 9, 16, 25, or 36.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
  * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @param [in] application <tt>int</tt>: Coding mode (one of @ref OAC_APPLICATION_VOIP, @ref OAC_APPLICATION_AUDIO, or @ref OAC_APPLICATION_RESTRICTED_LOWDELAY)
  * @param [out] error <tt>int*</tt>: @ref oac_errorcodes
@@ -264,7 +264,7 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT OacEncoder *oac_encoder_create(
  *                                      24000, or 48000.
  * @param [in] channels <tt>int</tt>: Number of channels in input signal.
  *                                    For OAC_FORMAT_STANDARD: 1 or 2.
- *                                    For OAC_FORMAT_AMBISONICS: 1, 4, 9, 16, 25, or 36.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
  * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @param [in] application <tt>int</tt>: Coding mode (one of OAC_APPLICATION_VOIP, OAC_APPLICATION_AUDIO, or OAC_APPLICATION_RESTRICTED_LOWDELAY)
  * @retval #OAC_OK Success or @ref oac_errorcodes
@@ -493,7 +493,7 @@ typedef struct OacDRED OacDRED;
 /** Gets the size of an <code>OacDecoder</code> structure.
  * @param [in] channels <tt>int</tt>: Number of channels.
  *                                    For OAC_FORMAT_STANDARD: 1 or 2.
- *                                    For OAC_FORMAT_AMBISONICS: 1, 4, 9, 16, 25, or 36.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
  * @param [in] format <tt>int</tt>: Format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
  * @returns The size in bytes, or 0 on error.
  */
@@ -505,7 +505,7 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decoder_get_size(int channels, int for
  *                                     24000, or 48000.
  * @param [in] channels <tt>int</tt>: Number of channels to decode.
  *                                    For OAC_FORMAT_STANDARD: 1 or 2.
- *                                    For OAC_FORMAT_AMBISONICS: 1, 4, 9, 16, 25, or 36.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
  * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @param [out] error <tt>int*</tt>: #OAC_OK Success or @ref oac_errorcodes
  *
@@ -533,7 +533,7 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT OacDecoder *oac_decoder_create(
  *                                     24000, or 48000.
  * @param [in] channels <tt>int</tt>: Number of channels to decode.
  *                                    For OAC_FORMAT_STANDARD: 1 or 2.
- *                                    For OAC_FORMAT_AMBISONICS: 1, 4, 9, 16, 25, or 36.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
  * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @retval #OAC_OK Success or @ref oac_errorcodes
  */

@@ -1184,7 +1184,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     oac_int32 cbr_bytes = -1;
     oac_val16 stereo_width;
     const CELTMode *celt_mode = NULL;
-    int packet_size_cap = 1276;
+    int packet_size_cap = (st->format == OAC_FORMAT_STANDARD) ? 1276 : 1276*OAC_MAX_CHANNELS;
 #ifndef DISABLE_FLOAT_API
     AnalysisInfo analysis_info;
     int analysis_read_pos_bak = -1;
@@ -1829,7 +1829,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     VARDECL(oac_res, tmp_prefill);
     SAVE_STACK;
 
-    max_data_bytes = IMIN(orig_max_data_bytes, 1276);
+    max_data_bytes = IMIN(orig_max_data_bytes, (st->format == OAC_FORMAT_STANDARD) ? 1276 : 1276*OAC_MAX_CHANNELS);
     st->rangeFinal = 0;
     if (st->application != OAC_APPLICATION_RESTRICTED_CELT)
         silk_enc = (char*)st + st->silk_enc_offset;

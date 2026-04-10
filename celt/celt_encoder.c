@@ -66,10 +66,16 @@
 
 #define CELT_ENCODER_C
 
+// #define DEBUG_AMBISONICS
+
 #include "cpu_support.h"
 #include "os_support.h"
 #include "mdct.h"
 #include <math.h>
+#ifdef DEBUG_AMBISONICS
+#include <stdio.h>
+#include <stdlib.h>
+#endif
 #include "celt.h"
 #include "pitch.h"
 #include "bands.h"
@@ -1222,6 +1228,17 @@ static celt_glog oaci_dynalloc_analysis(const celt_glog *bandLogE, const celt_gl
             importance[i] = 13;
     }
     *tot_boost_ = tot_boost;
+#ifdef DEBUG_AMBISONICS
+    {
+        static int debug_alloc = -1;
+        if (debug_alloc == -1) debug_alloc = (getenv("OAC_DEBUG_ALLOC") != NULL);
+        if (debug_alloc) {
+            for (i = start; i < end; i++)
+                fprintf(stderr, "ALLOC_DEBUG dynalloc_analysis band=%d offset=%d tot_boost=%d\n",
+                        i, offsets[i], (int)*tot_boost_);
+        }
+    }
+#endif
     RESTORE_STACK;
     return maxDepth;
 }
@@ -1748,7 +1765,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     oac_val16 tone_freq = -1;
     oac_val32 toneishness = 0;
     VARDECL(celt_glog, surround_dynalloc);
-    int packet_size_cap = 1275;
+    int packet_size_cap = (st->format == OAC_FORMAT_STANDARD) ? 1275 : 1275*OAC_MAX_AMBISONICS_CHANNELS;
     int qext_scale = 1;
     ALLOC_STACK;
 
@@ -2273,6 +2290,15 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
         /* Making dynalloc more likely */
         if (j)
             dynalloc_logp = IMAX(2, dynalloc_logp - 1);
+#ifdef DEBUG_AMBISONICS
+        {
+            static int debug_alloc = -1;
+            if (debug_alloc == -1) debug_alloc = (getenv("OAC_DEBUG_ALLOC") != NULL);
+            if (debug_alloc && (offsets[i] != boost || boost > 0))
+                fprintf(stderr, "ALLOC_DEBUG dynalloc_signal band=%d analysis=%d signaled=%d quanta=%d flags=%d budget_left=%d\n",
+                        i, offsets[i], boost, quanta, j, (int)(total_bits - total_boost - tell));
+        }
+#endif
         offsets[i] = boost;
     }
 
@@ -2444,6 +2470,23 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     codedBands = oaci_clt_compute_allocation(mode, start, end, offsets, cap,
          alloc_trim, &st->intensity, &dual_stereo, bits, &balance, pulses,
          fine_quant, fine_priority, C, LM, enc, 1, st->lastCodedBands, signalBandwidth);
+#ifdef DEBUG_AMBISONICS
+    {
+        static int debug_alloc = -1;
+        if (debug_alloc == -1)
+            debug_alloc = (getenv("OAC_DEBUG_ALLOC") != NULL);
+        if (debug_alloc) {
+            int _i;
+            fprintf(stderr, "ALLOC_DEBUG frame C=%d LM=%d trim=%d codedBands=%d bits=%d nbEBands=%d equiv_rate=%d start=%d end=%d\n",
+                    C, LM, alloc_trim, codedBands, (int)bits, nbEBands, (int)equiv_rate, start, end);
+            for (_i = start; _i < end; _i++) {
+            fprintf(stderr, "ALLOC_DEBUG band %d pulses=%d fine_quant=%d cap=%d offsets=%d\n",
+                        _i, pulses[_i], fine_quant[_i], cap[_i], offsets[_i]);
+            }
+            fprintf(stderr, "ALLOC_DEBUG end\n");
+        }
+    }
+#endif
     if (st->lastCodedBands)
         st->lastCodedBands = IMIN(st->lastCodedBands + 1, IMAX(st->lastCodedBands - 1, codedBands));
     else

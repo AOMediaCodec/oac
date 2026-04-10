@@ -84,8 +84,12 @@
 #define CELTDecoder OacCustomDecoder
 #define CELTMode OacCustomMode
 
-/** Maximum number of channels supported across all formats (ambisonics order 5). */
-#define OAC_MAX_CHANNELS 36
+/** Maximum supported ambisonics order. */
+#define OAC_MAX_AMBISONICS_ORDER 5
+#define OAC_MAX_AMBISONICS_CHANNELS ((OAC_MAX_AMBISONICS_ORDER+1)*(OAC_MAX_AMBISONICS_ORDER+1))
+#define OAC_MAX_CHANNELS 255
+/* Check that OAC_MAX_CHANNELS is large enough */
+typedef char oac_assert_max_channels_sufficient[(OAC_MAX_CHANNELS >= OAC_MAX_AMBISONICS_CHANNELS) ? 1 : -1];
 #define LEAK_BANDS 19
 
 typedef struct {
