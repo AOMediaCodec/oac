@@ -191,10 +191,13 @@ static int oaci_quant_coarse_energy_impl(const CELTMode *m, int start, int end,
                                     int C, int LM, int intra, celt_glog max_decay, int lfe) {
     int i, c;
     int badness = 0;
-    oac_val32 prev[2] = {0, 0};
+    oac_val32 prev[OAC_MAX_CHANNELS];
     oac_val16 coef;
     oac_val16 beta;
 
+    /* Initialize prev array for all channels */
+    for (c = 0; c < C; c++)
+        prev[c] = 0;
     if (tell + 3 <= budget)
         oaci_ec_enc_bit_logp(enc, intra, 3);
     if (intra) {
@@ -446,12 +449,15 @@ void oaci_unquant_coarse_energy(const CELTMode *m, int start, int end, celt_glog
                            int LM) {
     const unsigned char *prob_model = e_prob_model[LM][intra];
     int i, c;
-    oac_val64 prev[2] = {0, 0};
+    oac_val64 prev[OAC_MAX_CHANNELS];
     oac_val16 coef;
     oac_val16 beta;
     oac_int32 budget;
     oac_int32 tell;
 
+    /* Initialize prev array for all channels */
+    for (c = 0; c < C; c++)
+        prev[c] = 0;
     if (intra) {
         coef = 0;
         beta = beta_intra;
@@ -469,10 +475,8 @@ void oaci_unquant_coarse_energy(const CELTMode *m, int start, int end, celt_glog
             int qi;
             oac_val32 q;
             oac_val32 tmp;
-            /* It would be better to express this invariant as a
-               test on C at function entry, but that isn't enough
-               to make the static analyzer happy. */
-            celt_sig_assert(c < 2);
+            /* Multi-channel ambisonics support: c can now be up to OAC_MAX_CHANNELS */
+            celt_sig_assert(c < OAC_MAX_CHANNELS);
             tell = oaci_ec_tell(dec);
             if (budget - tell >= 15) {
                 int pi;

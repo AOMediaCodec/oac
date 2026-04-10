@@ -115,6 +115,7 @@ struct OacEncoder {
 #endif
     int application;
     int channels;
+    int format;                               /* OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS */
     int delay_compensation;
     int force_channels;
     int signal_type;
@@ -143,7 +144,7 @@ struct OacEncoder {
     oac_int16 hybrid_stereo_width_Q14;
     oac_int32 variable_HP_smth2_Q15;
     oac_val16 prev_HB_gain;
-    oac_val32 hp_mem[4];
+    oac_val32 hp_mem[2*OAC_MAX_CHANNELS];
     int mode;
     int prev_mode;
     int prev_channels;
@@ -221,45 +222,66 @@ static const oac_int32 fec_thresholds[] = {
     22000, 1000,     /* FB */
 };
 
-int oac_encoder_get_size(int channels) {
+int oac_encoder_get_size(int channels, int format) {
     int ret;
-    ret = oac_encoder_init(NULL, 48000, channels, OAC_APPLICATION_AUDIO);
+    ret = oac_encoder_init(NULL, 48000, channels, format, OAC_APPLICATION_AUDIO);
     if (ret < 0)
         return 0;
     else
         return ret;
 }
 
-int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int application) {
+int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int application) {
     void *silk_enc = NULL;
     CELTEncoder *celt_enc = NULL;
     int err;
     int ret, silkEncSizeBytes, celtEncSizeBytes = 0;
     int tot_size;
     int base_size;
+    int skip_silk = 0;
 
-    if ((Fs != 48000 && Fs != 24000 && Fs != 16000 && Fs != 12000 && Fs != 8000
+    /* Validate sample rate */
+    if (Fs != 48000 && Fs != 24000 && Fs != 16000 && Fs != 12000 && Fs != 8000
 #ifdef ENABLE_QEXT
          && Fs != 96000
 #endif
-         ) || (channels != 1 && channels != 2)
-        || (application != OAC_APPLICATION_VOIP && application != OAC_APPLICATION_AUDIO
-            && application != OAC_APPLICATION_RESTRICTED_LOWDELAY
-            && application != OAC_APPLICATION_RESTRICTED_SILK
-            && application != OAC_APPLICATION_RESTRICTED_CELT))
+         )
         return OAC_BAD_ARG;
 
-    /* Create SILK encoder */
-    ret = oaci_silk_Get_Encoder_Size( &silkEncSizeBytes, channels );
-    if (ret)
+    /* Validate format and channel count */
+    if (!oaci_validate_format_channels(format, channels))
         return OAC_BAD_ARG;
-    silkEncSizeBytes = oaci_align(silkEncSizeBytes);
-    if (application == OAC_APPLICATION_RESTRICTED_CELT)
+    /* Validate application */
+    if (application != OAC_APPLICATION_VOIP && application != OAC_APPLICATION_AUDIO
+        && application != OAC_APPLICATION_RESTRICTED_LOWDELAY
+        && application != OAC_APPLICATION_RESTRICTED_SILK
+        && application != OAC_APPLICATION_RESTRICTED_CELT)
+        return OAC_BAD_ARG;
+    /* For ambisonics with >2 channels, force CELT-only (no SILK) */
+    if (format == OAC_FORMAT_AMBISONICS && channels > 2) {
+        skip_silk = 1;
+        /* Also disallow SILK-only mode for multi-channel ambisonics */
+        if (application == OAC_APPLICATION_RESTRICTED_SILK)
+            return OAC_BAD_ARG;
+    }
+    /* Create SILK encoder */
+    if (skip_silk) {
         silkEncSizeBytes = 0;
+    } else {
+        ret = oaci_silk_Get_Encoder_Size( &silkEncSizeBytes, IMIN(channels, 2) );
+        if (ret)
+            return OAC_BAD_ARG;
+        silkEncSizeBytes = oaci_align(silkEncSizeBytes);
+        if (application == OAC_APPLICATION_RESTRICTED_CELT)
+            silkEncSizeBytes = 0;
+    }
     if (application != OAC_APPLICATION_RESTRICTED_SILK)
         celtEncSizeBytes = oaci_celt_encoder_get_size(channels);
     base_size = oaci_align(sizeof(OacEncoder));
-    if (application == OAC_APPLICATION_RESTRICTED_SILK || application == OAC_APPLICATION_RESTRICTED_CELT) {
+    /* delay_buffer is declared as [MAX_ENCODER_BUFFER*2] in OacEncoder, sized for stereo.
+       Subtract unused portions: full buffer for restricted modes or >2 channels,
+       half buffer for mono. Multi-channel ambisonics doesn't use the delay buffer. */
+    if (application == OAC_APPLICATION_RESTRICTED_SILK || application == OAC_APPLICATION_RESTRICTED_CELT || channels > 2) {
         base_size = oaci_align(base_size - MAX_ENCODER_BUFFER*2*sizeof(oac_res));
     } else if (channels == 1)
         base_size = oaci_align(base_size - MAX_ENCODER_BUFFER*sizeof(oac_res));
@@ -272,20 +294,23 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int application
     st->celt_enc_offset = st->silk_enc_offset + silkEncSizeBytes;
 
     st->stream_channels = st->channels = channels;
+    st->format = format;
 
     st->Fs = Fs;
 
     st->arch = oac_select_arch();
 
-    if (application != OAC_APPLICATION_RESTRICTED_CELT) {
+    /* Initialize SILK encoder (skip for multi-channel ambisonics) */
+    ret = 0;
+    if (application != OAC_APPLICATION_RESTRICTED_CELT && !skip_silk) {
         silk_enc = (char*)st + st->silk_enc_offset;
-        ret = oaci_silk_InitEncoder( silk_enc, st->channels, st->arch, &st->silk_mode );
+        ret = oaci_silk_InitEncoder( silk_enc, IMIN(st->channels, 2), st->arch, &st->silk_mode );
     }
-    if (ret)return OAC_INTERNAL_ERROR;
+    if (ret) return OAC_INTERNAL_ERROR;
 
-    /* default SILK parameters */
-    st->silk_mode.nChannelsAPI              = channels;
-    st->silk_mode.nChannelsInternal         = channels;
+    /* default SILK parameters (only used for 1-2 channel modes) */
+    st->silk_mode.nChannelsAPI              = IMIN(channels, 2);
+    st->silk_mode.nChannelsInternal         = IMIN(channels, 2);
     st->silk_mode.API_sampleRate            = st->Fs;
     st->silk_mode.maxInternalSampleRate     = 16000;
     st->silk_mode.minInternalSampleRate     = 8000;
@@ -304,7 +329,7 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int application
     /* Initialize CELT encoder */
     if (application != OAC_APPLICATION_RESTRICTED_SILK) {
         celt_enc = (CELTEncoder*)((char*)st + st->celt_enc_offset);
-        err = oaci_celt_encoder_init(celt_enc, Fs, channels, st->arch);
+        err = oaci_celt_encoder_init(celt_enc, Fs, channels, st->arch, st->format);
         if (err != OAC_OK) return OAC_INTERNAL_ERROR;
         celt_encoder_ctl(celt_enc, CELT_SET_SIGNALLING(0));
         celt_encoder_ctl(celt_enc, OAC_SET_COMPLEXITY(st->silk_mode.complexity));
@@ -327,7 +352,9 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int application
     st->force_channels = OAC_AUTO;
     st->user_forced_mode = OAC_AUTO;
     st->voice_ratio = -1;
-    if (application != OAC_APPLICATION_RESTRICTED_CELT && application != OAC_APPLICATION_RESTRICTED_SILK)
+    /* delay_buffer is sized for MAX_ENCODER_BUFFER*2 samples (stereo only).
+       For multi-channel ambisonics or restricted modes, we disable it. */
+    if (application != OAC_APPLICATION_RESTRICTED_CELT && application != OAC_APPLICATION_RESTRICTED_SILK && channels <= 2)
         st->encoder_buffer = st->Fs/100;
     else
         st->encoder_buffer = 0;
@@ -380,6 +407,11 @@ static unsigned char oaci_gen_toc(int mode, int framerate, int bandwidth, int ch
     return toc;
 }
 
+/* Returns 1 for mono, 2 for stereo, for TOC byte generation.
+   For ambisonics (>2 channels), returns 1 since TOC stereo bit can only signal 0/1. */
+static OAC_INLINE int oaci_toc_channels(int channels) {
+    return channels > 2 ? 1 : channels;
+}
 #ifdef FIXED_POINT
 /* Second order ARMA filter, alternative implementation */
 void oaci_silk_biquad_res(
@@ -509,7 +541,7 @@ static void oaci_dc_reject(const oac_res *in, oac_int32 cutoff_Hz, oac_res *out,
 #else
 static void oaci_dc_reject(const oac_val16 *in, oac_int32 cutoff_Hz, oac_val16 *out, oac_val32 *hp_mem, int len,
                       int channels, oac_int32 Fs) {
-    int i;
+    int c, i;
     float coef, coef2;
     coef = 6.3f*cutoff_Hz/Fs;
     coef2 = 1 - coef;
@@ -531,16 +563,18 @@ static void oaci_dc_reject(const oac_val16 *in, oac_int32 cutoff_Hz, oac_val16 *
         hp_mem[0] = m0;
         hp_mem[2] = m2;
     } else {
-        float m0;
-        m0 = hp_mem[0];
-        for (i = 0; i < len; i++) {
-            oac_val32 x, y;
-            x = in[i];
-            y = x - m0;
-            m0 = coef*x + VERY_SMALL + coef2*m0;
-            out[i] = y;
+        for (c = 0; c < channels; c++) {
+            float m;
+            m = hp_mem[2*c];
+            for (i = 0; i < len; i++) {
+                oac_val32 x, y;
+                x = in[channels*i + c];
+                y = x - m;
+                m = coef*x + VERY_SMALL + coef2*m;
+                out[channels*i + c] = y;
+            }
+            hp_mem[2*c] = m;
         }
-        hp_mem[0] = m0;
     }
 }
 #endif
@@ -610,7 +644,7 @@ static void oaci_gain_fade(const oac_res *in, oac_res *out, oac_val16 g1, oac_va
     } while (++c < channels);
 }
 
-OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int application, int *error) {
+OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int format, int application, int *error) {
     int ret;
     OacEncoder *st;
     int size;
@@ -618,7 +652,7 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int application, int 
 #ifdef ENABLE_QEXT
          && Fs != 96000
 #endif
-         ) || (channels != 1 && channels != 2)
+         ) || !oaci_validate_format_channels(format, channels)
         || (application != OAC_APPLICATION_VOIP && application != OAC_APPLICATION_AUDIO
             && application != OAC_APPLICATION_RESTRICTED_LOWDELAY
             && application != OAC_APPLICATION_RESTRICTED_SILK
@@ -627,7 +661,7 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int application, int 
             *error = OAC_BAD_ARG;
         return NULL;
     }
-    size = oac_encoder_init(NULL, Fs, channels, application);
+    size = oac_encoder_init(NULL, Fs, channels, format, application);
     if (size <= 0) {
         if (error)
             *error = OAC_INTERNAL_ERROR;
@@ -639,7 +673,7 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int application, int 
             *error = OAC_ALLOC_FAIL;
         return NULL;
     }
-    ret = oac_encoder_init(st, Fs, channels, application);
+    ret = oac_encoder_init(st, Fs, channels, format, application);
     if (error)
         *error = ret;
     if (ret != OAC_OK) {
@@ -1150,7 +1184,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     oac_int32 cbr_bytes = -1;
     oac_val16 stereo_width;
     const CELTMode *celt_mode = NULL;
-    int packet_size_cap = 1276;
+    int packet_size_cap = (st->format == OAC_FORMAT_STANDARD) ? 1276 : 1276*OAC_MAX_CHANNELS;
 #ifndef DISABLE_FLOAT_API
     AnalysisInfo analysis_info;
     int analysis_read_pos_bak = -1;
@@ -1202,7 +1236,6 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         oaci_run_analysis(&st->analysis, celt_mode, analysis_pcm, analysis_size, frame_size,
              c1, c2, analysis_channels, st->Fs,
              lsb_depth, oaci_downmix, &analysis_info);
-
     } else if (st->analysis.initialized) {
         oaci_tonality_analysis_reset(&st->analysis);
     }
@@ -1318,7 +1351,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         else if (tocmode == MODE_HYBRID && bw <= OAC_BANDWIDTH_SUPERWIDEBAND)
             bw = OAC_BANDWIDTH_SUPERWIDEBAND;
 
-        data[0] = oaci_gen_toc(tocmode, frame_rate, bw, st->stream_channels);
+        data[0] = oaci_gen_toc(tocmode, frame_rate, bw, oaci_toc_channels(st->stream_channels));
         data[0] |= packet_code;
 
         ret = packet_code <= 1 ? 1 : 2;
@@ -1466,8 +1499,11 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     }
     if (st->lfe && st->application != OAC_APPLICATION_RESTRICTED_SILK)
         st->mode = MODE_CELT_ONLY;
+    /* Ambisonics: force CELT-only mode (SILK only supports 1-2 channels) */
+    if (st->format == OAC_FORMAT_AMBISONICS)
+        st->mode = MODE_CELT_ONLY;
 
-    if (st->prev_mode > 0
+    if (st->prev_mode > 0 && st->format != OAC_FORMAT_AMBISONICS
         && ((st->mode != MODE_CELT_ONLY && st->prev_mode == MODE_CELT_ONLY)
             || (st->mode == MODE_CELT_ONLY && st->prev_mode != MODE_CELT_ONLY))) {
         redundancy = 1;
@@ -1666,7 +1702,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         ALLOC(tmp_data, max_len_sum, unsigned char);
         curr_data = tmp_data;
         ALLOC(rp, 1, OacRepacketizer);
-        oac_repacketizer_init(rp);
+        oac_repacketizer_init(rp, st->format);
 
 
         bak_to_mono = st->silk_mode.toMono;
@@ -1793,7 +1829,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     VARDECL(oac_res, tmp_prefill);
     SAVE_STACK;
 
-    max_data_bytes = IMIN(orig_max_data_bytes, 1276);
+    max_data_bytes = IMIN(orig_max_data_bytes, (st->format == OAC_FORMAT_STANDARD) ? 1276 : 1276*OAC_MAX_CHANNELS);
     st->rangeFinal = 0;
     if (st->application != OAC_APPLICATION_RESTRICTED_CELT)
         silk_enc = (char*)st + st->silk_enc_offset;
@@ -1804,6 +1840,9 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     curr_bandwidth = st->bandwidth;
     if (st->application == OAC_APPLICATION_RESTRICTED_LOWDELAY || st->application == OAC_APPLICATION_RESTRICTED_CELT
         || st->application == OAC_APPLICATION_RESTRICTED_SILK)
+        delay_compensation = 0;
+    else if (st->format == OAC_FORMAT_AMBISONICS)
+        /* Ambisonics has no delay buffer (encoder_buffer=0), so no delay compensation */
         delay_compensation = 0;
     else
         delay_compensation = st->delay_compensation;
@@ -1907,7 +1946,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
            cause NaNs further down. */
         if (!(sum < 1e9f) || oaci_celt_isnan(sum)) {
             OAC_CLEAR(&pcm_buf[total_buffer*st->channels], frame_size*st->channels);
-            st->hp_mem[0] = st->hp_mem[1] = st->hp_mem[2] = st->hp_mem[3] = 0;
+            OAC_CLEAR(st->hp_mem, 2*st->channels);
         }
     }
 #else
@@ -1933,7 +1972,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
 
     /* SILK processing */
     HB_gain = Q15ONE;
-    if (st->mode != MODE_CELT_ONLY) {
+    if (st->mode != MODE_CELT_ONLY && st->channels <= 2) {
         oac_int32 total_bitRate, celt_rate;
         const oac_res *pcm_silk;
 
@@ -2118,7 +2157,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
         }
         if (nBytes == 0) {
             st->rangeFinal = 0;
-            data[-1] = oaci_gen_toc(st->mode, st->Fs/frame_size, curr_bandwidth, st->stream_channels);
+            data[-1] = oaci_gen_toc(st->mode, st->Fs/frame_size, curr_bandwidth, oaci_toc_channels(st->stream_channels));
             RESTORE_STACK;
             return 1;
         }
@@ -2388,7 +2427,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
 
     /* Signalling the mode in the first byte */
     data--;
-    data[0] |= oaci_gen_toc(st->mode, st->Fs/frame_size, curr_bandwidth, st->stream_channels);
+    data[0] |= oaci_gen_toc(st->mode, st->Fs/frame_size, curr_bandwidth, oaci_toc_channels(st->stream_channels));
 
     st->rangeFinal ^= redundant_rng;
 
@@ -2405,7 +2444,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     if (st->use_dtx && !st->silk_mode.useDTX) {
         if (oaci_decide_dtx_mode(activity, &st->nb_no_activity_ms_Q1, 2*1000*frame_size/st->Fs)) {
             st->rangeFinal = 0;
-            data[0] = oaci_gen_toc(st->mode, st->Fs/frame_size, curr_bandwidth, st->stream_channels);
+            data[0] = oaci_gen_toc(st->mode, st->Fs/frame_size, curr_bandwidth, oaci_toc_channels(st->stream_channels));
             RESTORE_STACK;
             return 1;
         }
@@ -2884,6 +2923,15 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
                 goto bad_arg;
             }
             *value = st->Fs;
+        }
+        break;
+        case OAC_GET_FORMAT_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) {
+                goto bad_arg;
+            }
+            *value = st->format;
         }
         break;
         case OAC_GET_FINAL_RANGE_REQUEST:

@@ -100,6 +100,7 @@ struct OacDecoder {
     int celt_dec_offset;
     int silk_dec_offset;
     int channels;
+    int format;
     oac_int32 Fs;           /** Sampling rate (at the API level) */
     silk_DecControlStruct DecControl;
     int decode_gain;
@@ -121,7 +122,7 @@ struct OacDecoder {
     int prev_redundancy;
     int last_packet_duration;
 #ifndef FIXED_POINT
-    oac_val16 softclip_mem[2];
+    oac_val16 softclip_mem[OAC_MAX_CHANNELS];
 #endif
 
     oac_uint32 rangeFinal;
@@ -129,7 +130,7 @@ struct OacDecoder {
 
 #if defined(ENABLE_HARDENING) || defined(ENABLE_ASSERTIONS)
 static void validate_oac_decoder(OacDecoder *st) {
-    celt_assert(st->channels == 1 || st->channels == 2);
+    celt_assert(st->channels >= 1 && st->channels <= OAC_MAX_CHANNELS);
 # ifdef ENABLE_QEXT
     celt_assert(st->Fs == 96000 || st->Fs == 48000 || st->Fs == 24000 || st->Fs == 16000 || st->Fs == 12000
         || st->Fs == 8000);
@@ -149,63 +150,84 @@ static void validate_oac_decoder(OacDecoder *st) {
     celt_assert(st->arch >= 0);
     celt_assert(st->arch <= OAC_ARCHMASK);
 # endif
-    celt_assert(st->stream_channels == 1 || st->stream_channels == 2);
+    celt_assert(st->stream_channels >= 1 && st->stream_channels <= OAC_MAX_CHANNELS);
 }
 # define VALIDATE_OAC_DECODER(st) validate_oac_decoder(st)
 #else
 # define VALIDATE_OAC_DECODER(st)
 #endif
 
-int oac_decoder_get_size(int channels) {
+int oac_decoder_get_size(int channels, int format) {
     int silkDecSizeBytes, celtDecSizeBytes;
     int ret;
-    if (channels < 1 || channels > 2)
+    int skip_silk;
+    if (!oaci_validate_format_channels(format, channels))
         return 0;
-    ret = oaci_silk_Get_Decoder_Size( &silkDecSizeBytes );
-    if (ret)
-        return 0;
-    silkDecSizeBytes = oaci_align(silkDecSizeBytes);
+    /* For multi-channel ambisonics (>2 channels), skip SILK (only supports 1-2 channels) */
+    skip_silk = (format == OAC_FORMAT_AMBISONICS && channels > 2);
+    if (!skip_silk) {
+        ret = oaci_silk_Get_Decoder_Size( &silkDecSizeBytes );
+        if (ret)
+            return 0;
+        silkDecSizeBytes = oaci_align(silkDecSizeBytes);
+    } else {
+        silkDecSizeBytes = 0;
+    }
     celtDecSizeBytes = oaci_celt_decoder_get_size(channels);
     return oaci_align(sizeof(OacDecoder)) + silkDecSizeBytes + celtDecSizeBytes;
 }
 
-int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels) {
+int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
     void *silk_dec;
     CELTDecoder *celt_dec;
     int ret, silkDecSizeBytes;
+    int skip_silk;
 
     if ((Fs != 48000 && Fs != 24000 && Fs != 16000 && Fs != 12000 && Fs != 8000
 #ifdef ENABLE_QEXT
          && Fs != 96000
 #endif
          )
-        || (channels != 1 && channels != 2))
+        || !oaci_validate_format_channels(format, channels))
         return OAC_BAD_ARG;
 
-    OAC_CLEAR((char*)st, oac_decoder_get_size(channels));
-    /* Initialize SILK decoder */
-    ret = oaci_silk_Get_Decoder_Size(&silkDecSizeBytes);
-    if (ret)
-        return OAC_INTERNAL_ERROR;
+    /* For multi-channel ambisonics (>2 channels), skip SILK (only supports 1-2 channels) */
+    skip_silk = (format == OAC_FORMAT_AMBISONICS && channels > 2);
 
-    silkDecSizeBytes = oaci_align(silkDecSizeBytes);
-    st->silk_dec_offset = oaci_align(sizeof(OacDecoder));
-    st->celt_dec_offset = st->silk_dec_offset + silkDecSizeBytes;
-    silk_dec = (char*)st + st->silk_dec_offset;
+    OAC_CLEAR((char*)st, oac_decoder_get_size(channels, format));
+    if (!skip_silk) {
+        /* Initialize SILK decoder */
+        ret = oaci_silk_Get_Decoder_Size(&silkDecSizeBytes);
+        if (ret)
+            return OAC_INTERNAL_ERROR;
+        silkDecSizeBytes = oaci_align(silkDecSizeBytes);
+        st->silk_dec_offset = oaci_align(sizeof(OacDecoder));
+        st->celt_dec_offset = st->silk_dec_offset + silkDecSizeBytes;
+        silk_dec = (char*)st + st->silk_dec_offset;
+    } else {
+        /* No SILK for multi-channel ambisonics */
+        silkDecSizeBytes = 0;
+        st->silk_dec_offset = 0;
+        st->celt_dec_offset = oaci_align(sizeof(OacDecoder));
+        silk_dec = NULL;
+    }
     celt_dec = (CELTDecoder*)((char*)st + st->celt_dec_offset);
     st->stream_channels = st->channels = channels;
+    st->format = format;
     st->complexity = 0;
 
     st->Fs = Fs;
     st->DecControl.API_sampleRate = st->Fs;
     st->DecControl.nChannelsAPI      = st->channels;
 
-    /* Reset decoder */
-    ret = oaci_silk_InitDecoder( silk_dec );
-    if (ret) return OAC_INTERNAL_ERROR;
+    /* Reset SILK decoder (only for 1-2 channel modes) */
+    if (!skip_silk) {
+        ret = oaci_silk_InitDecoder( silk_dec );
+        if (ret) return OAC_INTERNAL_ERROR;
+    }
 
     /* Initialize CELT decoder */
-    ret = oaci_celt_decoder_init(celt_dec, Fs, channels);
+    ret = oaci_celt_decoder_init(celt_dec, Fs, channels, st->format);
     if (ret != OAC_OK) return OAC_INTERNAL_ERROR;
 
     celt_decoder_ctl(celt_dec, CELT_SET_SIGNALLING(0));
@@ -213,13 +235,14 @@ int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels) {
     st->prev_mode = 0;
     st->frame_size = Fs/400;
 #ifdef ENABLE_DEEP_PLC
-    oaci_lpcnet_plc_init( &st->lpcnet);
+    if (!skip_silk)
+        oaci_lpcnet_plc_init( &st->lpcnet);
 #endif
     st->arch = oac_select_arch();
     return OAC_OK;
 }
 
-OacDecoder *oac_decoder_create(oac_int32 Fs, int channels, int *error) {
+OacDecoder *oac_decoder_create(oac_int32 Fs, int channels, int format, int *error) {
     int ret;
     OacDecoder *st;
     if ((Fs != 48000 && Fs != 24000 && Fs != 16000 && Fs != 12000 && Fs != 8000
@@ -227,18 +250,18 @@ OacDecoder *oac_decoder_create(oac_int32 Fs, int channels, int *error) {
          && Fs != 96000
 #endif
          )
-        || (channels != 1 && channels != 2)) {
+        || !oaci_validate_format_channels(format, channels)) {
         if (error)
             *error = OAC_BAD_ARG;
         return NULL;
     }
-    st = (OacDecoder *)oac_alloc(oac_decoder_get_size(channels));
+    st = (OacDecoder *)oac_alloc(oac_decoder_get_size(channels, format));
     if (st == NULL) {
         if (error)
             *error = OAC_ALLOC_FAIL;
         return NULL;
     }
-    ret = oac_decoder_init(st, Fs, channels);
+    ret = oac_decoder_init(st, Fs, channels, format);
     if (error)
         *error = ret;
     if (ret != OAC_OK) {
@@ -758,7 +781,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     packet_stream_channels = oac_packet_get_nb_channels(data);
 
     count = oac_packet_parse_impl(data, len, self_delimited, &toc, NULL,
-                                  size, &offset, packet_offset, &padding, &padding_len);
+                                  size, &offset, packet_offset, &padding, &padding_len,
+                                  st->format);
     if (st->ignore_extensions) {
         padding = NULL;
         padding_len = 0;
@@ -789,6 +813,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
         st->mode = packet_mode;
         st->bandwidth = packet_bandwidth;
         st->frame_size = packet_frame_size;
+        /* FEC is SILK-only, so we should never reach here with ambisonics (which forces CELT-only) */
+        celt_assert(st->format != OAC_FORMAT_AMBISONICS);
         st->stream_channels = packet_stream_channels;
         ret = oac_decode_frame(st, data, size[0], pcm + st->channels*(frame_size - packet_frame_size),
             packet_frame_size, 1);
@@ -809,7 +835,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     st->mode = packet_mode;
     st->bandwidth = packet_bandwidth;
     st->frame_size = packet_frame_size;
-    st->stream_channels = packet_stream_channels;
+    /* For ambisonics, ignore TOC channel bit and use initialized channel count */
+    st->stream_channels = (st->format == OAC_FORMAT_AMBISONICS) ? st->channels : packet_stream_channels;
 
     nb_samples = 0;
     for (i = 0; i < count; i++) {
@@ -857,7 +884,7 @@ int oac_decode(OacDecoder *st, const unsigned char *data,
         else
             return OAC_INVALID_PACKET;
     }
-    celt_assert(st->channels == 1 || st->channels == 2);
+    celt_assert(st->channels >= 1 && st->channels <= OAC_MAX_CHANNELS);
     ALLOC(out, frame_size*st->channels, oac_res);
 
     ret = oac_decode_native(st, data, len, out, frame_size, decode_fec, 0, NULL, OPTIONAL_CLIP, NULL, 0);
@@ -900,7 +927,7 @@ int oac_decode24(OacDecoder *st, const unsigned char *data,
         else
             return OAC_INVALID_PACKET;
     }
-    celt_assert(st->channels == 1 || st->channels == 2);
+    celt_assert(st->channels >= 1 && st->channels <= OAC_MAX_CHANNELS);
     ALLOC(out, frame_size*st->channels, oac_res);
 
     ret = oac_decode_native(st, data, len, out, frame_size, decode_fec, 0, NULL, 0, NULL, 0);
@@ -943,7 +970,7 @@ int oac_decode_float(OacDecoder *st, const unsigned char *data,
         else
             return OAC_INVALID_PACKET;
     }
-    celt_assert(st->channels == 1 || st->channels == 2);
+    celt_assert(st->channels >= 1 && st->channels <= OAC_MAX_CHANNELS);
     ALLOC(out, frame_size*st->channels, oac_res);
 
     ret = oac_decode_native(st, data, len, out, frame_size, decode_fec, 0, NULL, 0, NULL, 0);
@@ -1052,6 +1079,15 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
                 goto bad_arg;
             }
             *value = st->Fs;
+        }
+        break;
+        case OAC_GET_FORMAT_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) {
+                goto bad_arg;
+            }
+            *value = st->format;
         }
         break;
         case OAC_GET_PITCH_REQUEST:
@@ -1225,7 +1261,7 @@ int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len) {
     if (packet_frame_size > 960)
         nb_frames = packet_frame_size/960;
     packet_stream_channels = oac_packet_get_nb_channels(packet);
-    ret = oac_packet_parse(packet, len, NULL, frames, size, NULL);
+    ret = oac_packet_parse(packet, len, NULL, frames, size, NULL, OAC_FORMAT_STANDARD);
     if (ret <= 0)
         return ret;
     if (size[0] == 0)
@@ -1372,7 +1408,7 @@ static int oaci_dred_find_payload(const unsigned char *data, oac_int32 len, cons
     *payload = NULL;
     /* Get the padding section of the packet. */
     ret = oac_packet_parse_impl(data, len, 0, NULL, frames, size, NULL, NULL,
-    &padding, &padding_len);
+    &padding, &padding_len, OAC_FORMAT_STANDARD);
     if (ret < 0)
         return ret;
     nb_frames = ret;
@@ -1507,7 +1543,7 @@ int oac_decoder_dred_decode(OacDecoder *st, const OacDRED *dred, oac_int32 dred_
         return OAC_BAD_ARG;
     }
 
-    celt_assert(st->channels == 1 || st->channels == 2);
+    celt_assert(st->channels >= 1 && st->channels <= OAC_MAX_CHANNELS);
     ALLOC(out, frame_size*st->channels, float);
 
     ret = oac_decode_native(st, NULL, 0, out, frame_size, 0, 0, NULL, 1, dred, dred_offset);
@@ -1539,7 +1575,7 @@ int oac_decoder_dred_decode24(OacDecoder *st, const OacDRED *dred, oac_int32 dre
         return OAC_BAD_ARG;
     }
 
-    celt_assert(st->channels == 1 || st->channels == 2);
+    celt_assert(st->channels >= 1 && st->channels <= OAC_MAX_CHANNELS);
     ALLOC(out, frame_size*st->channels, float);
 
     ret = oac_decode_native(st, NULL, 0, out, frame_size, 0, 0, NULL, 1, dred, dred_offset);

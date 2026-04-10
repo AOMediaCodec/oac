@@ -75,6 +75,7 @@ struct OacRepacketizer {
     const unsigned char *frames[48];
     oac_int16 len[48];
     int framesize;
+    int format;
     const unsigned char *paddings[48];
     oac_int32 padding_len[48];
     unsigned char padding_nb_frames[48];
@@ -239,7 +240,8 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     int self_delimited, unsigned char *out_toc,
     const unsigned char *frames[48], oac_int16 size[48],
     int *payload_offset, oac_int32 *packet_offset,
-    const unsigned char **padding, oac_int32 *padding_len);
+    const unsigned char **padding, oac_int32 *padding_len,
+    int format);
 
 oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int end,
     unsigned char *data, oac_int32 maxlen, int self_delimited, int pad,
@@ -291,4 +293,23 @@ oac_int32 oac_packet_extensions_count_ext(const unsigned char *data,
 oac_int32 oac_packet_pad_impl(unsigned char *data, oac_int32 len, oac_int32 new_len, int pad,
     const oac_extension_data  *extensions, int nb_extensions);
 
+/** Validate format and channel count combination.
+ * @param format OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS
+ * @param channels Number of channels
+ * @returns 1 if valid, 0 if invalid
+ */
+static OAC_INLINE int oaci_validate_format_channels(int format, int channels) {
+    if (format == OAC_FORMAT_STANDARD) {
+        return (channels == 1 || channels == 2);
+    } else if (format == OAC_FORMAT_AMBISONICS) {
+        /* Valid ambisonics channel counts: (order+1)^2 for orders 0 to OAC_MAX_AMBISONICS_ORDER */
+        int order;
+        for (order = 0; order <= OAC_MAX_AMBISONICS_ORDER; order++) {
+            if (channels == (order+1)*(order+1))
+                return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
 #endif /* OAC_PRIVATE_H */

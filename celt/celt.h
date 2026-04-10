@@ -84,6 +84,12 @@
 #define CELTDecoder OacCustomDecoder
 #define CELTMode OacCustomMode
 
+/** Maximum supported ambisonics order. */
+#define OAC_MAX_AMBISONICS_ORDER 5
+#define OAC_MAX_AMBISONICS_CHANNELS ((OAC_MAX_AMBISONICS_ORDER+1)*(OAC_MAX_AMBISONICS_ORDER+1))
+#define OAC_MAX_CHANNELS 255
+/* Check that OAC_MAX_CHANNELS is large enough */
+typedef char oac_assert_max_channels_sufficient[(OAC_MAX_CHANNELS >= OAC_MAX_AMBISONICS_CHANNELS) ? 1 : -1];
 #define LEAK_BANDS 19
 
 typedef struct {
@@ -184,7 +190,7 @@ int oaci_celt_encode_with_ec(OacCustomEncoder * OAC_RESTRICT st, const oac_res *
     unsigned char *compressed, int nbCompressedBytes, ec_enc *enc);
 
 int oaci_celt_encoder_init(CELTEncoder *st, oac_int32 sampling_rate, int channels,
-    int arch);
+    int arch, int format);
 
 
 
@@ -193,7 +199,7 @@ int oaci_celt_encoder_init(CELTEncoder *st, oac_int32 sampling_rate, int channel
 int oaci_celt_decoder_get_size(int channels);
 
 
-int oaci_celt_decoder_init(CELTDecoder *st, oac_int32 sampling_rate, int channels);
+int oaci_celt_decoder_init(CELTDecoder *st, oac_int32 sampling_rate, int channels, int format);
 
 int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned char *data,
     int len, oac_res * OAC_RESTRICT pcm, int frame_size, ec_dec *dec, int accum

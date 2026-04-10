@@ -665,7 +665,7 @@ void test_oac_repacketizer_out_range_impl(void) {
         {100, 0, (const unsigned char *)"uvwxyz", 6},
     };
 
-    oac_repacketizer_init(&rp);
+    oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
 
     memset(packet, 0, sizeof(packet));
     /* Hybrid Packet with 20 msec frames, Code 3 */
@@ -703,7 +703,7 @@ void test_oac_repacketizer_out_range_impl(void) {
 
     /* now verify that we have the expected extensions */
     res = oac_packet_parse_impl(packet_out, res, 0, NULL, NULL, size,
-      NULL, NULL, &padding, &padding_len);
+      NULL, NULL, &padding, &padding_len, OAC_FORMAT_STANDARD);
     nb_ext = 10;
     res = oac_packet_extensions_parse(padding, padding_len, ext_out, &nb_ext,
     3);

@@ -89,3 +89,9 @@ src/x64
 .vs/
 .vscode/
 CMakeSettings.json
+
+# Downloaded model files (autogen.sh / dnn/download_model.sh)
+dnn/*_data.c
+dnn/*_data.h
+dnn/dred_rdovae_constants.h
+*.pth

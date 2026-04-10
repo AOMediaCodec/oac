@@ -185,12 +185,14 @@ OAC_CUSTOM_EXPORT_STATIC OAC_WARN_UNUSED_RESULT int oac_custom_encoder_get_size(
  *  the stream (must be the same characteristics as used for the
  *  decoder)
  * @param [in] channels <tt>int</tt>: Number of channels
+ * @param [in] format <tt>int</tt>: Stream format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @return OAC_OK Success or @ref oac_errorcodes
  */
 OAC_CUSTOM_EXPORT int oac_custom_encoder_init(
     OacCustomEncoder *st,
     const OacCustomMode *mode,
-    int channels) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(2);
+    int channels,
+    int format) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(2);
 # endif
 #endif
 
@@ -201,12 +203,14 @@ OAC_CUSTOM_EXPORT int oac_custom_encoder_init(
  *  the stream (must be the same characteristics as used for the
  *  decoder)
  * @param [in] channels <tt>int</tt>: Number of channels
+ * @param [in] format <tt>int</tt>: Stream format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @param [out] error <tt>int*</tt>: Returns an error code
  * @return Newly created encoder state.
  */
 OAC_CUSTOM_EXPORT OAC_WARN_UNUSED_RESULT OacCustomEncoder *oac_custom_encoder_create(
     const OacCustomMode *mode,
     int channels,
+    int format,
     int *error) OAC_ARG_NONNULL(1);
 
 
@@ -310,12 +314,14 @@ OAC_CUSTOM_EXPORT_STATIC OAC_WARN_UNUSED_RESULT int oac_custom_decoder_get_size(
  *  the stream (must be the same characteristics as used for the
  *  encoder)
  * @param [in] channels <tt>int</tt>: Number of channels
+ * @param [in] format <tt>int</tt>: Stream format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @return OAC_OK Success or @ref oac_errorcodes
  */
 OAC_CUSTOM_EXPORT_STATIC int oac_custom_decoder_init(
     OacCustomDecoder *st,
     const OacCustomMode *mode,
-    int channels) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(2);
+    int channels,
+    int format) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(2);
 
 #endif
 
@@ -325,12 +331,14 @@ OAC_CUSTOM_EXPORT_STATIC int oac_custom_decoder_init(
  * @param [in] mode <tt>OacCustomMode</tt>: Contains all the information about the characteristics of the
  *          stream (must be the same characteristics as used for the encoder)
  * @param [in] channels <tt>int</tt>: Number of channels
+ * @param [in] format <tt>int</tt>: Stream format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @param [out] error <tt>int*</tt>: Returns an error code
  * @return Newly created decoder state.
  */
 OAC_CUSTOM_EXPORT OAC_WARN_UNUSED_RESULT OacCustomDecoder *oac_custom_decoder_create(
     const OacCustomMode *mode,
     int channels,
+    int format,
     int *error) OAC_ARG_NONNULL(1);
 
 /** Destroys a decoder state.

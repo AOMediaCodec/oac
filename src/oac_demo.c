@@ -76,7 +76,7 @@
 # include "lossgen.h"
 #endif
 
-#define MAX_PACKET 15000
+#define MAX_PACKET (1276*OAC_MAX_AMBISONICS_CHANNELS)
 
 #ifdef ENABLE_QEXT
 # define MAX_SAMPLING_RATE 96000
@@ -160,6 +160,7 @@ void print_usage( char* argv[] ) {
     fprintf(stderr, "options:\n" );
     fprintf(stderr, "-e                   : only runs the encoder (output the bit-stream)\n" );
     fprintf(stderr, "-d                   : only runs the decoder (reads the bit-stream as input)\n" );
+    fprintf(stderr, "-format <std|ambix>  : audio format (std=standard 1-2ch, ambix=ambisonics 1/4/9/16/25/36ch); default: std\n" );
     fprintf(stderr, "-cbr                 : enable constant bitrate; default: variable bitrate\n" );
     fprintf(stderr, "-cvbr                : enable constrained variable bitrate; default: unconstrained\n" );
     fprintf(stderr,
@@ -458,6 +459,7 @@ int main(int argc, char *argv[]) {
     int k;
     oac_int32 skip = 0;
     int format = FORMAT_S16_LE;
+    int oac_format = OAC_FORMAT_STANDARD;
     int stop = 0;
     oac_int32 *in = NULL;
     oac_int32 *out = NULL;
@@ -567,8 +569,9 @@ int main(int argc, char *argv[]) {
     channels = atoi(argv[args]);
     args++;
 
-    if (channels < 1 || channels > 2) {
-        fprintf(stderr, "Oac_demo supports only 1 or 2 channels.\n");
+    /* Basic channel validation - full validation done after parsing -format option */
+    if (channels < 1 || channels > OAC_MAX_CHANNELS) {
+        fprintf(stderr, "Channels must be between 1 and %d.\n", OAC_MAX_CHANNELS);
         goto failure;
     }
 
@@ -593,6 +596,18 @@ int main(int argc, char *argv[]) {
             check_encoder_option(decode_only, "-cbr");
             use_vbr = 0;
             args++;
+        } else if (strcmp( argv[ args ], "-format" ) == 0) {
+            if (strcmp(argv[ args + 1 ], "std") == 0)
+                oac_format = OAC_FORMAT_STANDARD;
+            else if (strcmp(argv[ args + 1 ], "ambix") == 0)
+                oac_format = OAC_FORMAT_AMBISONICS;
+            else {
+                fprintf(stderr, "Unknown format %s. "
+                                "Supported are std, ambix.\n",
+                                argv[ args + 1 ]);
+                goto failure;
+            }
+            args += 2;
         } else if (strcmp( argv[ args ], "-bandwidth" ) == 0) {
             check_encoder_option(decode_only, "-bandwidth");
             if (strcmp(argv[ args + 1 ], "NB") == 0)
@@ -780,6 +795,24 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    /* Validate channel count based on format */
+    if (oac_format == OAC_FORMAT_STANDARD) {
+        if (channels < 1 || channels > 2) {
+            fprintf(stderr, "Standard format supports only 1 or 2 channels.\n");
+            goto failure;
+        }
+    } else if (oac_format == OAC_FORMAT_AMBISONICS) {
+        /* Valid ambisonics channel counts: (order+1)^2 for orders 0 to OAC_MAX_AMBISONICS_ORDER */
+        int valid = 0, order;
+        for (order = 0; order <= OAC_MAX_AMBISONICS_ORDER; order++) {
+            if (channels == (order+1)*(order+1)) { valid = 1; break; }
+        }
+        if (!valid) {
+            fprintf(stderr, "Ambisonics format requires (order+1)^2 channels for orders 0-%d.\n",
+                    OAC_MAX_AMBISONICS_ORDER);
+            goto failure;
+        }
+    }
     if (sweep_max)
         sweep_min = bitrate_bps;
 
@@ -816,7 +849,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (!decode_only) {
-        enc = oac_encoder_create(sampling_rate, channels, application, &err);
+        enc = oac_encoder_create(sampling_rate, channels, oac_format, application, &err);
         if (err != OAC_OK) {
             fprintf(stderr, "Cannot create encoder: %s\n", oac_strerror(err));
             goto failure;
@@ -843,7 +876,7 @@ int main(int argc, char *argv[]) {
 #endif
     }
     if (!encode_only) {
-        dec = oac_decoder_create(sampling_rate, channels, &err);
+        dec = oac_decoder_create(sampling_rate, channels, oac_format, &err);
         if (err != OAC_OK) {
             fprintf(stderr, "Cannot create decoder: %s\n", oac_strerror(err));
             goto failure;

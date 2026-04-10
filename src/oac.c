@@ -64,6 +64,7 @@
 #endif
 
 #include "oac.h"
+#include "celt.h"
 #include "mathops.h"
 #include "oac_private.h"
 
@@ -237,7 +238,8 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
                           int self_delimited, unsigned char *out_toc,
                           const unsigned char *frames[48], oac_int16 size[48],
                           int *payload_offset, oac_int32 *packet_offset,
-                          const unsigned char **padding, oac_int32 *padding_len) {
+                          const unsigned char **padding, oac_int32 *padding_len,
+                          int format) {
     int i, bytes;
     int count;
     int cbr;
@@ -361,7 +363,7 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
         /* Because it's not encoded explicitly, it's possible the size of the
            last packet (or all the packets, for the CBR case) is larger than
            1275. Reject them here.*/
-        if (last_size > 1275)
+        if (last_size > (format == OAC_FORMAT_AMBISONICS ? 1275*OAC_MAX_CHANNELS : 1275))
             return OAC_INVALID_PACKET;
         size[count - 1] = (oac_int16)last_size;
     }
@@ -390,7 +392,8 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
 
 int oac_packet_parse(const unsigned char *data, oac_int32 len,
                      unsigned char *out_toc, const unsigned char *frames[48],
-                     oac_int16 size[48], int *payload_offset) {
+                     oac_int16 size[48], int *payload_offset, int format) {
     return oac_packet_parse_impl(data, len, 0, out_toc,
-                                 frames, size, payload_offset, NULL, NULL, NULL);
+                                 frames, size, payload_offset, NULL, NULL, NULL,
+                                 format);
 }

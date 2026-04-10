@@ -131,11 +131,11 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    rp = oac_repacketizer_create();
+    rp = oac_repacketizer_create(OAC_FORMAT_STANDARD);
     while (!eof) {
         int err;
         int nb_packets = merge;
-        oac_repacketizer_init(rp);
+        oac_repacketizer_init(rp, OAC_FORMAT_STANDARD);
         for (i = 0; i < nb_packets; i++) {
             unsigned char ch[4];
             if (fread(ch, 1, 4, fin) != 4) {

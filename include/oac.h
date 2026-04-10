@@ -198,13 +198,15 @@ typedef struct OacEncoder OacEncoder;
 
 /** Gets the size of an <code>OacEncoder</code> structure.
  * @param[in] channels <tt>int</tt>: Number of channels.
- *                                   This must be 1 or 2.
- * @returns The size in bytes.
+ *                                   For OAC_FORMAT_STANDARD: 1 or 2.
+ *                                   For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
+ * @param[in] format <tt>int</tt>: Format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
+ * @returns The size in bytes, or 0 on error.
  * @note Since this function does not take the application as input, it will overestimate
  * the size required for OAC_APPLICATION_RESTRICTED_SILK and OAC_APPLICATION_RESTRICTED_CELT.
  * That is generally not a problem, except when trying to know the size to use for a copy.
  */
-OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_encoder_get_size(int channels);
+OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_encoder_get_size(int channels, int format);
 
 /**
  */
@@ -233,7 +235,10 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_encoder_get_size(int channels);
  * @param [in] Fs <tt>oac_int32</tt>: Sampling rate of input signal (Hz)
  *                                     This must be one of 8000, 12000, 16000,
  *                                     24000, or 48000.
- * @param [in] channels <tt>int</tt>: Number of channels (1 or 2) in input signal
+ * @param [in] channels <tt>int</tt>: Number of channels in input signal.
+ *                                    For OAC_FORMAT_STANDARD: 1 or 2.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
+ * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @param [in] application <tt>int</tt>: Coding mode (one of @ref OAC_APPLICATION_VOIP, @ref OAC_APPLICATION_AUDIO, or @ref OAC_APPLICATION_RESTRICTED_LOWDELAY)
  * @param [out] error <tt>int*</tt>: @ref oac_errorcodes
  * @note Regardless of the sampling rate and number channels selected, the Oac encoder
@@ -244,6 +249,7 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_encoder_get_size(int channels);
 OAC_EXPORT OAC_WARN_UNUSED_RESULT OacEncoder *oac_encoder_create(
     oac_int32 Fs,
     int channels,
+    int format,
     int application,
     int *error);
 
@@ -256,7 +262,10 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT OacEncoder *oac_encoder_create(
  * @param [in] Fs <tt>oac_int32</tt>: Sampling rate of input signal (Hz)
  *                                      This must be one of 8000, 12000, 16000,
  *                                      24000, or 48000.
- * @param [in] channels <tt>int</tt>: Number of channels (1 or 2) in input signal
+ * @param [in] channels <tt>int</tt>: Number of channels in input signal.
+ *                                    For OAC_FORMAT_STANDARD: 1 or 2.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
+ * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @param [in] application <tt>int</tt>: Coding mode (one of OAC_APPLICATION_VOIP, OAC_APPLICATION_AUDIO, or OAC_APPLICATION_RESTRICTED_LOWDELAY)
  * @retval #OAC_OK Success or @ref oac_errorcodes
  */
@@ -264,6 +273,7 @@ OAC_EXPORT int oac_encoder_init(
     OacEncoder *st,
     oac_int32 Fs,
     int channels,
+    int format,
     int application) OAC_ARG_NONNULL(1);
 
 /** Encodes an Oac frame.
@@ -482,16 +492,21 @@ typedef struct OacDRED OacDRED;
 
 /** Gets the size of an <code>OacDecoder</code> structure.
  * @param [in] channels <tt>int</tt>: Number of channels.
- *                                    This must be 1 or 2.
- * @returns The size in bytes.
+ *                                    For OAC_FORMAT_STANDARD: 1 or 2.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
+ * @param [in] format <tt>int</tt>: Format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
+ * @returns The size in bytes, or 0 on error.
  */
-OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decoder_get_size(int channels);
+OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decoder_get_size(int channels, int format);
 
 /** Allocates and initializes a decoder state.
  * @param [in] Fs <tt>oac_int32</tt>: Sample rate to decode at (Hz).
  *                                     This must be one of 8000, 12000, 16000,
  *                                     24000, or 48000.
- * @param [in] channels <tt>int</tt>: Number of channels (1 or 2) to decode
+ * @param [in] channels <tt>int</tt>: Number of channels to decode.
+ *                                    For OAC_FORMAT_STANDARD: 1 or 2.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
+ * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @param [out] error <tt>int*</tt>: #OAC_OK Success or @ref oac_errorcodes
  *
  * Internally Oac stores data at 48000 Hz, so that should be the default
@@ -505,6 +520,7 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decoder_get_size(int channels);
 OAC_EXPORT OAC_WARN_UNUSED_RESULT OacDecoder *oac_decoder_create(
     oac_int32 Fs,
     int channels,
+    int format,
     int *error);
 
 /** Initializes a previously allocated decoder state.
@@ -515,13 +531,17 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT OacDecoder *oac_decoder_create(
  * @param [in] Fs <tt>oac_int32</tt>: Sampling rate to decode to (Hz).
  *                                     This must be one of 8000, 12000, 16000,
  *                                     24000, or 48000.
- * @param [in] channels <tt>int</tt>: Number of channels (1 or 2) to decode
+ * @param [in] channels <tt>int</tt>: Number of channels to decode.
+ *                                    For OAC_FORMAT_STANDARD: 1 or 2.
+ *                                    For OAC_FORMAT_AMBISONICS: (order+1)^2 channels, up to OAC_MAX_AMBISONICS_ORDER.
+ * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @retval #OAC_OK Success or @ref oac_errorcodes
  */
 OAC_EXPORT int oac_decoder_init(
     OacDecoder *st,
     oac_int32 Fs,
-    int channels) OAC_ARG_NONNULL(1);
+    int channels,
+    int format) OAC_ARG_NONNULL(1);
 
 /** Decode an Oac packet.
  * @param [in] st <tt>OacDecoder*</tt>: Decoder state
@@ -735,6 +755,7 @@ OAC_EXPORT int oac_decoder_dred_decode_float(OacDecoder *st, const OacDRED *dred
  * @param [out] frames <tt>char*[48]</tt> encapsulated frames
  * @param [out] size <tt>oac_int16[48]</tt> sizes of the encapsulated frames
  * @param [out] payload_offset <tt>int*</tt>: returns the position of the payload within the packet (in bytes)
+ * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @returns number of frames
  */
 OAC_EXPORT int oac_packet_parse(
@@ -743,7 +764,8 @@ OAC_EXPORT int oac_packet_parse(
     unsigned char *out_toc,
     const unsigned char *frames[48],
     oac_int16 size[48],
-    int *payload_offset) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(5);
+    int *payload_offset,
+    int format) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(5);
 
 /** Gets the bandwidth of an Oac packet.
  * @param [in] data <tt>char*</tt>: Oac packet
@@ -997,14 +1019,16 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_repacketizer_get_size(void);
  * @see oac_repacketizer_cat
  * @param rp <tt>OacRepacketizer*</tt>: The repacketizer state to
  *                                       (re)initialize.
+ * @param format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
  * @returns A pointer to the same repacketizer state that was passed in.
  */
-OAC_EXPORT OacRepacketizer *oac_repacketizer_init(OacRepacketizer *rp) OAC_ARG_NONNULL(1);
+OAC_EXPORT OacRepacketizer *oac_repacketizer_init(OacRepacketizer *rp, int format) OAC_ARG_NONNULL(1);
 
 /** Allocates memory and initializes the new repacketizer with
  * oac_repacketizer_init().
+ * @param format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
  */
-OAC_EXPORT OAC_WARN_UNUSED_RESULT OacRepacketizer *oac_repacketizer_create(void);
+OAC_EXPORT OAC_WARN_UNUSED_RESULT OacRepacketizer *oac_repacketizer_create(int format);
 
 /** Frees an <code>OacRepacketizer</code> allocated by
  * oac_repacketizer_create().
