@@ -494,15 +494,17 @@ static int oaci_patch_transient_decision(celt_glog *newE, celt_glog *oldE, int n
     celt_glog spread_old[26];
     /* Apply an aggressive (-6 dB/Bark) spreading function to the old frame to
        avoid false detection caused by irrelevant bands */
-    if (C == 1) {
-        spread_old[start] = oldE[start];
-        for (i = start + 1; i < end; i++)
-            spread_old[i] = MAXG(spread_old[i - 1] - GCONST(1.0f), oldE[i]);
-    } else {
+    if (C == 2) {
         spread_old[start] = MAXG(oldE[start], oldE[start + nbEBands]);
         for (i = start + 1; i < end; i++)
             spread_old[i] = MAXG(spread_old[i - 1] - GCONST(1.0f),
                                MAXG(oldE[i], oldE[i + nbEBands]));
+    } else {
+        /* TODO: For ambisonics (C>2), using the omni channel (W) alone
+           might not be optimal for transient detection. */
+        spread_old[start] = oldE[start];
+        for (i = start + 1; i < end; i++)
+            spread_old[i] = MAXG(spread_old[i - 1] - GCONST(1.0f), oldE[i]);
     }
     for (i = end - 2; i >= start; i--)
         spread_old[i] = MAXG(spread_old[i], spread_old[i + 1] - GCONST(1.0f));
@@ -1132,9 +1134,8 @@ static celt_glog oaci_dynalloc_analysis(const celt_glog *bandLogE, const celt_gl
                 bandLogE[nbEBands + i] - follower[nbEBands + i]));
             }
         } else {
-            /* For C>2 (ambisonics), the W channel is already the average of
-               all channels, so we can use it directly as reference without
-               cross-talk or multi-channel averaging. */
+            /* TODO: For ambisonics we fall through to using the omni channel which
+               might not be optimal */
             for (i = start; i < end; i++) {
                 follower[i] = MAXG(0, bandLogE[i] - follower[i]);
             }

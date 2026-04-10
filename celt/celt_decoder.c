@@ -617,11 +617,13 @@ void oaci_update_plc_state(LPCNetPLCState *lpcnet, celt_sig *decode_mem[OAC_MAX_
     int offset;
     celt_sig buf48k[DECODE_BUFFER_SIZE];
     oac_int16 buf16k[PLC_UPDATE_SAMPLES];
-    if (CC == 1) OAC_COPY(buf48k, decode_mem[0], DECODE_BUFFER_SIZE);
-    else {
+    if (CC == 2) {
         for (i = 0; i < DECODE_BUFFER_SIZE; i++) {
             buf48k[i] = .5*(decode_mem[0][i] + decode_mem[1][i]);
         }
+    } else {
+        /* For mono or ambisonics (CC>2), use the omni channel directly. */
+        OAC_COPY(buf48k, decode_mem[0], DECODE_BUFFER_SIZE);
     }
     /* Down-sample the last 40 ms. */
     for (i = 1; i < DECODE_BUFFER_SIZE; i++) buf48k[i] += PREEMPHASIS*buf48k[i - 1];
@@ -1308,7 +1310,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
                 /* Shorter frames have more natural fluctuations -- play it safe. */
                 oldBandE[c*nbEBands + i] -= safety;
             }
-        } while (++c < 2);
+        } while (++c < max_channels);
     }
     /* Get band energies */
     oaci_unquant_coarse_energy(mode, start, end, oldBandE,
