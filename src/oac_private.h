@@ -291,4 +291,19 @@ oac_int32 oac_packet_extensions_count_ext(const unsigned char *data,
 oac_int32 oac_packet_pad_impl(unsigned char *data, oac_int32 len, oac_int32 new_len, int pad,
     const oac_extension_data  *extensions, int nb_extensions);
 
+/** Validate format and channel count combination.
+ * @param format OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS
+ * @param channels Number of channels
+ * @returns 1 if valid, 0 if invalid
+ */
+static OAC_INLINE int oaci_validate_format_channels(int format, int channels) {
+    if (format == OAC_FORMAT_STANDARD) {
+        return (channels == 1 || channels == 2);
+    } else if (format == OAC_FORMAT_AMBISONICS) {
+        /* Valid ambisonics channel counts: (order+1)^2 for orders 0-5 */
+        return (channels == 1 || channels == 4 || channels == 9 ||
+                channels == 16 || channels == 25 || channels == 36);
+    }
+    return 0;
+}
 #endif /* OAC_PRIVATE_H */
