@@ -1051,9 +1051,9 @@ static celt_glog oaci_dynalloc_analysis(const celt_glog *bandLogE, const celt_gl
         ALLOC(sig, nbEBands, celt_glog);
         for (i = 0; i < end; i++)
             mask[i] = bandLogE[i] - noise_floor[i];
-        if (C == 2) {
+        for (c = 1; c < C; c++) {
             for (i = 0; i < end; i++)
-                mask[i] = MAXG(mask[i], bandLogE[nbEBands + i] - noise_floor[i]);
+                mask[i] = MAXG(mask[i], bandLogE[c*nbEBands + i] - noise_floor[i]);
         }
         OAC_COPY(sig, mask, end);
         for (i = 1; i < end; i++)
@@ -1132,6 +1132,9 @@ static celt_glog oaci_dynalloc_analysis(const celt_glog *bandLogE, const celt_gl
                 bandLogE[nbEBands + i] - follower[nbEBands + i]));
             }
         } else {
+            /* For C>2 (ambisonics), the W channel is already the average of
+               all channels, so we can use it directly as reference without
+               cross-talk or multi-channel averaging. */
             for (i = start; i < end; i++) {
                 follower[i] = MAXG(0, bandLogE[i] - follower[i]);
             }
@@ -1607,14 +1610,7 @@ static int oaci_compute_vbr(const CELTMode *mode, AnalysisInfo *analysis, oac_in
         target -= (oac_int32)MIN32(MULT16_32_Q15(max_frac, target),
                       SHR32(MULT16_16(stereo_saving - QCONST16(0.1f, 8), (coded_stereo_dof<<BITRES)), 8));
     }
-    /* Boost the rate according to dynalloc (minus the dynalloc average for calibration).
-       tot_boost scales with C through band width in dynalloc. For C<=2 the
-       calibration constant of 19 is balanced by stereo savings; for C>2
-       (multi-mono, no stereo savings) we scale it to avoid a positive bias. */
-    if (C > 2)
-        target += tot_boost - C * (19<<LM);
-    else
-        target += tot_boost - (19<<LM);
+    target += tot_boost - (19<<LM);
     /* Apply transient boost, compensating for average boost. */
     tf_calibration = QCONST16(0.044f, 14);
     target += (oac_int32)SHL32(MULT16_32_Q15(tf_estimate - tf_calibration, target), 1);
@@ -2093,8 +2089,8 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
         celt_glog offset = shortBlocks?HALF32(SHL32(LM, DB_SHIFT - 5)):0;
         for (i = start; i < end; i++) {
             follow = MAXG(follow - QCONST32(1.0f, DB_SHIFT - 5), SHR32(bandLogE[i], 5) - offset);
-            if (C == 2)
-                follow = MAXG(follow, SHR32(bandLogE[i + nbEBands], 5) - offset);
+            for (c = 1; c < C; c++)
+                follow = MAXG(follow, SHR32(bandLogE[i + c*nbEBands], 5) - offset);
             frame_avg += follow;
         }
         frame_avg /= (end - start);
