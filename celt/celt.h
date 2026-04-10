@@ -92,6 +92,10 @@
 typedef char oac_assert_max_channels_sufficient[(OAC_MAX_CHANNELS >= OAC_MAX_AMBISONICS_CHANNELS) ? 1 : -1];
 #define LEAK_BANDS 19
 
+/** SEMAC (Spatial Energy Matching Ambisonics Coding) is now controlled at runtime
+    via encoder controls (OAC_SET_ENABLE_SEMAC). The compile-time ENABLE_SEMAC flag
+    only controls whether SEMAC support is compiled into the library. */
+
 typedef struct {
     int valid;
     float tonality;

@@ -161,6 +161,10 @@ void print_usage( char* argv[] ) {
     fprintf(stderr, "-e                   : only runs the encoder (output the bit-stream)\n" );
     fprintf(stderr, "-d                   : only runs the decoder (reads the bit-stream as input)\n" );
     fprintf(stderr, "-format <std|ambix>  : audio format (std=standard 1-2ch, ambix=ambisonics 1/4/9/16/25/36ch); default: std\n" );
+#ifdef ENABLE_SEMAC
+    fprintf(stderr, "-enable_semac        : enable SEMAC for ambisonics; default: disabled\n" );
+    fprintf(stderr, "-semac_transport_order <order> : SEMAC transport order (-1=input order, 0-5); default: -1\n" );
+#endif
     fprintf(stderr, "-cbr                 : enable constant bitrate; default: variable bitrate\n" );
     fprintf(stderr, "-cvbr                : enable constrained variable bitrate; default: unconstrained\n" );
     fprintf(stderr,
@@ -589,6 +593,10 @@ int main(int argc, char *argv[]) {
     forcechannels = OAC_AUTO;
     use_dtx = 0;
     packet_loss_perc = 0;
+#ifdef ENABLE_SEMAC
+    int enable_semac = 0;
+    int semac_transport_order = -1;
+#endif
 
     while (args < argc - 2) {
         /* process command line options */
@@ -788,6 +796,16 @@ int main(int argc, char *argv[]) {
             enable_osce_bwe = 1;
             args++;
 #endif
+#ifdef ENABLE_SEMAC
+        } else if (strcmp( argv[ args ], "-enable_semac" ) == 0) {
+            check_encoder_option(decode_only, "-enable_semac");
+            enable_semac = 1;
+            args++;
+        } else if (strcmp( argv[ args ], "-semac_transport_order" ) == 0) {
+            check_encoder_option(decode_only, "-semac_transport_order");
+            semac_transport_order = atoi(argv[ args + 1 ]);
+            args += 2;
+#endif
         } else {
             printf( "Error: unrecognized setting: %s\n\n", argv[ args ] );
             print_usage( argv );
@@ -870,6 +888,12 @@ int main(int argc, char *argv[]) {
         if (dred_duration > 0) {
             oac_encoder_ctl(enc, OAC_SET_DRED_DURATION(dred_duration));
         }
+#ifdef ENABLE_SEMAC
+        if (enable_semac) {
+            oac_encoder_ctl(enc, OAC_SET_ENABLE_SEMAC(1));
+            oac_encoder_ctl(enc, OAC_SET_SEMAC_TRANSPORT_ORDER(semac_transport_order));
+        }
+#endif
 #ifdef ENABLE_OSCE_TRAINING_DATA
         oac_encoder_ctl(enc, OAC_SET_FORCE_MODE(MODE_SILK_ONLY));
         srand(0);

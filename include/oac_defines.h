@@ -214,6 +214,13 @@ extern "C" {
 #define OAC_GET_IGNORE_EXTENSIONS_REQUEST 4059
 #define OAC_GET_FORMAT_REQUEST 4060
 
+#ifdef ENABLE_SEMAC
+#define OAC_SET_ENABLE_SEMAC_REQUEST 4062
+#define OAC_GET_ENABLE_SEMAC_REQUEST 4063
+#define OAC_SET_SEMAC_TRANSPORT_ORDER_REQUEST 4064
+#define OAC_GET_SEMAC_TRANSPORT_ORDER_REQUEST 4065
+#endif
+
 /** Defines for the presence of extended APIs. */
 #define OAC_HAVE_OAC_PROJECTION_H
 
@@ -872,6 +879,42 @@ extern "C" {
  * @hideinitializer
  */
 #define OAC_GET_FORMAT(x) OAC_GET_FORMAT_REQUEST, oac_check_int_ptr(x)
+
+#ifdef ENABLE_SEMAC
+/** Enables or disables SEMAC (Spatial Energy Matching Ambisonics Coding) in the encoder.
+ * @see OAC_GET_ENABLE_SEMAC
+ * @param[in] x <tt>oac_int32</tt>: Allowed values:
+ * <dl>
+ * <dt>0</dt><dd>Disable SEMAC (default).</dd>
+ * <dt>1</dt><dd>Enable SEMAC for ambisonics encoding.</dd>
+ * </dl>
+ * @hideinitializer */
+#define OAC_SET_ENABLE_SEMAC(x) OAC_SET_ENABLE_SEMAC_REQUEST, oac_check_int(x)
+/** Gets encoder's configured use of SEMAC.
+ * @see OAC_SET_ENABLE_SEMAC
+ * @param[out] x <tt>oac_int32 *</tt>: Returns one of the following values:
+ * <dl>
+ * <dt>0</dt><dd>SEMAC disabled (default).</dd>
+ * <dt>1</dt><dd>SEMAC enabled.</dd>
+ * </dl>
+ * @hideinitializer */
+#define OAC_GET_ENABLE_SEMAC(x) OAC_GET_ENABLE_SEMAC_REQUEST, oac_check_int_ptr(x)
+
+/** Configures the SEMAC transport order.
+ * @see OAC_GET_SEMAC_TRANSPORT_ORDER
+ * @param[in] x <tt>oac_int32</tt>: Transport order. Allowed values:
+ * <dl>
+ * <dt>-1</dt><dd>Use input order (default).</dd>
+ * <dt>0-5</dt><dd>Specific ambisonics order (0=mono, 1=FOA, 2=2nd order, etc.)</dd>
+ * </dl>
+ * @hideinitializer */
+#define OAC_SET_SEMAC_TRANSPORT_ORDER(x) OAC_SET_SEMAC_TRANSPORT_ORDER_REQUEST, oac_check_int(x)
+/** Gets the encoder's configured SEMAC transport order.
+ * @see OAC_SET_SEMAC_TRANSPORT_ORDER
+ * @param[out] x <tt>oac_int32 *</tt>: Returns the transport order (-1 for input order, or 0-5).
+ * @hideinitializer */
+#define OAC_GET_SEMAC_TRANSPORT_ORDER(x) OAC_GET_SEMAC_TRANSPORT_ORDER_REQUEST, oac_check_int_ptr(x)
+#endif
 /**@}*/
 
 /** @defgroup oac_libinfo Oac library information functions

@@ -80,8 +80,13 @@
 #include "pitch.h"
 #include "bands.h"
 #include "modes.h"
-#include "entcode.h"
+#ifdef ENABLE_SEMAC
+#include "stack_alloc.h"
+#endif
 #include "quant_bands.h"
+#ifdef ENABLE_SEMAC
+#include "semac.h"
+#endif
 #include "rate.h"
 #include "stack_alloc.h"
 #include "mathops.h"
@@ -104,6 +109,11 @@ struct OacCustomEncoder {
     int channels;
     int stream_channels;
     int format;                   /**< OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS */
+
+#ifdef ENABLE_SEMAC
+    int enable_semac;             /**< Whether SEMAC is enabled (0/1) */
+    int semac_transport_order;    /**< Transport order (-1 for input order, or 0-5) */
+#endif
 
     int force_intra;
     int clip;
@@ -131,6 +141,9 @@ struct OacCustomEncoder {
     oac_uint32 rng;
     int spread_decision;
     oac_val32 delayedIntra;
+#ifdef ENABLE_SEMAC
+    oac_val32 delayedIntraSpatial;
+#endif
     int tonal_average;
     int lastCodedBands;
     int hf_average;
@@ -176,8 +189,11 @@ struct OacCustomEncoder {
     /* celt_sig prefilter_mem[],  Size = channels*COMBFILTER_MAXPERIOD */
     /* celt_glog oldBandE[],     Size = channels*mode->nbEBands */
     /* celt_glog oldLogE[],      Size = channels*mode->nbEBands */
-    /* celt_glog oldLogE2[],     Size = channels*mode->nbEBands */
-    /* celt_glog energyError[],  Size = channels*mode->nbEBands */
+   /* celt_glog oldLogE2[],     Size = channels*mode->nbEBands */
+   /* celt_glog energyError[],  Size = channels*mode->nbEBands */
+#ifdef ENABLE_SEMAC
+   /* celt_glog oldSpatialBandE[], Size = channels*mode->nbEBands (SEMAC) */
+#endif
 };
 
 int oaci_celt_encoder_get_size(int channels) {
@@ -200,10 +216,15 @@ OAC_CUSTOM_NOSTATIC int oac_custom_encoder_get_size(const CELTMode *mode, int ch
     size = sizeof(struct CELTEncoder)
            + (channels*mode->overlap - 1)*sizeof(celt_sig) /* celt_sig in_mem[channels*mode->overlap]; */
            + channels*QEXT_SCALE(COMBFILTER_MAXPERIOD)*sizeof(celt_sig) /* celt_sig prefilter_mem[channels*COMBFILTER_MAXPERIOD]; */
-           + 4*channels*mode->nbEBands*sizeof(celt_glog); /* celt_glog oldBandE[channels*mode->nbEBands]; */
-                                                          /* celt_glog oldLogE[channels*mode->nbEBands]; */
-                                                          /* celt_glog oldLogE2[channels*mode->nbEBands]; */
-                                                          /* celt_glog energyError[channels*mode->nbEBands]; */
+           + 4*channels*mode->nbEBands*sizeof(celt_glog) /* celt_glog oldBandE[channels*mode->nbEBands]; */
+                                                         /* celt_glog oldLogE[channels*mode->nbEBands]; */
+                                                         /* celt_glog oldLogE2[channels*mode->nbEBands]; */
+                                                         /* celt_glog energyError[channels*mode->nbEBands]; */
+#ifdef ENABLE_SEMAC
+                                                         + OAC_MAX_AMBISONICS_CHANNELS*mode->nbEBands*sizeof(celt_glog);  /* celt_glog oldSpatialBandE[OAC_MAX_AMBISONICS_CHANNELS*mode->nbEBands]; (SEMAC) */
+#else
+;
+#endif
     return size;
 }
 
@@ -236,6 +257,11 @@ static int oac_custom_encoder_init_arch(CELTEncoder *st, const CELTMode *mode,
     st->mode = mode;
     st->stream_channels = st->channels = channels;
     st->format = format;
+
+#ifdef ENABLE_SEMAC
+    st->enable_semac = 1;
+    st->semac_transport_order = 1;
+#endif
 
     st->upsample = 1;
     st->start = 0;
@@ -1709,12 +1735,25 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     VARDECL(int, fine_priority);
     VARDECL(int, tf_res);
     VARDECL(unsigned char, collapse_masks);
+#ifdef ENABLE_SEMAC
+    VARDECL(celt_ener, spatialBandE);
+    VARDECL(celt_glog, spatialBandLogE);
+    VARDECL(celt_glog, spatialError);
+#endif
     celt_sig *prefilter_mem;
     celt_glog *oldBandE, *oldLogE, *oldLogE2, *energyError;
+#ifdef ENABLE_SEMAC
+    celt_glog *oldSpatialBandE;
+    int semac_active, transport_order, coding_channels, num_beams;
+#endif
     int shortBlocks = 0;
     int isTransient = 0;
     const int CC = st->channels;
+#ifdef ENABLE_SEMAC
+    int C = st->stream_channels; /* ToDo: rethink this part! */
+#else
     const int C = st->stream_channels;
+#endif
     int LM, M;
     int tf_select;
     int nbFilledBytes, nbAvailableBytes;
@@ -1800,6 +1839,9 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     oldLogE = oldBandE + CC*nbEBands;
     oldLogE2 = oldLogE + CC*nbEBands;
     energyError = oldLogE2 + CC*nbEBands;
+#ifdef ENABLE_SEMAC
+    oldSpatialBandE = energyError + CC*nbEBands;
+#endif
 
     if (enc == NULL) {
         tell0_frac = tell = 1;
@@ -2017,13 +2059,44 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     celt_assert(!oaci_celt_isnan(freq[0]) && (C == 1 || !oaci_celt_isnan(freq[N])));
     if (CC == 2 && C == 1)
         tf_chan = 0;
+
+#ifdef ENABLE_SEMAC
+    /* SEMAC: Determine activation and transport order */
+    {
+       int input_order = oaci_semac_get_order(CC);
+       semac_active = st->enable_semac && (st->format == OAC_FORMAT_AMBISONICS) && CC > 1;
+       if (st->semac_transport_order == -1) {
+           transport_order = input_order;  /* Use input order */
+       } else {
+           transport_order = IMIN(st->semac_transport_order, input_order);
+       }
+       coding_channels = semac_active ? oaci_semac_get_channels(transport_order) : CC;
+       num_beams = oaci_semac_get_channels(input_order);
+    }
+
+    /* Allocate SEMAC spatial energy buffers at function scope (needed later for encoding) */
+    ALLOC(spatialBandE, semac_active ? num_beams * nbEBands : ALLOC_NONE, celt_ener);
+    ALLOC(spatialBandLogE, semac_active ? num_beams * nbEBands : ALLOC_NONE, celt_glog);
+    ALLOC(spatialError, semac_active ? num_beams * nbEBands : ALLOC_NONE, celt_glog);
+
+    /* SEMAC: Extract spatial beam energies from full N-channel MDCT spectrum */
+    if (semac_active) {
+       oaci_semac_compute_spatial_energy(mode, freq,
+          spatialBandE, spatialBandLogE,
+          oaci_semac_get_order(CC), effEnd, end, CC, LM, st->arch);
+
+       /* Reduce C to coding_channels for the remainder of the encoding pipeline */
+       C = coding_channels;
+    }
+#endif
+
     oaci_compute_band_energies(mode, freq, bandE, effEnd, C, LM, st->arch);
 
     if (st->lfe) {
-        for (i = 2; i < end; i++) {
-            bandE[i] = IMIN(bandE[i], MULT16_32_Q15(QCONST16(1e-4f, 15), bandE[0]));
-            bandE[i] = MAX32(bandE[i], EPSILON);
-        }
+       for (i = 2; i < end; i++) {
+          bandE[i] = IMIN(bandE[i], MULT16_32_Q15(QCONST16(1e-4f, 15), bandE[0]));
+          bandE[i] = MAX32(bandE[i], EPSILON);
+       }
     }
     oaci_amp2Log2(mode, effEnd, end, bandE, bandLogE, C);
 
@@ -2143,6 +2216,18 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     if (LM > 0 && oaci_ec_tell(enc) + 3 <= total_bits)
         oaci_ec_enc_bit_logp(enc, isTransient, 3);
 
+#ifdef ENABLE_SEMAC
+    /* SEMAC: Bitstream signaling — must match decoder read order (after transient flag) */
+    if (semac_active) {
+       oaci_ec_enc_bit_logp(enc, 1, 1);
+       oaci_ec_enc_bits(enc, transport_order, 3);
+    } else if (st->format == OAC_FORMAT_AMBISONICS && CC > 1) {
+#else
+    if (st->format == OAC_FORMAT_AMBISONICS && CC > 1) {
+#endif
+       oaci_ec_enc_bit_logp(enc, 0, 1);
+    }
+
     ALLOC(X, C*N, celt_norm);        /**< Interleaved normalised MDCTs */
 
     /* Band normalisation */
@@ -2198,10 +2283,33 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
             }
         }
     } while (++c < C);
-    oaci_quant_coarse_energy(mode, start, end, effEnd, bandLogE,
-         oldBandE, total_bits, error, enc,
-         C, LM, nbAvailableBytes, st->force_intra,
-         &st->delayedIntra, st->complexity >= 4, st->loss_rate, st->lfe);
+   oaci_quant_coarse_energy(mode, start, end, effEnd, bandLogE,
+        oldBandE, total_bits, error, enc,
+        C, LM, nbAvailableBytes, st->force_intra,
+        &st->delayedIntra, st->complexity >= 4, st->loss_rate, st->lfe);
+
+#ifdef ENABLE_SEMAC
+    /* SEMAC: Encode spatial beam energies right after coarse energy so that
+       the bit allocation step sees the reduced budget and allocates fewer
+       bits to PVQ accordingly. */
+    if (semac_active) {
+       oac_int32 spatial_budget;
+       spatial_budget = nbCompressedBytes*8;
+       oaci_quant_coarse_energy(mode, start, end, effEnd, spatialBandLogE,
+          oldSpatialBandE, spatial_budget, spatialError, enc,
+          num_beams, LM, (nbCompressedBytes*8 - oaci_ec_tell(enc)) >> 3, 0,
+          &st->delayedIntraSpatial, 1, st->loss_rate, 0);
+
+       /* Fine quantization for spatial energies */
+       {
+           int spatial_fine_quant[21]; /* nbEBands is 21 max */
+           for (i = 0; i < nbEBands; i++) {
+              spatial_fine_quant[i] = (i >= start && i < end) ? SPATIAL_FINE_BITS : 0;
+           }
+           oaci_quant_fine_energy(mode, start, end, oldSpatialBandE, spatialError, NULL, spatial_fine_quant, enc, num_beams);
+       }
+    }
+#endif
 
     oaci_tf_encode(start, end, isTransient, tf_res, LM, tf_select, enc);
 
@@ -2903,6 +3011,44 @@ int oac_custom_encoder_ctl(CELTEncoder * OAC_RESTRICT st, int request, ...) {
             st->energy_mask = value;
         }
         break;
+#ifdef ENABLE_SEMAC
+        case OAC_SET_ENABLE_SEMAC_REQUEST:
+        {
+            oac_int32 value = va_arg(ap, oac_int32);
+            if (value < 0 || value > 1) {
+                goto bad_arg;
+            }
+            st->enable_semac = value;
+        }
+        break;
+        case OAC_GET_ENABLE_SEMAC_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) {
+                goto bad_arg;
+            }
+            *value = st->enable_semac;
+        }
+        break;
+        case OAC_SET_SEMAC_TRANSPORT_ORDER_REQUEST:
+        {
+            oac_int32 value = va_arg(ap, oac_int32);
+            if (value < -1 || value > 5) {
+                goto bad_arg;
+            }
+            st->semac_transport_order = value;
+        }
+        break;
+        case OAC_GET_SEMAC_TRANSPORT_ORDER_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) {
+                goto bad_arg;
+            }
+            *value = st->semac_transport_order;
+        }
+        break;
+#endif
         default:
             goto bad_request;
     }

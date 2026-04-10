@@ -185,6 +185,16 @@ AS_IF([test "$enable_dred" = "yes"],[
 ])
 AM_CONDITIONAL([ENABLE_DRED], [test "$enable_dred" = "yes"])
 
+AC_ARG_ENABLE([semac],
+    [AS_HELP_STRING([--enable-semac],
+                    [enable Spatial Energy Matching Ambisonics Coding])],,
+    [enable_semac=no])
+
+AS_IF([test "$enable_semac" = "yes"],[
+  AC_DEFINE([ENABLE_SEMAC], [1], [Spatial Energy Matching Ambisonics Coding])
+])
+AM_CONDITIONAL([ENABLE_SEMAC], [test "$enable_semac" = "yes"])
+
 AC_ARG_ENABLE([deep-plc],
     [AS_HELP_STRING([--enable-deep-plc], [use deep PLC for SILK])],,
     [enable_deep_plc=no])

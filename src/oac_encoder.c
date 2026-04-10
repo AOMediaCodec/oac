@@ -135,6 +135,10 @@ struct OacEncoder {
     int arch;
     int use_dtx;                          /* general DTX for both SILK and CELT */
     int fec_config;
+#ifdef ENABLE_SEMAC
+    int enable_semac;                     /* Whether SEMAC is enabled (0/1) */
+    int semac_transport_order;            /* Transport order (-1 for input order, or 0-5) */
+#endif
 #ifndef DISABLE_FLOAT_API
     TonalityAnalysisState analysis;
 #endif
@@ -360,6 +364,11 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
         st->encoder_buffer = 0;
     st->lsb_depth = 24;
     st->variable_duration = OAC_FRAMESIZE_ARG;
+
+#ifdef ENABLE_SEMAC
+    st->enable_semac = 0;
+    st->semac_transport_order = -1;
+#endif
 
     /* Delay compensation of 4 ms (2.5 ms for SILK's extra look-ahead
      + 1.5 ms for SILK resamplers and stereo prediction) */
@@ -3130,6 +3139,48 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
 # ifdef ENABLE_DRED
             ret = oaci_dred_encoder_load_model(&st->dred_encoder, data, len);
 # endif
+        }
+        break;
+#endif
+#ifdef ENABLE_SEMAC
+        case OAC_SET_ENABLE_SEMAC_REQUEST:
+        {
+            oac_int32 value = va_arg(ap, oac_int32);
+            if (value < 0 || value > 1) {
+                goto bad_arg;
+            }
+            st->enable_semac = value;
+            if (st->application != OAC_APPLICATION_RESTRICTED_SILK)
+                ret = celt_encoder_ctl(celt_enc, OAC_SET_ENABLE_SEMAC(value));
+        }
+        break;
+        case OAC_GET_ENABLE_SEMAC_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) {
+                goto bad_arg;
+            }
+            *value = st->enable_semac;
+        }
+        break;
+        case OAC_SET_SEMAC_TRANSPORT_ORDER_REQUEST:
+        {
+            oac_int32 value = va_arg(ap, oac_int32);
+            if (value < -1 || value > 5) {
+                goto bad_arg;
+            }
+            st->semac_transport_order = value;
+            if (st->application != OAC_APPLICATION_RESTRICTED_SILK)
+                ret = celt_encoder_ctl(celt_enc, OAC_SET_SEMAC_TRANSPORT_ORDER(value));
+        }
+        break;
+        case OAC_GET_SEMAC_TRANSPORT_ORDER_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) {
+                goto bad_arg;
+            }
+            *value = st->semac_transport_order;
         }
         break;
 #endif
