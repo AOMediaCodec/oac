@@ -1588,6 +1588,8 @@ static int oaci_compute_vbr(const CELTMode *mode, AnalysisInfo *analysis, oac_in
     coded_bins = eBands[coded_bands]<<LM;
     if (C == 2)
         coded_bins += eBands[IMIN(intensity, coded_bands)]<<LM;
+    else if (C > 2)
+        coded_bins *= C;
 
     target = base_target;
 
@@ -1610,8 +1612,14 @@ static int oaci_compute_vbr(const CELTMode *mode, AnalysisInfo *analysis, oac_in
         target -= (oac_int32)MIN32(MULT16_32_Q15(max_frac, target),
                       SHR32(MULT16_16(stereo_saving - QCONST16(0.1f, 8), (coded_stereo_dof<<BITRES)), 8));
     }
-    /* Boost the rate according to dynalloc (minus the dynalloc average for calibration). */
-    target += tot_boost - (19<<LM);
+    /* Boost the rate according to dynalloc (minus the dynalloc average for calibration).
+       tot_boost scales with C through band width in dynalloc. For C<=2 the
+       calibration constant of 19 is balanced by stereo savings; for C>2
+       (multi-mono, no stereo savings) we scale it to avoid a positive bias. */
+    if (C > 2)
+        target += tot_boost - C * (19<<LM);
+    else
+        target += tot_boost - (19<<LM);
     /* Apply transient boost, compensating for average boost. */
     tf_calibration = QCONST16(0.044f, 14);
     target += (oac_int32)SHL32(MULT16_32_Q15(tf_estimate - tf_calibration, target), 1);
@@ -1936,7 +1944,8 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
            in hybrid mode. It seems like we still want to have real transients on vowels
            though (small SILK quantization offset value). */
         int allow_weak_transients = hybrid && effectiveBytes < 15 && st->silk_info.signalType != 2;
-        isTransient = oaci_transient_analysis(in, N + overlap, CC,
+        isTransient = oaci_transient_analysis(in, N + overlap,
+            st->format == OAC_FORMAT_AMBISONICS ? 1 : CC,
             &tf_estimate, &tf_chan, allow_weak_transients, &weak_transient, tone_freq, toneishness);
     }
     toneishness = MIN32(toneishness, QCONST32(1.f, 29) - SHL32(tf_estimate, 15));
@@ -2342,11 +2351,14 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
            st->stereo_saving, tot_boost, tf_estimate, pitch_change, maxDepth,
            st->lfe, st->energy_mask != NULL, surround_masking,
            temporal_vbr);
+<<<<<<< Updated upstream
             /* oaci_compute_vbr was calibrated for mono/stereo (coded_bins includes
                at most 2 channels). For C>2, scale the VBR adjustment down so that
                it remains proportional to a per-channel budget. */
             if (C > 2)
                 target = base_target + (target - base_target) / C;
+=======
+>>>>>>> Stashed changes
         } else {
             target = base_target;
             /* Tonal frames (offset<100) need more bits than noisy (offset>100) ones. */
