@@ -145,7 +145,7 @@ static void oaci_ec_dec_normalize(ec_dec *_this) {
         /*Take the rest of the bits we need from this new symbol.*/
         sym = (sym<<EC_SYM_BITS|_this->rem)>>(EC_SYM_BITS - EC_CODE_EXTRA);
         /*And subtract them from val, capped to be less than EC_CODE_TOP.*/
-        _this->val = ((_this->val<<EC_SYM_BITS) + (EC_SYM_MAX&~sym))&(EC_CODE_TOP - 1);
+        _this->val = (((_this->val & ((EC_CODE_TOP - 1) >> EC_SYM_BITS)) << EC_SYM_BITS) + (EC_SYM_MAX&~sym))&(EC_CODE_TOP - 1);
     }
 }
 

@@ -135,7 +135,7 @@ static OAC_INLINE void oaci_ec_enc_normalize(ec_enc *_this) {
     while (_this->rng <= EC_CODE_BOT) {
         oaci_ec_enc_carry_out(_this, (int)(_this->val>>EC_CODE_SHIFT));
         /*Move the next-to-high-order symbol into the high-order position.*/
-        _this->val = (_this->val<<EC_SYM_BITS)&(EC_CODE_TOP - 1);
+        _this->val = (_this->val & ((EC_CODE_TOP - 1) >> EC_SYM_BITS)) << EC_SYM_BITS;
         _this->rng <<= EC_SYM_BITS;
         _this->nbits_total += EC_SYM_BITS;
     }
@@ -294,7 +294,7 @@ void oaci_ec_enc_done(ec_enc *_this) {
     }
     while (l > 0) {
         oaci_ec_enc_carry_out(_this, (int)(end>>EC_CODE_SHIFT));
-        end = (end<<EC_SYM_BITS)&(EC_CODE_TOP - 1);
+        end = (end & ((EC_CODE_TOP - 1) >> EC_SYM_BITS)) << EC_SYM_BITS;
         l -= EC_SYM_BITS;
     }
     /*If we have a buffered byte flush it into the output buffer.*/
