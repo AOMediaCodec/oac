@@ -76,7 +76,7 @@
 # include "lossgen.h"
 #endif
 
-#define MAX_PACKET 15000
+#define MAX_PACKET (1276*OAC_MAX_AMBISONICS_CHANNELS)
 
 #ifdef ENABLE_QEXT
 # define MAX_SAMPLING_RATE 96000
