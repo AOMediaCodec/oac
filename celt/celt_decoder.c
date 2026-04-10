@@ -1025,7 +1025,8 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
                 overlap_mem = tmp;
             }
             /* For now, we just do mono PLC. */
-            if (C == 2) OAC_COPY(decode_mem[1], decode_mem[0], decode_buffer_size + overlap);
+            for (c = 1; c < C; c++)
+                OAC_COPY(decode_mem[c], decode_mem[0], decode_buffer_size + overlap);
             c = 0; do {
                 /* Cross-fade with 48-kHz non-neural PLC for the first 2.5 ms to avoid a discontinuity. */
                 if (!last_neural) {
