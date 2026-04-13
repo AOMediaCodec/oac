@@ -75,6 +75,7 @@ struct OacRepacketizer {
     const unsigned char *frames[48];
     oac_int16 len[48];
     int framesize;
+    int format;
     const unsigned char *paddings[48];
     oac_int32 padding_len[48];
     unsigned char padding_nb_frames[48];
@@ -239,7 +240,8 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     int self_delimited, unsigned char *out_toc,
     const unsigned char *frames[48], oac_int16 size[48],
     int *payload_offset, oac_int32 *packet_offset,
-    const unsigned char **padding, oac_int32 *padding_len);
+    const unsigned char **padding, oac_int32 *padding_len,
+    int format);
 
 oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int end,
     unsigned char *data, oac_int32 maxlen, int self_delimited, int pad,

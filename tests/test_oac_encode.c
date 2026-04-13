@@ -634,7 +634,7 @@ int run_test1(int no_fuzz) {
         /* We fuzz the packet, but take care not to only corrupt the payload
            Corrupted headers are tested elsewhere and we need to actually run
            the decoders in order to compare them. */
-        if (oac_packet_parse(packet, len, &toc, frames, size, &payload_offset) <= 0) test_failed();
+        if (oac_packet_parse(packet, len, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD) <= 0) test_failed();
         if ((fast_rand()&1023) == 0) len = 0;
         for (j = (oac_int32)(frames[0] - packet); j < len;
              j++) for (jj = 0; jj < 8; jj++) packet[j] ^= ((!no_fuzz) && ((fast_rand()&1023) == 0))<<jj;

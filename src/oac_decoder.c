@@ -781,7 +781,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     packet_stream_channels = oac_packet_get_nb_channels(data);
 
     count = oac_packet_parse_impl(data, len, self_delimited, &toc, NULL,
-                                  size, &offset, packet_offset, &padding, &padding_len);
+                                  size, &offset, packet_offset, &padding, &padding_len,
+                                  st->format);
     if (st->ignore_extensions) {
         padding = NULL;
         padding_len = 0;
@@ -1260,7 +1261,7 @@ int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len) {
     if (packet_frame_size > 960)
         nb_frames = packet_frame_size/960;
     packet_stream_channels = oac_packet_get_nb_channels(packet);
-    ret = oac_packet_parse(packet, len, NULL, frames, size, NULL);
+    ret = oac_packet_parse(packet, len, NULL, frames, size, NULL, OAC_FORMAT_STANDARD);
     if (ret <= 0)
         return ret;
     if (size[0] == 0)
@@ -1407,7 +1408,7 @@ static int oaci_dred_find_payload(const unsigned char *data, oac_int32 len, cons
     *payload = NULL;
     /* Get the padding section of the packet. */
     ret = oac_packet_parse_impl(data, len, 0, NULL, frames, size, NULL, NULL,
-    &padding, &padding_len);
+    &padding, &padding_len, OAC_FORMAT_AMBISONICS);
     if (ret < 0)
         return ret;
     nb_frames = ret;

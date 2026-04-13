@@ -755,6 +755,7 @@ OAC_EXPORT int oac_decoder_dred_decode_float(OacDecoder *st, const OacDRED *dred
  * @param [out] frames <tt>char*[48]</tt> encapsulated frames
  * @param [out] size <tt>oac_int16[48]</tt> sizes of the encapsulated frames
  * @param [out] payload_offset <tt>int*</tt>: returns the position of the payload within the packet (in bytes)
+ * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @returns number of frames
  */
 OAC_EXPORT int oac_packet_parse(
@@ -763,7 +764,8 @@ OAC_EXPORT int oac_packet_parse(
     unsigned char *out_toc,
     const unsigned char *frames[48],
     oac_int16 size[48],
-    int *payload_offset) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(5);
+    int *payload_offset,
+    int format) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(5);
 
 /** Gets the bandwidth of an Oac packet.
  * @param [in] data <tt>char*</tt>: Oac packet
@@ -1017,14 +1019,16 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_repacketizer_get_size(void);
  * @see oac_repacketizer_cat
  * @param rp <tt>OacRepacketizer*</tt>: The repacketizer state to
  *                                       (re)initialize.
+ * @param format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
  * @returns A pointer to the same repacketizer state that was passed in.
  */
-OAC_EXPORT OacRepacketizer *oac_repacketizer_init(OacRepacketizer *rp) OAC_ARG_NONNULL(1);
+OAC_EXPORT OacRepacketizer *oac_repacketizer_init(OacRepacketizer *rp, int format) OAC_ARG_NONNULL(1);
 
 /** Allocates memory and initializes the new repacketizer with
  * oac_repacketizer_init().
+ * @param format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
  */
-OAC_EXPORT OAC_WARN_UNUSED_RESULT OacRepacketizer *oac_repacketizer_create(void);
+OAC_EXPORT OAC_WARN_UNUSED_RESULT OacRepacketizer *oac_repacketizer_create(int format);
 
 /** Frees an <code>OacRepacketizer</code> allocated by
  * oac_repacketizer_create().

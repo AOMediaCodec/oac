@@ -182,7 +182,8 @@ static int oac_multistream_packet_validate(const unsigned char *data,
         if (len <= 0)
             return OAC_INVALID_PACKET;
         count = oac_packet_parse_impl(data, len, s != nb_streams - 1, &toc, NULL,
-                                     size, NULL, &packet_offset, NULL, NULL);
+                                     size, NULL, &packet_offset, NULL, NULL,
+                                     OAC_FORMAT_STANDARD);
         if (count < 0)
             return count;
         tmp_samples = oac_packet_get_nb_samples(data, packet_offset, Fs);

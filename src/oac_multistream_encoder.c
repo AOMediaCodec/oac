@@ -912,7 +912,7 @@ int oac_multistream_encode_native
         int c1, c2;
         int ret;
 
-        oac_repacketizer_init(&rp);
+        oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
         enc = (OacEncoder*)ptr;
         if (s < st->layout.nb_coupled_streams) {
             int i;

@@ -1702,7 +1702,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         ALLOC(tmp_data, max_len_sum, unsigned char);
         curr_data = tmp_data;
         ALLOC(rp, 1, OacRepacketizer);
-        oac_repacketizer_init(rp);
+        oac_repacketizer_init(rp, st->format);
 
 
         bak_to_mono = st->silk_mode.toMono;
