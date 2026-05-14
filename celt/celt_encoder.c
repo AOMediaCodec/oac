@@ -66,7 +66,7 @@
 
 #define CELT_ENCODER_C
 
-// #define DEBUG_AMBISONICS
+/* #define DEBUG_AMBISONICS */
 
 #include "cpu_support.h"
 #include "os_support.h"
