@@ -345,7 +345,7 @@ oac_int32 oac_packet_pad_impl(unsigned char *data, oac_int32 len, oac_int32 new_
     else if (len > new_len)
         return OAC_BAD_ARG;
     ALLOC(copy, len, unsigned char);
-    oac_repacketizer_init(&rp, OAC_FORMAT_AMBISONICS);
+    oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
     /* Moving payload to the end of the packet so we can do in-place padding */
     OAC_COPY(copy, data, len);
     ret = oac_repacketizer_cat(&rp, copy, len);
@@ -373,7 +373,7 @@ oac_int32 oac_packet_unpad(unsigned char *data, oac_int32 len) {
     int i;
     if (len < 1)
         return OAC_BAD_ARG;
-    oac_repacketizer_init(&rp, OAC_FORMAT_AMBISONICS);
+    oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
     ret = oac_repacketizer_cat(&rp, data, len);
     if (ret < 0)
         return ret;
@@ -408,7 +408,7 @@ int oac_multistream_packet_pad(unsigned char *data, oac_int32 len, oac_int32 new
             return OAC_INVALID_PACKET;
         count = oac_packet_parse_impl(data, len, 1, &toc, NULL,
                                      size, NULL, &packet_offset, NULL, NULL,
-                                     OAC_FORMAT_AMBISONICS);
+                                     OAC_FORMAT_STANDARD);
         if (count < 0)
             return count;
         data += packet_offset;
@@ -437,10 +437,10 @@ oac_int32 oac_multistream_packet_unpad(unsigned char *data, oac_int32 len, int n
         int self_delimited = s != nb_streams - 1;
         if (len <= 0)
             return OAC_INVALID_PACKET;
-        oac_repacketizer_init(&rp, OAC_FORMAT_AMBISONICS);
+        oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
         ret = oac_packet_parse_impl(data, len, self_delimited, &toc, NULL,
                                      size, NULL, &packet_offset, NULL, NULL,
-                                     OAC_FORMAT_AMBISONICS);
+                                     OAC_FORMAT_STANDARD);
         if (ret < 0)
             return ret;
         ret = oac_repacketizer_cat_impl(&rp, data, packet_offset, self_delimited);
