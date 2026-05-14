@@ -1408,7 +1408,7 @@ static int oaci_dred_find_payload(const unsigned char *data, oac_int32 len, cons
     *payload = NULL;
     /* Get the padding section of the packet. */
     ret = oac_packet_parse_impl(data, len, 0, NULL, frames, size, NULL, NULL,
-    &padding, &padding_len, OAC_FORMAT_AMBISONICS);
+    &padding, &padding_len, OAC_FORMAT_STANDARD);
     if (ret < 0)
         return ret;
     nb_frames = ret;
