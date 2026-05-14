@@ -2536,7 +2536,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
         }
 
         c = 0; do {
-            OAC_MOVE(st->syn_mem[c], st->syn_mem[c] + N, QEXT_SCALE(DEC_PITCH_BUF_SIZE) - N + overlap);
+            OAC_MOVE(st->syn_mem[c], st->syn_mem[c] + N, QEXT_SCALE(DEC_PITCH_BUF_SIZE) - N + overlap/2);
         } while (++c < CC);
 
         c = 0; do {
