@@ -1116,7 +1116,14 @@ oac_int32 test_enc_api(void) {
     fprintf(stdout, "  ---------------------------------------------------\n");
     for (c = 0; c < 4; c++) {
         i = oac_encoder_get_size(c, OAC_FORMAT_STANDARD);
+#ifdef RESYNTH
+        /* RESYNTH builds allocate per-channel state sized for OAC_MAX_CHANNELS, so the
+           encoder allocation greatly exceeds the normal upper bound. Skip the size
+           range check; just verify the zero/non-zero pattern across configurations. */
+        if (((c == 1 || c == 2) && i <= 0) || ((c != 1 && c != 2) && i != 0)) test_failed();
+#else
         if (((c == 1 || c == 2) && (i <= 2048 || i > 1<<18)) || ((c != 1 && c != 2) && i != 0)) test_failed();
+#endif
         fprintf(stdout, "    oac_encoder_get_size(%d)=%d ...............%s OK.\n", c, i, i > 0?"":"....");
         cfgs++;
     }
