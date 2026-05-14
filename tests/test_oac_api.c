@@ -796,9 +796,9 @@ oac_int32 test_parse(void) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, jj, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
-            if ((jj&1) == 1) {
-                /* Must pass if payload length even (packet length odd),
-                   must fail otherwise. */
+            if ((jj&1) == 1 && jj <= 2551) {
+                /* Must pass if payload length even (packet length odd) and
+                   size<=2551, must fail otherwise. */
                 if (ret != 2) test_failed();
                 if (size[0] != size[1] || size[0] != ((jj - 1)>>1)) test_failed();
                 if (frames[0] != packet + 1) test_failed();
@@ -1569,10 +1569,10 @@ int test_repacketizer_api(void) {
                 for (cnt = 0; cnt < maxp + 2; cnt++) {
                     if (cnt > 0) {
                         ret = oac_repacketizer_cat(rp, packet, k + (i > 2?2:1));
-                        if ((cnt <= maxp && k <= (1275*(oac_int32)i))?ret != OAC_OK:ret != OAC_INVALID_PACKET) test_failed();
+                        if ((cnt <= maxp && k <= (1275*i))?ret != OAC_OK:ret != OAC_INVALID_PACKET) test_failed();
                         cfgs++;
                     }
-                    rcnt = k <= (1275*(oac_int32)i)?(cnt < maxp?cnt:maxp):0;
+                    rcnt = k <= (1275*i)?(cnt < maxp?cnt:maxp):0;
                     if (oac_repacketizer_get_nb_frames(rp) != rcnt*i) test_failed();
                     cfgs++;
                     ret = oac_repacketizer_out_range(rp, 0, rcnt*i, po, max_out);
