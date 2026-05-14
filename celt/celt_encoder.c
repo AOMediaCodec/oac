@@ -1628,6 +1628,7 @@ static int oaci_compute_vbr(const CELTMode *mode, AnalysisInfo *analysis, oac_in
         target -= (oac_int32)MIN32(MULT16_32_Q15(max_frac, target),
                       SHR32(MULT16_16(stereo_saving - QCONST16(0.1f, 8), (coded_stereo_dof<<BITRES)), 8));
     }
+    /* Boost the rate according to dynalloc (minus the dynalloc average for calibration). */
     target += tot_boost - (19<<LM);
     /* Apply transient boost, compensating for average boost. */
     tf_calibration = QCONST16(0.044f, 14);
