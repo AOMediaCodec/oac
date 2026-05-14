@@ -85,7 +85,7 @@
 #define CELTMode OacCustomMode
 
 /** Maximum supported ambisonics order. */
-#define OAC_MAX_AMBISONICS_ORDER 7
+#define OAC_MAX_AMBISONICS_ORDER 5
 #define OAC_MAX_AMBISONICS_CHANNELS ((OAC_MAX_AMBISONICS_ORDER+1)*(OAC_MAX_AMBISONICS_ORDER+1))
 #define OAC_MAX_CHANNELS 255
 /* Check that OAC_MAX_CHANNELS is large enough */

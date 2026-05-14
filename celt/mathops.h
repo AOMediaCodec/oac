@@ -299,7 +299,7 @@ static OAC_INLINE float oaci_celt_log2(float x) {
     } in;
     in.f = x;
     integer = (oac_int32)(in.i>>23) - 127;
-    in.i = (in.i & 0x007FFFFFu) | (127u << 23);
+    in.i = (oac_int32)in.i - (oac_int32)((oac_uint32)integer<<23);
 
     /* Normalize the mantissa range from [1, 2] to [1,1.125], and then shift x
      * by 1.0625 to [-0.0625, 0.0625]. */
@@ -357,7 +357,7 @@ static OAC_INLINE float oaci_celt_exp2(float x) {
                                           + frac*(EXP2_COEFF_A3
                                                   + frac*(EXP2_COEFF_A4
                                                           + frac*(EXP2_COEFF_A5)))));
-    res.i = (res.i + ((oac_uint32)integer << 23)) & 0x7fffffffu;
+    res.i = (oac_uint32)((oac_int32)res.i + (oac_int32)((oac_uint32)integer<<23))&0x7fffffff;
     return res.f;
 }
 

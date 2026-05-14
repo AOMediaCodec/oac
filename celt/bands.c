@@ -90,7 +90,7 @@ int oaci_hysteresis_decision(oac_val16 val, const oac_val16 *thresholds, const o
 }
 
 oac_uint32 oaci_celt_lcg_rand(oac_uint32 seed) {
-    return (oac_uint32)((oac_uint64)1664525 * seed + 1013904223);
+    return 1664525*seed + 1013904223;
 }
 
 /* This is a cos() approximation designed to be bit-exact on any platform. Bit exactness
@@ -986,7 +986,7 @@ static unsigned oaci_quant_partition(struct band_ctx *ctx, celt_norm *X,
         if (mbits >= sbits) {
             cm = oaci_quant_partition(ctx, X, N, mbits, B, lowband, LM,
                MULT32_32_Q31(gain, mid), fill, left_split_mem);
-            rebalance = mbits - (oac_int32)(oaci_ec_tell_frac(ec) - (oac_uint32)tell);
+            rebalance = mbits - (oaci_ec_tell_frac(ec) - tell);
             if (rebalance > 3<<BITRES && itheta != 0)
                 sbits += rebalance - (3<<BITRES);
             cm |= oaci_quant_partition(ctx, Y, N, sbits, B, next_lowband2, LM,
@@ -994,7 +994,7 @@ static unsigned oaci_quant_partition(struct band_ctx *ctx, celt_norm *X,
         } else {
             cm = oaci_quant_partition(ctx, Y, N, sbits, B, next_lowband2, LM,
                MULT32_32_Q31(gain, side), fill>>B, right_split_mem)<<(B0>>1);
-            rebalance = sbits - (oac_int32)(oaci_ec_tell_frac(ec) - (oac_uint32)tell);
+            rebalance = sbits - (oaci_ec_tell_frac(ec) - tell);
             if (rebalance > 3<<BITRES && itheta != 16384)
                 mbits += rebalance - (3<<BITRES);
             cm |= oaci_quant_partition(ctx, X, N, mbits, B, lowband, LM,
@@ -1352,7 +1352,7 @@ static unsigned oaci_quant_band_stereo(struct band_ctx *ctx, celt_norm *X, celt_
                mid for folding later. */
             cm = oaci_quant_band(ctx, X, N, mbits, B, lowband, LM, lowband_out, Q31ONE,
                lowband_scratch, fill, split_mem[0]);
-            rebalance = mbits - (oac_int32)(oaci_ec_tell_frac(ec) - (oac_uint32)tell);
+            rebalance = mbits - (oaci_ec_tell_frac(ec) - tell);
             if (rebalance > 3<<BITRES && itheta != 0)
                 sbits += rebalance - (3<<BITRES);
 
@@ -1363,7 +1363,7 @@ static unsigned oaci_quant_band_stereo(struct band_ctx *ctx, celt_norm *X, celt_
             /* For a stereo split, the high bits of fill are always zero, so no
                folding will be done to the side. */
             cm = oaci_quant_band(ctx, Y, N, sbits, B, NULL, LM, NULL, side, NULL, fill>>B, split_mem[1]);
-            rebalance = sbits - (oac_int32)(oaci_ec_tell_frac(ec) - (oac_uint32)tell);
+            rebalance = sbits - (oaci_ec_tell_frac(ec) - tell);
             if (rebalance > 3<<BITRES && itheta != 16384)
                 mbits += rebalance - (3<<BITRES);
             /* In stereo mode, we do not apply a scaling to the mid because we need the normalized
