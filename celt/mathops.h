@@ -357,7 +357,7 @@ static OAC_INLINE float oaci_celt_exp2(float x) {
                                           + frac*(EXP2_COEFF_A3
                                                   + frac*(EXP2_COEFF_A4
                                                           + frac*(EXP2_COEFF_A5)))));
-    res.i = ((res.i & 0x007FFFFFu) | ((oac_uint32)(127 + integer) << 23)) & 0x7fffffffu;
+    res.i = (res.i + ((oac_uint32)integer << 23)) & 0x7fffffffu;
     return res.f;
 }
 
