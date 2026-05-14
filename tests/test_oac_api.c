@@ -792,7 +792,7 @@ oac_int32 test_parse(void) {
     /*code 1, two frames of the same size*/
     for (i = 0; i < 64; i++) {
         packet[0] = (i<<2) + 1;
-        for (jj = 0; jj <= 1275*2 + 1; jj++) {
+        for (jj = 0; jj <= 1275*2 + 3; jj++) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, jj, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
