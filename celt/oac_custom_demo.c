@@ -241,7 +241,7 @@ int main(int argc, char *argv[]) {
         }
     }
     if (!decode_only) {
-        enc = oac_custom_encoder_create(mode, channels, &err);
+        enc = oac_custom_encoder_create(mode, channels, OAC_FORMAT_STANDARD, &err);
         if (err != 0) {
             fprintf(stderr, "Failed to create the encoder: %s\n", oac_strerror(err));
             goto failure;
@@ -263,7 +263,7 @@ int main(int argc, char *argv[]) {
         }
     }
     if (!encode_only) {
-        dec = oac_custom_decoder_create(mode, channels, &err);
+        dec = oac_custom_decoder_create(mode, channels, OAC_FORMAT_STANDARD, &err);
         if (err != 0) {
             fprintf(stderr, "Failed to create the decoder: %s\n", oac_strerror(err));
             goto failure;

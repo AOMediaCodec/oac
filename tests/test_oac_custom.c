@@ -553,7 +553,7 @@ void test_oac_custom(const int num_encoders, const int num_setting_changes) {
         }
 
         if (params.custom_decode) {
-            decC = oac_custom_decoder_create(mode, params.num_channels, &err);
+            decC = oac_custom_decoder_create(mode, params.num_channels, OAC_FORMAT_STANDARD, &err);
             if (err != OAC_OK || decC == NULL) {
                 fprintf(stderr,
                     "test_oac_custom error: %d kHz, %d ch, "
@@ -577,7 +577,7 @@ void test_oac_custom(const int num_encoders, const int num_setting_changes) {
         }
 
         if (params.custom_encode) {
-            encC = oac_custom_encoder_create(mode, params.num_channels, &err);
+            encC = oac_custom_encoder_create(mode, params.num_channels, OAC_FORMAT_STANDARD, &err);
             if (err != OAC_OK || encC == NULL) {
                 fprintf(stderr,
                     "test_oac_custom error: %d kHz, %d ch, "

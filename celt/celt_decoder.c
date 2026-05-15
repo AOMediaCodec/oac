@@ -235,10 +235,10 @@ OAC_CUSTOM_NOSTATIC int oac_custom_decoder_get_size(const CELTMode *mode, int ch
 }
 
 #if defined(CUSTOM_MODES) || defined(ENABLE_OAC_CUSTOM_API)
-CELTDecoder *oac_custom_decoder_create(const CELTMode *mode, int channels, int *error) {
+CELTDecoder *oac_custom_decoder_create(const CELTMode *mode, int channels, int format, int *error) {
     int ret;
     CELTDecoder *st = (CELTDecoder *)oac_alloc(oac_custom_decoder_get_size(mode, channels));
-    ret = oac_custom_decoder_init(st, mode, channels);
+    ret = oac_custom_decoder_init(st, mode, channels, format);
     if (ret != OAC_OK) {
         oac_custom_decoder_destroy(st);
         st = NULL;
@@ -253,23 +253,19 @@ int oaci_celt_decoder_init(CELTDecoder *st, oac_int32 sampling_rate, int channel
     int ret;
 #ifdef ENABLE_QEXT
     if (sampling_rate == 96000) {
-        ret = oac_custom_decoder_init(st, oac_custom_mode_create(96000, 960, NULL), channels);
-        if (ret == OAC_OK)
-            st->format = format;
-        return ret;
+        return oac_custom_decoder_init(st, oac_custom_mode_create(96000, 960, NULL), channels, format);
     }
 #endif
-    ret = oac_custom_decoder_init(st, oac_custom_mode_create(48000, 960, NULL), channels);
+    ret = oac_custom_decoder_init(st, oac_custom_mode_create(48000, 960, NULL), channels, format);
     if (ret != OAC_OK)
         return ret;
     st->downsample = oaci_resampling_factor(sampling_rate);
     if (st->downsample == 0)
         return OAC_BAD_ARG;
-    st->format = format;
     return OAC_OK;
 }
 
-OAC_CUSTOM_NOSTATIC int oac_custom_decoder_init(CELTDecoder *st, const CELTMode *mode, int channels) {
+OAC_CUSTOM_NOSTATIC int oac_custom_decoder_init(CELTDecoder *st, const CELTMode *mode, int channels, int format) {
     if (channels < 0 || channels > OAC_MAX_CHANNELS)
         return OAC_BAD_ARG;
 
@@ -281,6 +277,7 @@ OAC_CUSTOM_NOSTATIC int oac_custom_decoder_init(CELTDecoder *st, const CELTMode 
     st->mode = mode;
     st->overlap = mode->overlap;
     st->stream_channels = st->channels = channels;
+    st->format = format;
 
     st->downsample = 1;
     st->start = 0;
