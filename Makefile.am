@@ -165,6 +165,7 @@ noinst_PROGRAMS = celt/tests/test_unit_cwrs32 \
                   celt/tests/test_unit_types \
                   oac_compare \
                   oac_demo \
+                  oac_ambisonics_compare \
                   repacketizer_demo \
                   silk/tests/test_unit_LPC_inv_pred_gain \
                   tests/test_oac_api \
@@ -206,6 +207,9 @@ repacketizer_demo_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
 
 oac_compare_SOURCES = src/oac_compare.c
 oac_compare_LDADD = $(LIBM)
+
+oac_ambisonics_compare_SOURCES = src/oac_ambisonics_compare.c
+oac_ambisonics_compare_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
 
 trivial_example_SOURCES = doc/trivial_example.c
 trivial_example_LDADD = liboac.la $(LIBM)
