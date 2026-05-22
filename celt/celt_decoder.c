@@ -1156,7 +1156,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     oldLogE2 = oldLogE + max_channels*nbEBands;
     backgroundLogE = oldLogE2 + max_channels*nbEBands;
 #ifdef ENABLE_SEMAC
-    oldSpatialBandE = (celt_glog*)((oac_val16*)(backgroundLogE + max_channels*nbEBands) + max_channels*CELT_LPC_ORDER);
+    oldSpatialBandE = (celt_glog*)((oac_val16*)(backgroundLogE + max_channels*nbEBands) + CC*CELT_LPC_ORDER);
 #endif
 
 #if defined(CUSTOM_MODES) || defined(ENABLE_OAC_CUSTOM_API)
@@ -1440,7 +1440,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     /* Allocate X and collapse_masks before the if/else since they're used after */
     ALLOC(collapse_masks, C*nbEBands, unsigned char);
 #ifdef ENABLE_SEMAC
-    ALLOC(X, CC*N, celt_norm);  /**< Interleaved normalised MDCTs (full size for SEMAC reconstruction) */
+    ALLOC(X, IMAX(CC, C)*N, celt_norm);  /**< Interleaved normalised MDCTs (large enough for both stream and SEMAC) */
 #else
     ALLOC(X, C*N, celt_norm);  /**< Interleaved normalised MDCTs */
 #endif

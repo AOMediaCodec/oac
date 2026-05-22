@@ -259,8 +259,8 @@ static int oac_custom_encoder_init_arch(CELTEncoder *st, const CELTMode *mode,
     st->format = format;
 
 #ifdef ENABLE_SEMAC
-    st->enable_semac = 1;
-    st->semac_transport_order = 1;
+    st->enable_semac = 0;
+    st->semac_transport_order = -1;
 #endif
 
     st->upsample = 1;
