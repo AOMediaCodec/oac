@@ -40,63 +40,52 @@
 #include <string.h>
 #include <math.h>
 #include "oac.h"
+#include "oac_multistream.h"
 #include "oac_projection.h"
 
-#define MAX_PACKET 32768
+#define MAX_PACKET (1276*36)
 #define MAX_FRAME_SIZE 5760  /* 120ms at 48kHz */
 
 static void print_usage(const char *progname) {
-    fprintf(stderr, "Usage: %s <mode> <sampling_rate> <channels> <bitrate> <input.pcm> <output_prefix>\n", progname);
+    fprintf(stderr, "Usage: %s <mode> <sampling_rate> <channels> <bitrate> <input.pcm> <output.pcm> [options]\n", progname);
     fprintf(stderr, "\n");
     fprintf(stderr, "Modes:\n");
-    fprintf(stderr, "  semac       - Encode using SEMAC (Spatial Energy Matching Ambisonics Coding)\n");
-    fprintf(stderr, "  projection  - Encode using Projection API (mapping family 3)\n");
-    fprintf(stderr, "  both        - Encode using both methods for comparison\n");
+    fprintf(stderr, "  mapping2   - Opus multistream channel mapping family 2 (standard ambisonics)\n");
+    fprintf(stderr, "  mapping3   - Opus multistream channel mapping family 3 (projection/demixing)\n");
+    fprintf(stderr, "  semac      - SEMAC (Spatial Energy Matching Ambisonics Coding)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Parameters:\n");
     fprintf(stderr, "  sampling_rate  - Sampling rate in Hz (8000, 12000, 16000, 24000, 48000)\n");
     fprintf(stderr, "  channels       - Number of ambisonics channels (1, 4, 9, 16, 25, 36)\n");
-    fprintf(stderr, "  bitrate        - Bitrate in bits per second\n");
+    fprintf(stderr, "  bitrate        - Total bitrate in bits per second\n");
     fprintf(stderr, "  input.pcm      - Input PCM file (16-bit signed, interleaved)\n");
-    fprintf(stderr, "  output_prefix  - Prefix for output files\n");
+    fprintf(stderr, "  output.pcm     - Output PCM file (16-bit signed, interleaved)\n");
     fprintf(stderr, "\n");
-    fprintf(stderr, "Examples:\n");
-    fprintf(stderr, "  %s semac 48000 16 128000 input_16ch.pcm output\n", progname);
-    fprintf(stderr, "  %s projection 48000 16 128000 input_16ch.pcm output\n", progname);
-    fprintf(stderr, "  %s both 48000 16 128000 input_16ch.pcm output\n", progname);
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Output files:\n");
-    fprintf(stderr, "  <output_prefix>_semac.oac       - SEMAC encoded bitstream\n");
-    fprintf(stderr, "  <output_prefix>_semac.pcm        - SEMAC decoded audio\n");
-    fprintf(stderr, "  <output_prefix>_projection.oac   - Projection encoded bitstream\n");
-    fprintf(stderr, "  <output_prefix>_projection.pcm   - Projection decoded audio\n");
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  -transport_order <N>  : SEMAC transport order (1-5, default: input order)\n");
 }
 
-static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
-                                FILE *fin, const char *oac_out, const char *pcm_out) {
-    OacEncoder *enc = NULL;
-    OacDecoder *dec = NULL;
-    FILE *foac = NULL;
-    FILE *fpcm = NULL;
+static int encode_decode_mapping2(int sampling_rate, int channels, int bitrate,
+                                   FILE *fin, FILE *fout) {
+    OacMSEncoder *enc = NULL;
+    OacMSDecoder *dec = NULL;
     int err;
     int ret = 0;
 
     short *inbuf = NULL;
     short *outbuf = NULL;
     unsigned char *packet = NULL;
+    unsigned char mapping[256];
+    int streams, coupled_streams;
 
     int frame_size = sampling_rate / 50;  /* 20ms frames */
-    int in_samples, out_samples;
-    long total_bytes = 0;
-    long total_samples = 0;
+    int in_samples;
 
-    printf("=== SEMAC Encoding ===\n");
-    printf("  Sampling rate: %d Hz\n", sampling_rate);
-    printf("  Channels: %d\n", channels);
-    printf("  Bitrate: %d bps\n", bitrate);
-    printf("  Frame size: %d samples\n", frame_size);
+    fprintf(stderr, "=== Mapping Family 2 (Standard Ambisonics Multistream) ===\n");
+    fprintf(stderr, "  Sampling rate: %d Hz\n", sampling_rate);
+    fprintf(stderr, "  Channels: %d\n", channels);
+    fprintf(stderr, "  Bitrate: %d bps\n", bitrate);
 
-    /* Allocate buffers */
     inbuf = (short *)malloc(frame_size * channels * sizeof(short));
     outbuf = (short *)malloc(MAX_FRAME_SIZE * channels * sizeof(short));
     packet = (unsigned char *)malloc(MAX_PACKET);
@@ -107,112 +96,70 @@ static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
         goto cleanup;
     }
 
-    /* Create encoder */
-    enc = oac_encoder_create(sampling_rate, channels, OAC_FORMAT_AMBISONICS,
-                             OAC_APPLICATION_AUDIO, &err);
+    enc = oac_multistream_surround_encoder_create(sampling_rate, channels, 2,
+                                                   &streams, &coupled_streams,
+                                                   mapping,
+                                                   OAC_APPLICATION_AUDIO, &err);
     if (err != OAC_OK || !enc) {
-        fprintf(stderr, "Error: Failed to create SEMAC encoder: %s\n", oac_strerror(err));
+        fprintf(stderr, "Error: Failed to create mapping family 2 encoder: %s\n", oac_strerror(err));
         ret = 1;
         goto cleanup;
     }
 
-    /* Configure encoder */
-    oac_encoder_ctl(enc, OAC_SET_BITRATE(bitrate));
-    oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
+    fprintf(stderr, "  Streams: %d (coupled: %d)\n", streams, coupled_streams);
 
-#ifdef ENABLE_SEMAC
-    oac_encoder_ctl(enc, OAC_SET_ENABLE_SEMAC(1));
-    printf("  SEMAC: enabled\n");
-#else
-    printf("  Warning: SEMAC not enabled in build (ENABLE_SEMAC not defined)\n");
-    printf("  Proceeding with standard ambisonics encoding\n");
-#endif
+    oac_multistream_encoder_ctl(enc, OAC_SET_BITRATE(bitrate));
+    oac_multistream_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
 
-    /* Create decoder */
-    dec = oac_decoder_create(sampling_rate, channels, OAC_FORMAT_AMBISONICS, &err);
+    dec = oac_multistream_decoder_create(sampling_rate, channels,
+                                          streams, coupled_streams,
+                                          mapping, &err);
     if (err != OAC_OK || !dec) {
-        fprintf(stderr, "Error: Failed to create decoder: %s\n", oac_strerror(err));
+        fprintf(stderr, "Error: Failed to create mapping family 2 decoder: %s\n", oac_strerror(err));
         ret = 1;
         goto cleanup;
     }
 
-    /* Open output files */
-    foac = fopen(oac_out, "wb");
-    if (!foac) {
-        fprintf(stderr, "Error: Failed to open %s for writing\n", oac_out);
-        ret = 1;
-        goto cleanup;
-    }
-
-    fpcm = fopen(pcm_out, "wb");
-    if (!fpcm) {
-        fprintf(stderr, "Error: Failed to open %s for writing\n", pcm_out);
-        ret = 1;
-        goto cleanup;
-    }
-
-    /* Encode/decode loop */
     rewind(fin);
     while (1) {
         in_samples = fread(inbuf, sizeof(short), frame_size * channels, fin);
         if (in_samples <= 0) break;
 
-        if (in_samples < frame_size * channels) {
-            /* Pad last frame with zeros */
+        if (in_samples < frame_size * channels)
             memset(inbuf + in_samples, 0, (frame_size * channels - in_samples) * sizeof(short));
-        }
 
-        /* Encode */
-        int nb_bytes = oac_encode(enc, inbuf, frame_size, packet, MAX_PACKET);
+        int nb_bytes = oac_multistream_encode(enc, inbuf, frame_size, packet, MAX_PACKET);
         if (nb_bytes < 0) {
             fprintf(stderr, "Error: Encoding failed: %s\n", oac_strerror(nb_bytes));
             ret = 1;
             goto cleanup;
         }
 
-        /* Write packet size and packet data */
-        unsigned char size_bytes[2];
-        size_bytes[0] = (nb_bytes >> 8) & 0xFF;
-        size_bytes[1] = nb_bytes & 0xFF;
-        fwrite(size_bytes, 1, 2, foac);
-        fwrite(packet, 1, nb_bytes, foac);
-        total_bytes += nb_bytes + 2;
-
-        /* Decode */
-        out_samples = oac_decode(dec, packet, nb_bytes, outbuf, MAX_FRAME_SIZE, 0);
+        int out_samples = oac_multistream_decode(dec, packet, nb_bytes, outbuf, MAX_FRAME_SIZE, 0);
         if (out_samples < 0) {
             fprintf(stderr, "Error: Decoding failed: %s\n", oac_strerror(out_samples));
             ret = 1;
             goto cleanup;
         }
 
-        fwrite(outbuf, sizeof(short), out_samples * channels, fpcm);
-        total_samples += out_samples;
+        fwrite(outbuf, sizeof(short), out_samples * channels, fout);
     }
 
-    printf("  Encoded %ld bytes (%.2f kbps actual)\n",
-           total_bytes,
-           total_samples > 0 ? (total_bytes * 8.0 * sampling_rate / total_samples / 1000.0) : 0);
-    printf("  Output: %s, %s\n", oac_out, pcm_out);
+    fprintf(stderr, "  Done.\n");
 
 cleanup:
-    if (enc) oac_encoder_destroy(enc);
-    if (dec) oac_decoder_destroy(dec);
-    if (foac) fclose(foac);
-    if (fpcm) fclose(fpcm);
-    if (inbuf) free(inbuf);
-    if (outbuf) free(outbuf);
-    if (packet) free(packet);
-
+    if (enc) oac_multistream_encoder_destroy(enc);
+    if (dec) oac_multistream_decoder_destroy(dec);
+    free(inbuf);
+    free(outbuf);
+    free(packet);
     return ret;
 }
 
-static int encode_decode_projection(int sampling_rate, int channels, int bitrate,
-                                     FILE *fin, const char *oac_out, const char *pcm_out) {
+static int encode_decode_mapping3(int sampling_rate, int channels, int bitrate,
+                                   FILE *fin, FILE *fout) {
     OacProjectionEncoder *enc = NULL;
     OacProjectionDecoder *dec = NULL;
-    FILE *foac = NULL;
-    FILE *fpcm = NULL;
     int err;
     int ret = 0;
 
@@ -221,20 +168,16 @@ static int encode_decode_projection(int sampling_rate, int channels, int bitrate
     unsigned char *packet = NULL;
     unsigned char *demixing_matrix = NULL;
 
-    int frame_size = sampling_rate / 50;  /* 20ms frames */
-    int in_samples, out_samples;
+    int frame_size = sampling_rate / 50;
+    int in_samples;
     int streams, coupled_streams;
-    long total_bytes = 0;
-    long total_samples = 0;
     oac_int32 matrix_size;
 
-    printf("=== Projection Encoding (Mapping Family 3) ===\n");
-    printf("  Sampling rate: %d Hz\n", sampling_rate);
-    printf("  Channels: %d\n", channels);
-    printf("  Bitrate: %d bps\n", bitrate);
-    printf("  Frame size: %d samples\n", frame_size);
+    fprintf(stderr, "=== Mapping Family 3 (Projection) ===\n");
+    fprintf(stderr, "  Sampling rate: %d Hz\n", sampling_rate);
+    fprintf(stderr, "  Channels: %d\n", channels);
+    fprintf(stderr, "  Bitrate: %d bps\n", bitrate);
 
-    /* Allocate buffers */
     inbuf = (short *)malloc(frame_size * channels * sizeof(short));
     outbuf = (short *)malloc(MAX_FRAME_SIZE * channels * sizeof(short));
     packet = (unsigned char *)malloc(MAX_PACKET);
@@ -245,7 +188,6 @@ static int encode_decode_projection(int sampling_rate, int channels, int bitrate
         goto cleanup;
     }
 
-    /* Create projection encoder (mapping family 3) */
     enc = oac_projection_ambisonics_encoder_create(sampling_rate, channels, 3,
                                                     &streams, &coupled_streams,
                                                     OAC_APPLICATION_AUDIO, &err);
@@ -255,13 +197,11 @@ static int encode_decode_projection(int sampling_rate, int channels, int bitrate
         goto cleanup;
     }
 
-    printf("  Streams: %d (coupled: %d)\n", streams, coupled_streams);
+    fprintf(stderr, "  Streams: %d (coupled: %d)\n", streams, coupled_streams);
 
-    /* Configure encoder */
     oac_projection_encoder_ctl(enc, OAC_SET_BITRATE(bitrate));
     oac_projection_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
 
-    /* Get demixing matrix for decoder */
     oac_projection_encoder_ctl(enc, OAC_PROJECTION_GET_DEMIXING_MATRIX_SIZE_REQUEST, &matrix_size);
     if (matrix_size <= 0) {
         fprintf(stderr, "Error: Failed to get demixing matrix size\n");
@@ -279,7 +219,6 @@ static int encode_decode_projection(int sampling_rate, int channels, int bitrate
     oac_projection_encoder_ctl(enc, OAC_PROJECTION_GET_DEMIXING_MATRIX_REQUEST,
                                 demixing_matrix, matrix_size);
 
-    /* Create projection decoder */
     dec = oac_projection_decoder_create(sampling_rate, channels, streams, coupled_streams,
                                          demixing_matrix, matrix_size, &err);
     if (err != OAC_OK || !dec) {
@@ -288,40 +227,14 @@ static int encode_decode_projection(int sampling_rate, int channels, int bitrate
         goto cleanup;
     }
 
-    /* Open output files */
-    foac = fopen(oac_out, "wb");
-    if (!foac) {
-        fprintf(stderr, "Error: Failed to open %s for writing\n", oac_out);
-        ret = 1;
-        goto cleanup;
-    }
-
-    fpcm = fopen(pcm_out, "wb");
-    if (!fpcm) {
-        fprintf(stderr, "Error: Failed to open %s for writing\n", pcm_out);
-        ret = 1;
-        goto cleanup;
-    }
-
-    /* Write demixing matrix to bitstream file header (for standalone decoding) */
-    fwrite(&matrix_size, sizeof(oac_int32), 1, foac);
-    fwrite(demixing_matrix, 1, matrix_size, foac);
-    fwrite(&streams, sizeof(int), 1, foac);
-    fwrite(&coupled_streams, sizeof(int), 1, foac);
-    total_bytes += sizeof(oac_int32) + matrix_size + 2 * sizeof(int);
-
-    /* Encode/decode loop */
     rewind(fin);
     while (1) {
         in_samples = fread(inbuf, sizeof(short), frame_size * channels, fin);
         if (in_samples <= 0) break;
 
-        if (in_samples < frame_size * channels) {
-            /* Pad last frame with zeros */
+        if (in_samples < frame_size * channels)
             memset(inbuf + in_samples, 0, (frame_size * channels - in_samples) * sizeof(short));
-        }
 
-        /* Encode */
         int nb_bytes = oac_projection_encode(enc, inbuf, frame_size, packet, MAX_PACKET);
         if (nb_bytes < 0) {
             fprintf(stderr, "Error: Encoding failed: %s\n", oac_strerror(nb_bytes));
@@ -329,53 +242,130 @@ static int encode_decode_projection(int sampling_rate, int channels, int bitrate
             goto cleanup;
         }
 
-        /* Write packet size and packet data */
-        unsigned char size_bytes[2];
-        size_bytes[0] = (nb_bytes >> 8) & 0xFF;
-        size_bytes[1] = nb_bytes & 0xFF;
-        fwrite(size_bytes, 1, 2, foac);
-        fwrite(packet, 1, nb_bytes, foac);
-        total_bytes += nb_bytes + 2;
-
-        /* Decode */
-        out_samples = oac_projection_decode(dec, packet, nb_bytes, outbuf, MAX_FRAME_SIZE, 0);
+        int out_samples = oac_projection_decode(dec, packet, nb_bytes, outbuf, MAX_FRAME_SIZE, 0);
         if (out_samples < 0) {
             fprintf(stderr, "Error: Decoding failed: %s\n", oac_strerror(out_samples));
             ret = 1;
             goto cleanup;
         }
 
-        fwrite(outbuf, sizeof(short), out_samples * channels, fpcm);
-        total_samples += out_samples;
+        fwrite(outbuf, sizeof(short), out_samples * channels, fout);
     }
 
-    printf("  Encoded %ld bytes (%.2f kbps actual)\n",
-           total_bytes,
-           total_samples > 0 ? (total_bytes * 8.0 * sampling_rate / total_samples / 1000.0) : 0);
-    printf("  Output: %s, %s\n", oac_out, pcm_out);
+    fprintf(stderr, "  Done.\n");
 
 cleanup:
     if (enc) oac_projection_encoder_destroy(enc);
     if (dec) oac_projection_decoder_destroy(dec);
-    if (foac) fclose(foac);
-    if (fpcm) fclose(fpcm);
-    if (inbuf) free(inbuf);
-    if (outbuf) free(outbuf);
-    if (packet) free(packet);
-    if (demixing_matrix) free(demixing_matrix);
+    free(inbuf);
+    free(outbuf);
+    free(packet);
+    free(demixing_matrix);
+    return ret;
+}
 
+static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
+                                int transport_order, FILE *fin, FILE *fout) {
+    OacEncoder *enc = NULL;
+    OacDecoder *dec = NULL;
+    int err;
+    int ret = 0;
+
+    short *inbuf = NULL;
+    short *outbuf = NULL;
+    unsigned char *packet = NULL;
+
+    int frame_size = sampling_rate / 50;
+    int in_samples;
+
+    fprintf(stderr, "=== SEMAC ===\n");
+    fprintf(stderr, "  Sampling rate: %d Hz\n", sampling_rate);
+    fprintf(stderr, "  Channels: %d\n", channels);
+    fprintf(stderr, "  Bitrate: %d bps\n", bitrate);
+    fprintf(stderr, "  Transport order: %d\n", transport_order);
+
+    inbuf = (short *)malloc(frame_size * channels * sizeof(short));
+    outbuf = (short *)malloc(MAX_FRAME_SIZE * channels * sizeof(short));
+    packet = (unsigned char *)malloc(MAX_PACKET);
+
+    if (!inbuf || !outbuf || !packet) {
+        fprintf(stderr, "Error: Failed to allocate buffers\n");
+        ret = 1;
+        goto cleanup;
+    }
+
+    enc = oac_encoder_create(sampling_rate, channels, OAC_FORMAT_AMBISONICS,
+                             OAC_APPLICATION_AUDIO, &err);
+    if (err != OAC_OK || !enc) {
+        fprintf(stderr, "Error: Failed to create SEMAC encoder: %s\n", oac_strerror(err));
+        ret = 1;
+        goto cleanup;
+    }
+
+    oac_encoder_ctl(enc, OAC_SET_BITRATE(bitrate));
+    oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
+
+#ifdef ENABLE_SEMAC
+    oac_encoder_ctl(enc, OAC_SET_ENABLE_SEMAC(1));
+    oac_encoder_ctl(enc, OAC_SET_SEMAC_TRANSPORT_ORDER(transport_order));
+    fprintf(stderr, "  SEMAC: enabled\n");
+#else
+    fprintf(stderr, "  Warning: SEMAC not enabled in build\n");
+#endif
+
+    dec = oac_decoder_create(sampling_rate, channels, OAC_FORMAT_AMBISONICS, &err);
+    if (err != OAC_OK || !dec) {
+        fprintf(stderr, "Error: Failed to create decoder: %s\n", oac_strerror(err));
+        ret = 1;
+        goto cleanup;
+    }
+
+    rewind(fin);
+    while (1) {
+        in_samples = fread(inbuf, sizeof(short), frame_size * channels, fin);
+        if (in_samples <= 0) break;
+
+        if (in_samples < frame_size * channels)
+            memset(inbuf + in_samples, 0, (frame_size * channels - in_samples) * sizeof(short));
+
+        int nb_bytes = oac_encode(enc, inbuf, frame_size, packet, MAX_PACKET);
+        if (nb_bytes < 0) {
+            fprintf(stderr, "Error: Encoding failed: %s\n", oac_strerror(nb_bytes));
+            ret = 1;
+            goto cleanup;
+        }
+
+        int out_samples = oac_decode(dec, packet, nb_bytes, outbuf, MAX_FRAME_SIZE, 0);
+        if (out_samples < 0) {
+            fprintf(stderr, "Error: Decoding failed: %s\n", oac_strerror(out_samples));
+            ret = 1;
+            goto cleanup;
+        }
+
+        fwrite(outbuf, sizeof(short), out_samples * channels, fout);
+    }
+
+    fprintf(stderr, "  Done.\n");
+
+cleanup:
+    if (enc) oac_encoder_destroy(enc);
+    if (dec) oac_decoder_destroy(dec);
+    free(inbuf);
+    free(outbuf);
+    free(packet);
     return ret;
 }
 
 int main(int argc, char *argv[]) {
     const char *mode;
     int sampling_rate, channels, bitrate;
-    const char *input_file, *output_prefix;
+    const char *input_file, *output_file;
     FILE *fin = NULL;
+    FILE *fout = NULL;
     int ret = 0;
-    char oac_out[1024], pcm_out[1024];
+    int transport_order = -1;
 
-    if (argc != 7) {
+    if (argc < 7) {
         print_usage(argv[0]);
         return 1;
     }
@@ -385,22 +375,35 @@ int main(int argc, char *argv[]) {
     channels = atoi(argv[3]);
     bitrate = atoi(argv[4]);
     input_file = argv[5];
-    output_prefix = argv[6];
+    output_file = argv[6];
 
-    /* Validate parameters */
-    if (strcmp(mode, "semac") != 0 && strcmp(mode, "projection") != 0 && strcmp(mode, "both") != 0) {
+    /* Parse optional arguments */
+    for (int i = 7; i < argc; i++) {
+        if (strcmp(argv[i], "-transport_order") == 0 && i + 1 < argc) {
+            transport_order = atoi(argv[++i]);
+        } else {
+            fprintf(stderr, "Error: unrecognized option: %s\n", argv[i]);
+            print_usage(argv[0]);
+            return 1;
+        }
+    }
+
+    /* Validate mode */
+    if (strcmp(mode, "mapping2") != 0 && strcmp(mode, "mapping3") != 0 &&
+        strcmp(mode, "semac") != 0) {
         fprintf(stderr, "Error: Invalid mode '%s'\n", mode);
         print_usage(argv[0]);
         return 1;
     }
 
+    /* Validate sampling rate */
     if (sampling_rate != 8000 && sampling_rate != 12000 && sampling_rate != 16000 &&
         sampling_rate != 24000 && sampling_rate != 48000) {
         fprintf(stderr, "Error: Unsupported sampling rate %d\n", sampling_rate);
         return 1;
     }
 
-    /* Validate ambisonics channel count: must be (order+1)^2 */
+    /* Validate ambisonics channel count */
     int valid = 0;
     for (int order = 0; order <= 5; order++) {
         if (channels == (order + 1) * (order + 1)) {
@@ -413,47 +416,29 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Open input file */
     fin = fopen(input_file, "rb");
     if (!fin) {
         fprintf(stderr, "Error: Failed to open input file %s\n", input_file);
         return 1;
     }
 
-    printf("OAC Ambisonics Comparison Tool\n");
-    printf("================================\n");
-    printf("Input: %s\n", input_file);
-    printf("Output prefix: %s\n", output_prefix);
-    printf("\n");
-
-    /* Run encoding */
-    if (strcmp(mode, "semac") == 0 || strcmp(mode, "both") == 0) {
-        snprintf(oac_out, sizeof(oac_out), "%s_semac.oac", output_prefix);
-        snprintf(pcm_out, sizeof(pcm_out), "%s_semac.pcm", output_prefix);
-
-        if (encode_decode_semac(sampling_rate, channels, bitrate, fin, oac_out, pcm_out) != 0) {
-            fprintf(stderr, "SEMAC encoding failed\n");
-            ret = 1;
-        }
-        printf("\n");
+    fout = fopen(output_file, "wb");
+    if (!fout) {
+        fprintf(stderr, "Error: Failed to open output file %s\n", output_file);
+        fclose(fin);
+        return 1;
     }
 
-    if (strcmp(mode, "projection") == 0 || strcmp(mode, "both") == 0) {
-        snprintf(oac_out, sizeof(oac_out), "%s_projection.oac", output_prefix);
-        snprintf(pcm_out, sizeof(pcm_out), "%s_projection.pcm", output_prefix);
-
-        if (encode_decode_projection(sampling_rate, channels, bitrate, fin, oac_out, pcm_out) != 0) {
-            fprintf(stderr, "Projection encoding failed\n");
-            ret = 1;
-        }
-        printf("\n");
+    if (strcmp(mode, "mapping2") == 0) {
+        ret = encode_decode_mapping2(sampling_rate, channels, bitrate, fin, fout);
+    } else if (strcmp(mode, "mapping3") == 0) {
+        ret = encode_decode_mapping3(sampling_rate, channels, bitrate, fin, fout);
+    } else if (strcmp(mode, "semac") == 0) {
+        ret = encode_decode_semac(sampling_rate, channels, bitrate, transport_order, fin, fout);
     }
 
     fclose(fin);
-
-    if (ret == 0) {
-        printf("Comparison complete!\n");
-    }
+    fclose(fout);
 
     return ret;
 }
