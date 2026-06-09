@@ -172,6 +172,7 @@ static int encode_decode_mapping3(int sampling_rate, int channels, int bitrate,
     int in_samples;
     int streams, coupled_streams;
     oac_int32 matrix_size;
+    oac_int32 matrix_gain_q8 = 0;
 
     fprintf(stderr, "=== Mapping Family 3 (Projection) ===\n");
     fprintf(stderr, "  Sampling rate: %d Hz\n", sampling_rate);
@@ -226,6 +227,12 @@ static int encode_decode_mapping3(int sampling_rate, int channels, int bitrate,
         ret = 1;
         goto cleanup;
     }
+
+    /* Apply demixing-matrix gain as decoder output gain (OpusHead Output Gain equivalent). */
+    oac_projection_encoder_ctl(enc, OAC_PROJECTION_GET_DEMIXING_MATRIX_GAIN_REQUEST,
+                                &matrix_gain_q8);
+    fprintf(stderr, "  Demixing matrix gain: %.4f dB\n", (float)matrix_gain_q8 / 256.f);
+    oac_projection_decoder_ctl(dec, OAC_SET_GAIN(matrix_gain_q8));
 
     rewind(fin);
     while (1) {

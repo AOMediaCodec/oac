@@ -307,6 +307,7 @@ void test_encode_decode(oac_int32 bitrate, oac_int32 channels,
     int len;
     int out_samples;
     oac_int32 matrix_size = 0;
+    oac_int32 matrix_gain = 0;
     unsigned char *matrix = NULL;
 
     buffer_in = (short *)malloc(sizeof(short)*BUFFER_SIZE*channels);
@@ -347,6 +348,17 @@ void test_encode_decode(oac_int32 bitrate, oac_int32 channels,
         fprintf(stderr,
       "Couldn\'t create decoder with %d channels, %d streams "
       "and %d coupled streams.\n", channels, streams, coupled);
+        goto bad_cleanup;
+    }
+
+    /* Apply demixing-matrix gain as decoder output gain (OpusHead Output Gain equivalent). */
+    error = oac_projection_encoder_ctl(st_enc,
+    OAC_PROJECTION_GET_DEMIXING_MATRIX_GAIN_REQUEST, &matrix_gain);
+    if (error != OAC_OK) {
+        goto bad_cleanup;
+    }
+    error = oac_projection_decoder_ctl(st_dec, OAC_SET_GAIN(matrix_gain));
+    if (error != OAC_OK) {
         goto bad_cleanup;
     }
 
