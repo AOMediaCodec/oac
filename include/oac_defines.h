@@ -219,6 +219,8 @@ extern "C" {
 #define OAC_GET_ENABLE_SEMAC_REQUEST 4063
 #define OAC_SET_SEMAC_TRANSPORT_ORDER_REQUEST 4064
 #define OAC_GET_SEMAC_TRANSPORT_ORDER_REQUEST 4065
+#define OAC_SET_SEMAC_TRANSPORT_DOMAIN_REQUEST 4066
+#define OAC_GET_SEMAC_TRANSPORT_DOMAIN_REQUEST 4067
 #endif
 
 /** Defines for the presence of extended APIs. */
@@ -914,6 +916,19 @@ extern "C" {
  * @param[out] x <tt>oac_int32 *</tt>: Returns the transport order (-1 for input order, or 0-5).
  * @hideinitializer */
 #define OAC_GET_SEMAC_TRANSPORT_ORDER(x) OAC_GET_SEMAC_TRANSPORT_ORDER_REQUEST, oac_check_int_ptr(x)
+
+/** SEMAC transport (coding) domains. The transport channels are coded in one of
+ * these domains; extend this list to add new domains. */
+#define OAC_SEMAC_DOMAIN_SHD  0   /**< Spherical harmonic (ambisonics) domain (default). */
+#define OAC_SEMAC_DOMAIN_BEAM 1   /**< Beam-projection domain (full input order only). */
+
+/** Selects the SEMAC transport (coding) domain.
+ * @param[in] x <tt>oac_int32</tt>: one of OAC_SEMAC_DOMAIN_* (default SHD).
+ * @hideinitializer */
+#define OAC_SET_SEMAC_TRANSPORT_DOMAIN(x) OAC_SET_SEMAC_TRANSPORT_DOMAIN_REQUEST, oac_check_int(x)
+/** Gets the encoder's configured SEMAC transport domain (OAC_SEMAC_DOMAIN_*).
+ * @hideinitializer */
+#define OAC_GET_SEMAC_TRANSPORT_DOMAIN(x) OAC_GET_SEMAC_TRANSPORT_DOMAIN_REQUEST, oac_check_int_ptr(x)
 #endif
 /**@}*/
 

@@ -45,6 +45,13 @@
 /* When defined, enables spatial normalization before ambisonics encoding */
 #define SEMAC_SPATIAL_NORMALIZATION
 
+/** SEMAC transport (coding) domains. Mirrors the public OAC_SEMAC_DOMAIN_*
+    values; extend with new domains as they are added. */
+typedef enum {
+   SEMAC_DOMAIN_SHD  = 0,   /**< Spherical harmonic (ambisonics) domain. */
+   SEMAC_DOMAIN_BEAM = 1    /**< Beam-projection domain (full input order only). */
+} SemacTransportDomain;
+
 /* Number of fine quantization bits for spatial beam energies in SEMAC mode.
    With 3 bits, resolution improves from 6 dB (coarse only) to 0.75 dB
    (6/2³ = 0.75 dB), meeting the sub-1 dB target for ambisonics spatial coding. */
@@ -91,14 +98,13 @@ void oaci_semac_apply_demixing(const float *demixing_matrix,
    const celt_sig *freq_in, celt_sig *freq_out,
    int channels, int num_bins);
 
-/** Encoder-side: compute spatial beam band energies from the full ambisonics
-    MDCT spectrum. Uses existing compute_band_energies + amp2Log2.
-    When SEMAC_SPATIAL_NORMALIZATION is defined, also applies spatial normalization:
-    transforms ambisonics to beamforming domain, normalizes beams using spatial energies,
-    transforms back to ambisonics domain, and replaces the original ambisonics channels.
+/** Encoder-side step 1: compute spatial beam band energies from the full
+    ambisonics MDCT spectrum. Transforms ambisonics -> beams (SPFB mixing) and
+    runs compute_band_energies + amp2Log2 on the beams. Does not modify freq.
     @param mode         CELT mode
-    @param freq         MDCT spectrum, layout freq[c*N + k]. When SEMAC_SPATIAL_NORMALIZATION
-                        is defined, this is modified in-place with the normalized ambisonics.
+    @param freq         Input MDCT spectrum, layout freq[c*N + k] (read-only)
+    @param beamFreq     Output beam-domain MDCT, layout beamFreq[b*N + k]
+                        [num_beams * N]. Reused by oaci_semac_create_transport_channels.
     @param spatialBandE Output linear band energies [num_beams * nbEBands]
     @param spatialLogE  Output log-domain band energies [num_beams * nbEBands]
     @param input_order  Ambisonics order of the input signal
@@ -108,9 +114,31 @@ void oaci_semac_apply_demixing(const float *demixing_matrix,
     @param LM           Frame size selector
     @param arch         Architecture flags */
 void oaci_semac_compute_spatial_energy(const CELTMode *mode,
-   celt_sig *freq,
+   const celt_sig *freq, celt_sig *beamFreq,
    celt_ener *spatialBandE, celt_glog *spatialLogE,
    int input_order, int effEnd, int end, int C, int LM, int arch);
+
+/** Encoder-side step 2: create the transport channels (written into freq) by
+    normalizing the beams to unit per-band energy. No-op unless
+    SEMAC_SPATIAL_NORMALIZATION is defined. With SEMAC_DOMAIN_SHD the normalized
+    beams are transformed back to the ambisonics domain (replacing freq); with
+    SEMAC_DOMAIN_BEAM the normalized beams ARE the transport channels
+    (full-order only: coding_channels == num_beams == C).
+    @param mode            CELT mode
+    @param beamFreq        Beam-domain MDCT from oaci_semac_compute_spatial_energy
+    @param freq            Output transport channels, layout freq[c*N + k]
+    @param spatialBandE    Per-beam linear band energies [num_beams * nbEBands]
+    @param input_order     Ambisonics order of the input signal
+    @param effEnd          Number of effective bands
+    @param C               Number of channels (SHD demix path)
+    @param coding_channels Number of transport channels (beam domain)
+    @param transport_domain SEMAC_DOMAIN_* selecting the coding domain
+    @param LM              Frame size selector */
+void oaci_semac_create_transport_channels(const CELTMode *mode,
+   const celt_sig *beamFreq, celt_sig *freq,
+   const celt_ener *spatialBandE,
+   int input_order, int effEnd, int C, int coding_channels,
+   int transport_domain, int LM);
 
 /** Decoder-side: reconstruct full ambisonics from coded channels + spatial energies.
     Operates in the normalized spectrum + band energy domain, before synthesis.
@@ -130,7 +158,7 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    celt_norm *X, celt_glog *oldBandE,
    const celt_glog *spatialLogE,
    int coding_channels, int output_channels,
-   int input_order,
+   int input_order, int transport_domain,
    int start, int effEnd, int end,
    int LM, int arch);
 

@@ -63,6 +63,7 @@ static void print_usage(const char *progname) {
     fprintf(stderr, "\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -transport_order <N>  : SEMAC transport order (1-5, default: input order)\n");
+    fprintf(stderr, "  -domain <shd|beam>    : SEMAC transport domain (default shd; beam = full order only)\n");
 }
 
 static int encode_decode_mapping2(int sampling_rate, int channels, int bitrate,
@@ -272,7 +273,8 @@ cleanup:
 }
 
 static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
-                                int transport_order, FILE *fin, FILE *fout) {
+                                int transport_order, int transport_domain,
+                                FILE *fin, FILE *fout) {
     OacEncoder *enc = NULL;
     OacDecoder *dec = NULL;
     int err;
@@ -290,6 +292,7 @@ static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
     fprintf(stderr, "  Channels: %d\n", channels);
     fprintf(stderr, "  Bitrate: %d bps\n", bitrate);
     fprintf(stderr, "  Transport order: %d\n", transport_order);
+    fprintf(stderr, "  Transport domain: %s\n", transport_domain == OAC_SEMAC_DOMAIN_BEAM ? "beam" : "SHD");
 
     inbuf = (short *)malloc(frame_size * channels * sizeof(short));
     outbuf = (short *)malloc(MAX_FRAME_SIZE * channels * sizeof(short));
@@ -315,6 +318,7 @@ static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
 #ifdef ENABLE_SEMAC
     oac_encoder_ctl(enc, OAC_SET_ENABLE_SEMAC(1));
     oac_encoder_ctl(enc, OAC_SET_SEMAC_TRANSPORT_ORDER(transport_order));
+    oac_encoder_ctl(enc, OAC_SET_SEMAC_TRANSPORT_DOMAIN(transport_domain));
     fprintf(stderr, "  SEMAC: enabled\n");
 #else
     fprintf(stderr, "  Warning: SEMAC not enabled in build\n");
@@ -371,6 +375,7 @@ int main(int argc, char *argv[]) {
     FILE *fout = NULL;
     int ret = 0;
     int transport_order = -1;
+    int transport_domain = OAC_SEMAC_DOMAIN_SHD;
 
     if (argc < 7) {
         print_usage(argv[0]);
@@ -388,6 +393,17 @@ int main(int argc, char *argv[]) {
     for (int i = 7; i < argc; i++) {
         if (strcmp(argv[i], "-transport_order") == 0 && i + 1 < argc) {
             transport_order = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-domain") == 0 && i + 1 < argc) {
+            const char *d = argv[++i];
+            if (strcmp(d, "shd") == 0) {
+                transport_domain = OAC_SEMAC_DOMAIN_SHD;
+            } else if (strcmp(d, "beam") == 0) {
+                transport_domain = OAC_SEMAC_DOMAIN_BEAM;
+            } else {
+                fprintf(stderr, "Error: unknown domain '%s' (use shd or beam)\n", d);
+                print_usage(argv[0]);
+                return 1;
+            }
         } else {
             fprintf(stderr, "Error: unrecognized option: %s\n", argv[i]);
             print_usage(argv[0]);
@@ -441,7 +457,7 @@ int main(int argc, char *argv[]) {
     } else if (strcmp(mode, "mapping3") == 0) {
         ret = encode_decode_mapping3(sampling_rate, channels, bitrate, fin, fout);
     } else if (strcmp(mode, "semac") == 0) {
-        ret = encode_decode_semac(sampling_rate, channels, bitrate, transport_order, fin, fout);
+        ret = encode_decode_semac(sampling_rate, channels, bitrate, transport_order, transport_domain, fin, fout);
     }
 
     fclose(fin);

@@ -113,6 +113,7 @@ struct OacCustomEncoder {
 #ifdef ENABLE_SEMAC
     int enable_semac;             /**< Whether SEMAC is enabled (0/1) */
     int semac_transport_order;    /**< Transport order (-1 for input order, or 0-5) */
+    int semac_transport_domain;   /**< Transport coding domain (OAC_SEMAC_DOMAIN_*) */
 #endif
 
     int force_intra;
@@ -261,6 +262,7 @@ static int oac_custom_encoder_init_arch(CELTEncoder *st, const CELTMode *mode,
 #ifdef ENABLE_SEMAC
     st->enable_semac = 0;
     st->semac_transport_order = -1;
+    st->semac_transport_domain = OAC_SEMAC_DOMAIN_SHD;
 #endif
 
     st->upsample = 1;
@@ -1739,12 +1741,13 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     VARDECL(celt_ener, spatialBandE);
     VARDECL(celt_glog, spatialBandLogE);
     VARDECL(celt_glog, spatialError);
+    VARDECL(celt_sig, semacBeamFreq);
 #endif
     celt_sig *prefilter_mem;
     celt_glog *oldBandE, *oldLogE, *oldLogE2, *energyError;
 #ifdef ENABLE_SEMAC
     celt_glog *oldSpatialBandE;
-    int semac_active, transport_order, coding_channels, num_beams;
+    int semac_active, transport_order, coding_channels, num_beams, semac_domain;
 #endif
     int shortBlocks = 0;
     int isTransient = 0;
@@ -2065,7 +2068,11 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     {
        int input_order = oaci_semac_get_order(CC);
        semac_active = st->enable_semac && (st->format == OAC_FORMAT_AMBISONICS) && CC > 1;
-       if (st->semac_transport_order == -1) {
+       semac_domain = semac_active ? st->semac_transport_domain : OAC_SEMAC_DOMAIN_SHD;
+       if (semac_domain == OAC_SEMAC_DOMAIN_BEAM) {
+           /* Beam-projection currently supports full-order transport only. */
+           transport_order = input_order;
+       } else if (st->semac_transport_order == -1) {
            transport_order = input_order;  /* Use input order */
        } else {
            transport_order = IMIN(st->semac_transport_order, input_order);
@@ -2078,12 +2085,16 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     ALLOC(spatialBandE, semac_active ? num_beams * nbEBands : ALLOC_NONE, celt_ener);
     ALLOC(spatialBandLogE, semac_active ? num_beams * nbEBands : ALLOC_NONE, celt_glog);
     ALLOC(spatialError, semac_active ? num_beams * nbEBands : ALLOC_NONE, celt_glog);
+    ALLOC(semacBeamFreq, semac_active ? num_beams * N : ALLOC_NONE, celt_sig);
 
-    /* SEMAC: Extract spatial beam energies from full N-channel MDCT spectrum */
+    /* SEMAC: extract spatial beam energies, then create the transport channels. */
     if (semac_active) {
-       oaci_semac_compute_spatial_energy(mode, freq,
+       int input_order = oaci_semac_get_order(CC);
+       oaci_semac_compute_spatial_energy(mode, freq, semacBeamFreq,
           spatialBandE, spatialBandLogE,
-          oaci_semac_get_order(CC), effEnd, end, CC, LM, st->arch);
+          input_order, effEnd, end, CC, LM, st->arch);
+       oaci_semac_create_transport_channels(mode, semacBeamFreq, freq,
+          spatialBandE, input_order, effEnd, CC, coding_channels, semac_domain, LM);
 
        /* Reduce C to coding_channels for the remainder of the encoding pipeline */
        C = coding_channels;
@@ -2221,6 +2232,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     if (semac_active) {
        oaci_ec_enc_bit_logp(enc, 1, 1);
        oaci_ec_enc_bits(enc, transport_order, 3);
+       oaci_ec_enc_bits(enc, semac_domain, 1);
     } else if (st->format == OAC_FORMAT_AMBISONICS && CC > 1) {
 #else
     if (st->format == OAC_FORMAT_AMBISONICS && CC > 1) {
@@ -3046,6 +3058,24 @@ int oac_custom_encoder_ctl(CELTEncoder * OAC_RESTRICT st, int request, ...) {
                 goto bad_arg;
             }
             *value = st->semac_transport_order;
+        }
+        break;
+        case OAC_SET_SEMAC_TRANSPORT_DOMAIN_REQUEST:
+        {
+            oac_int32 value = va_arg(ap, oac_int32);
+            if (value < 0 || value > OAC_SEMAC_DOMAIN_BEAM) {
+                goto bad_arg;
+            }
+            st->semac_transport_domain = value;
+        }
+        break;
+        case OAC_GET_SEMAC_TRANSPORT_DOMAIN_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) {
+                goto bad_arg;
+            }
+            *value = st->semac_transport_domain;
         }
         break;
 #endif

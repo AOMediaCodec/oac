@@ -138,6 +138,7 @@ struct OacEncoder {
 #ifdef ENABLE_SEMAC
     int enable_semac;                     /* Whether SEMAC is enabled (0/1) */
     int semac_transport_order;            /* Transport order (-1 for input order, or 0-5) */
+    int semac_transport_domain;           /* Transport coding domain (OAC_SEMAC_DOMAIN_*) */
 #endif
 #ifndef DISABLE_FLOAT_API
     TonalityAnalysisState analysis;
@@ -368,6 +369,7 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
 #ifdef ENABLE_SEMAC
     st->enable_semac = 0;
     st->semac_transport_order = -1;
+    st->semac_transport_domain = OAC_SEMAC_DOMAIN_SHD;
 #endif
 
     /* Delay compensation of 4 ms (2.5 ms for SILK's extra look-ahead
@@ -3181,6 +3183,26 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
                 goto bad_arg;
             }
             *value = st->semac_transport_order;
+        }
+        break;
+        case OAC_SET_SEMAC_TRANSPORT_DOMAIN_REQUEST:
+        {
+            oac_int32 value = va_arg(ap, oac_int32);
+            if (value < 0 || value > OAC_SEMAC_DOMAIN_BEAM) {
+                goto bad_arg;
+            }
+            st->semac_transport_domain = value;
+            if (st->application != OAC_APPLICATION_RESTRICTED_SILK)
+                ret = celt_encoder_ctl(celt_enc, OAC_SET_SEMAC_TRANSPORT_DOMAIN(value));
+        }
+        break;
+        case OAC_GET_SEMAC_TRANSPORT_DOMAIN_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) {
+                goto bad_arg;
+            }
+            *value = st->semac_transport_domain;
         }
         break;
 #endif

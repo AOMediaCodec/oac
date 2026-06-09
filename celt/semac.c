@@ -200,45 +200,63 @@ void oaci_semac_apply_demixing(const float *demixing_matrix,
 /* ========================================================================== */
 
 void oaci_semac_compute_spatial_energy(const CELTMode *mode,
-   celt_sig *freq,
+   const celt_sig *freq, celt_sig *beamFreq,
    celt_ener *spatialBandE, celt_glog *spatialLogE,
    int input_order, int effEnd, int end, int C, int LM, int arch)
 {
    int num_beams = oaci_semac_get_channels(input_order);
    int N = mode->shortMdctSize << LM;
    const float *mixing = oaci_semac_get_mixing_matrix(input_order);
-   VARDECL(celt_sig, beamFreq);
-   SAVE_STACK;
 
    celt_assert(mixing != NULL);
 
-   ALLOC(beamFreq, num_beams * N, celt_sig);
+   /* Transform ambisonics -> beams and extract per-beam band energies. */
    oaci_semac_apply_mixing(mixing, freq, beamFreq, C, N);
    oaci_compute_band_energies(mode, beamFreq, spatialBandE, effEnd, num_beams, LM, arch);
    oaci_amp2Log2(mode, effEnd, end, spatialBandE, spatialLogE, num_beams);
+}
 
+void oaci_semac_create_transport_channels(const CELTMode *mode,
+   const celt_sig *beamFreq, celt_sig *freq,
+   const celt_ener *spatialBandE,
+   int input_order, int effEnd, int C, int coding_channels,
+   int transport_domain, int LM)
+{
 #ifdef SEMAC_SPATIAL_NORMALIZATION
-   /* Apply spatial normalization: transform to beam domain, normalize beams,
-      transform back to ambisonics domain, and replace the original ambisonics
-      channels with the normalized version. */
-   {
-      int M = 1 << LM;
-      const float *demixing = oaci_semac_get_demixing_matrix(input_order);
-      VARDECL(celt_norm, beamNorm);
+   int num_beams = oaci_semac_get_channels(input_order);
+   int N = mode->shortMdctSize << LM;
+   int M = 1 << LM;
+   VARDECL(celt_norm, beamNorm);
+   SAVE_STACK;
 
-      celt_assert(demixing != NULL);
+   ALLOC(beamNorm, num_beams * N, celt_norm);
 
-      ALLOC(beamNorm, num_beams * N, celt_norm);
+   /* Normalize beams to unit energy per band. */
+   oaci_normalise_bands(mode, beamFreq, beamNorm, spatialBandE, effEnd, num_beams, M);
 
-      /* Normalize beams to unit energy per band */
-      oaci_normalise_bands(mode, beamFreq, beamNorm, spatialBandE, effEnd, num_beams, M);
-
-      /* Transform normalized beams back to ambisonics domain. */
-      oaci_semac_apply_demixing(demixing, (const celt_sig *)beamNorm, freq, C, N);
+   switch (transport_domain) {
+   case SEMAC_DOMAIN_BEAM:
+      /* Beam-projection (full order only): the normalized beams ARE the
+         transport channels (coding_channels == num_beams == C). */
+      OAC_COPY(freq, (const celt_sig *)beamNorm, coding_channels * N);
+      break;
+   case SEMAC_DOMAIN_SHD:
+   default:
+      /* SHD: transform normalized beams back to the ambisonics domain. */
+      {
+         const float *demixing = oaci_semac_get_demixing_matrix(input_order);
+         celt_assert(demixing != NULL);
+         oaci_semac_apply_demixing(demixing, (const celt_sig *)beamNorm, freq, C, N);
+      }
+      break;
    }
-#endif /* SEMAC_SPATIAL_NORMALIZATION */
 
    RESTORE_STACK;
+#else /* !SEMAC_SPATIAL_NORMALIZATION */
+   (void)mode; (void)beamFreq; (void)freq; (void)spatialBandE;
+   (void)input_order; (void)effEnd; (void)C; (void)coding_channels;
+   (void)transport_domain; (void)LM;
+#endif /* SEMAC_SPATIAL_NORMALIZATION */
 }
 
 /* ========================================================================== */
@@ -249,7 +267,7 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    celt_norm *X, celt_glog *oldBandE,
    const celt_glog *spatialLogE,
    int coding_channels, int output_channels,
-   int input_order,
+   int input_order, int transport_domain,
    int start, int effEnd, int end,
    int LM, int arch)
 {
@@ -285,8 +303,19 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    for (c = coding_channels; c < output_channels; c++)
       OAC_CLEAR(freq + c * N, N);
 
-   /* Step 2: Apply SPFB mixing -> beams */
-   oaci_semac_apply_mixing(mixing, freq, beamFreq, output_channels, N);
+   /* Step 2: Get beam-domain signals from the coded transport channels. */
+   switch (transport_domain) {
+   case SEMAC_DOMAIN_BEAM:
+      /* Beam-projection (full order): the coded channels ARE the beams
+         (coding_channels == output_channels == num_beams). */
+      OAC_COPY(beamFreq, freq, output_channels * N);
+      break;
+   case SEMAC_DOMAIN_SHD:
+   default:
+      /* SHD: apply SPFB mixing, ambisonics -> beams. */
+      oaci_semac_apply_mixing(mixing, freq, beamFreq, output_channels, N);
+      break;
+   }
 
    /* Step 3: Per-band normalize beams, apply spatial energies, inverse SPFB */
    for (i = start; i < effEnd; i++) {

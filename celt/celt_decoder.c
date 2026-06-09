@@ -1093,7 +1093,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     celt_glog *oldBandE, *oldLogE, *oldLogE2, *backgroundLogE;
 #ifdef ENABLE_SEMAC
     celt_glog *oldSpatialBandE;
-    int semac_active, transport_order, coding_channels, num_beams;
+    int semac_active, transport_order, coding_channels, num_beams, semac_domain;
 #endif
 
     int shortBlocks;
@@ -1311,6 +1311,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     transport_order = 0;
     coding_channels = C;
     num_beams = C;
+    semac_domain = OAC_SEMAC_DOMAIN_SHD;
     if (st->format == OAC_FORMAT_AMBISONICS && CC > 1) {
        semac_active = oaci_ec_dec_bit_logp(dec, 1);
        if (semac_active) {
@@ -1320,6 +1321,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
              transport_order = input_order;
           coding_channels = oaci_semac_get_channels(transport_order);
           num_beams = oaci_semac_get_channels(input_order);
+          semac_domain = oaci_ec_dec_bits(dec, 1);
           C = coding_channels;
        }
        tell = oaci_ec_tell(dec);
@@ -1474,7 +1476,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
    /* SEMAC: Reconstruct full ambisonics from coded channels + spatial energies */
     if (semac_active) {
        oaci_semac_reconstruct(mode, X, oldBandE, oldSpatialBandE,
-          coding_channels, CC, oaci_semac_get_order(CC),
+          coding_channels, CC, oaci_semac_get_order(CC), semac_domain,
           start, effEnd, end, LM, st->arch);
        C = CC;
     }
