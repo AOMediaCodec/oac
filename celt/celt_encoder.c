@@ -2069,10 +2069,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
        int input_order = oaci_semac_get_order(CC);
        semac_active = st->enable_semac && (st->format == OAC_FORMAT_AMBISONICS) && CC > 1;
        semac_domain = semac_active ? st->semac_transport_domain : OAC_SEMAC_DOMAIN_SHD;
-       if (semac_domain == OAC_SEMAC_DOMAIN_BEAM) {
-           /* Beam-projection currently supports full-order transport only. */
-           transport_order = input_order;
-       } else if (st->semac_transport_order == -1) {
+       if (st->semac_transport_order == -1) {
            transport_order = input_order;  /* Use input order */
        } else {
            transport_order = IMIN(st->semac_transport_order, input_order);

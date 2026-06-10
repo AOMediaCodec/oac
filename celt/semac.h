@@ -118,12 +118,12 @@ void oaci_semac_compute_spatial_energy(const CELTMode *mode,
    celt_ener *spatialBandE, celt_glog *spatialLogE,
    int input_order, int effEnd, int end, int C, int LM, int arch);
 
-/** Encoder-side step 2: create the transport channels (written into freq) by
-    normalizing the beams to unit per-band energy. No-op unless
-    SEMAC_SPATIAL_NORMALIZATION is defined. With SEMAC_DOMAIN_SHD the normalized
-    beams are transformed back to the ambisonics domain (replacing freq); with
-    SEMAC_DOMAIN_BEAM the normalized beams ARE the transport channels
-    (full-order only: coding_channels == num_beams == C).
+/** Encoder-side step 2: create the transport channels (written into freq) from
+    the beams. When SEMAC_SPATIAL_NORMALIZATION is defined the beams are first
+    normalized to unit per-band energy (restored at the decoder from the spatial
+    envelope); this is independent of the transport domain. SEMAC_DOMAIN_SHD
+    demixes the beams back to ambisonics; SEMAC_DOMAIN_BEAM downmixes them to
+    coding_channels transport beams (identity at full order).
     @param mode            CELT mode
     @param beamFreq        Beam-domain MDCT from oaci_semac_compute_spatial_energy
     @param freq            Output transport channels, layout freq[c*N + k]

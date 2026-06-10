@@ -196,6 +196,60 @@ void oaci_semac_apply_demixing(const float *demixing_matrix,
 }
 
 /* ========================================================================== */
+/* Beam-projection downmix / upmix                                            */
+/* Reduce the beam count by routing through SHD: beams -> ambisonics (demix)  */
+/* -> SH order truncation -> lower-order beams (mix). Identity at full order.  */
+/* ========================================================================== */
+
+/* Downmix num_beams input-order beams to coding_channels transport beams.
+   Only used by the normalized encoder path; the non-normalized path extracts
+   transport beams directly from the input ambisonics. */
+#ifdef SEMAC_SPATIAL_NORMALIZATION
+static void oaci_semac_downmix_beams(const celt_sig *beams_in, celt_sig *beams_out,
+   int order_in, int order_out, int num_bins)
+{
+   int num_beams = oaci_semac_get_channels(order_in);
+   int coding_channels = oaci_semac_get_channels(order_out);
+   const float *demix_in = oaci_semac_get_demixing_matrix(order_in);
+   const float *mix_tp = oaci_semac_get_mixing_matrix(order_out);
+   VARDECL(celt_sig, ambi);
+   SAVE_STACK;
+
+   celt_assert(demix_in != NULL && mix_tp != NULL);
+
+   ALLOC(ambi, num_beams * num_bins, celt_sig);
+   oaci_semac_apply_demixing(demix_in, beams_in, ambi, num_beams, num_bins);
+   /* mixing only coding_channels ambisonics inputs = SH order truncation */
+   oaci_semac_apply_mixing(mix_tp, ambi, beams_out, coding_channels, num_bins);
+
+   RESTORE_STACK;
+}
+#endif /* SEMAC_SPATIAL_NORMALIZATION */
+
+/* Upmix coding_channels transport beams back to num_beams beams (inverse). */
+static void oaci_semac_upmix_beams(const celt_sig *beams_in, celt_sig *beams_out,
+   int order_in, int order_out, int num_bins)
+{
+   int c;
+   int num_beams = oaci_semac_get_channels(order_out);
+   int coding_channels = oaci_semac_get_channels(order_in);
+   const float *demix_tp = oaci_semac_get_demixing_matrix(order_in);
+   const float *mix_in = oaci_semac_get_mixing_matrix(order_out);
+   VARDECL(celt_sig, ambi);
+   SAVE_STACK;
+
+   celt_assert(demix_tp != NULL && mix_in != NULL);
+
+   ALLOC(ambi, num_beams * num_bins, celt_sig);
+   oaci_semac_apply_demixing(demix_tp, beams_in, ambi, coding_channels, num_bins);
+   for (c = coding_channels; c < num_beams; c++)
+      OAC_CLEAR(ambi + c * num_bins, num_bins);
+   oaci_semac_apply_mixing(mix_in, ambi, beams_out, num_beams, num_bins);
+
+   RESTORE_STACK;
+}
+
+/* ========================================================================== */
 /* Spatial energy extraction (encoder side)                                   */
 /* ========================================================================== */
 
@@ -222,40 +276,52 @@ void oaci_semac_create_transport_channels(const CELTMode *mode,
    int input_order, int effEnd, int C, int coding_channels,
    int transport_domain, int LM)
 {
-#ifdef SEMAC_SPATIAL_NORMALIZATION
    int num_beams = oaci_semac_get_channels(input_order);
    int N = mode->shortMdctSize << LM;
+#ifdef SEMAC_SPATIAL_NORMALIZATION
+   /* Normalize input-order beams to unit per-band energy (restored at the
+      decoder), then form the transport channels from the normalized beams. */
    int M = 1 << LM;
    VARDECL(celt_norm, beamNorm);
    SAVE_STACK;
-
    ALLOC(beamNorm, num_beams * N, celt_norm);
-
-   /* Normalize beams to unit energy per band. */
    oaci_normalise_bands(mode, beamFreq, beamNorm, spatialBandE, effEnd, num_beams, M);
-
-   switch (transport_domain) {
-   case SEMAC_DOMAIN_BEAM:
-      /* Beam-projection (full order only): the normalized beams ARE the
-         transport channels (coding_channels == num_beams == C). */
-      OAC_COPY(freq, (const celt_sig *)beamNorm, coding_channels * N);
-      break;
-   case SEMAC_DOMAIN_SHD:
-   default:
-      /* SHD: transform normalized beams back to the ambisonics domain. */
-      {
-         const float *demixing = oaci_semac_get_demixing_matrix(input_order);
-         celt_assert(demixing != NULL);
-         oaci_semac_apply_demixing(demixing, (const celt_sig *)beamNorm, freq, C, N);
-      }
-      break;
+   if (transport_domain == SEMAC_DOMAIN_BEAM) {
+      /* Downmix to coding_channels transport beams (identity at full order). */
+      oaci_semac_downmix_beams((const celt_sig *)beamNorm, freq,
+         input_order, oaci_semac_get_order(coding_channels), N);
+   } else if (transport_domain == SEMAC_DOMAIN_SHD) {
+      /* Demix the beams back to ambisonics. */
+      const float *demixing = oaci_semac_get_demixing_matrix(input_order);
+      celt_assert(demixing != NULL);
+      oaci_semac_apply_demixing(demixing, (const celt_sig *)beamNorm, freq, C, N);
+   } else {
+      celt_assert(0); /* unknown transport domain */
    }
-
    RESTORE_STACK;
 #else /* !SEMAC_SPATIAL_NORMALIZATION */
-   (void)mode; (void)beamFreq; (void)freq; (void)spatialBandE;
-   (void)input_order; (void)effEnd; (void)C; (void)coding_channels;
-   (void)transport_domain; (void)LM;
+   (void)spatialBandE; (void)effEnd; (void)num_beams;
+   if (transport_domain == SEMAC_DOMAIN_BEAM) {
+      /* Extract transport beams straight from the input ambisonics (held in freq
+         on entry): transport = M_tp * truncated ambisonics. Avoids the demix->mix
+         round-trip and its transform error. */
+      const float *mix_tp =
+         oaci_semac_get_mixing_matrix(oaci_semac_get_order(coding_channels));
+      VARDECL(celt_sig, tmp);
+      SAVE_STACK;
+      celt_assert(mix_tp != NULL);
+      ALLOC(tmp, coding_channels * N, celt_sig);
+      oaci_semac_apply_mixing(mix_tp, freq, tmp, coding_channels, N);
+      OAC_COPY(freq, tmp, coding_channels * N);
+      RESTORE_STACK;
+   } else if (transport_domain == SEMAC_DOMAIN_SHD) {
+      /* SHD: demix the raw beams back to ambisonics. */
+      const float *demixing = oaci_semac_get_demixing_matrix(input_order);
+      celt_assert(demixing != NULL);
+      oaci_semac_apply_demixing(demixing, beamFreq, freq, C, N);
+   } else {
+      celt_assert(0); /* unknown transport domain */
+   }
 #endif /* SEMAC_SPATIAL_NORMALIZATION */
 }
 
@@ -304,17 +370,18 @@ void oaci_semac_reconstruct(const CELTMode *mode,
       OAC_CLEAR(freq + c * N, N);
 
    /* Step 2: Get beam-domain signals from the coded transport channels. */
-   switch (transport_domain) {
-   case SEMAC_DOMAIN_BEAM:
-      /* Beam-projection (full order): the coded channels ARE the beams
-         (coding_channels == output_channels == num_beams). */
-      OAC_COPY(beamFreq, freq, output_channels * N);
-      break;
-   case SEMAC_DOMAIN_SHD:
-   default:
+   if (transport_domain == SEMAC_DOMAIN_BEAM) {
+      /* Beam-projection: upmix the coding_channels coded transport beams back
+         to num_beams input-order beams (collapses to a plain copy at full
+         order). freq holds the denormalized transport beams in its first
+         coding_channels channels from Step 1. */
+      oaci_semac_upmix_beams(freq, beamFreq,
+         oaci_semac_get_order(coding_channels), input_order, N);
+   } else if (transport_domain == SEMAC_DOMAIN_SHD) {
       /* SHD: apply SPFB mixing, ambisonics -> beams. */
       oaci_semac_apply_mixing(mixing, freq, beamFreq, output_channels, N);
-      break;
+   } else {
+      celt_assert(0); /* unknown transport domain */
    }
 
    /* Step 3: Per-band normalize beams, apply spatial energies, inverse SPFB */
