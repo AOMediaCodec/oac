@@ -76,31 +76,26 @@ static OAC_INLINE int oaci_semac_get_channels(int order)
    return (order + 1) * (order + 1);
 }
 
-/** Get the SPFB mixing matrix (ambisonics -> beams) for the given order.
+/** Get the SPFB from_shd projection matrix (ambisonics -> beams) for the given order.
     Returns NULL if the order is unsupported. */
-const float *oaci_semac_get_mixing_matrix(int order);
+const float *oaci_semac_get_from_shd_matrix(int order);
 
-/** Get the SPFB demixing matrix (beams -> ambisonics) for the given order.
+/** Get the SPFB to_shd projection matrix (beams -> ambisonics) for the given order.
     Returns NULL if the order is unsupported. */
-const float *oaci_semac_get_demixing_matrix(int order);
+const float *oaci_semac_get_to_shd_matrix(int order);
 
-/** Apply SPFB mixing matrix: transform N ambisonics channels to N beams.
-    freq_in  layout: freq_in[c * num_bins + k],  c = 0..channels-1
-    freq_out layout: freq_out[b * num_bins + k], b = 0..channels-1 */
-void oaci_semac_apply_mixing(const float *mixing_matrix,
-   const celt_sig *freq_in, celt_sig *freq_out,
-   int channels, int num_bins);
-
-/** Apply SPFB demixing matrix: transform N beams to N ambisonics channels.
-    freq_in  layout: freq_in[b * num_bins + k],  b = 0..channels-1
-    freq_out layout: freq_out[c * num_bins + k], c = 0..channels-1 */
-void oaci_semac_apply_demixing(const float *demixing_matrix,
+/** Apply a square projection matrix (from_shd or to_shd): transform N channels
+    to N channels. The same matmul serves both directions; pass the from_shd
+    matrix for SHD->beams or the to_shd matrix for beams->SHD.
+    in/out layout: x[channel * num_bins + bin]; matrix row-major [channels x channels]. */
+void oaci_semac_project(const float *proj,
    const celt_sig *freq_in, celt_sig *freq_out,
    int channels, int num_bins);
 
 /** Encoder-side step 1: compute spatial beam band energies from the full
-    ambisonics MDCT spectrum. Transforms ambisonics -> beams (SPFB mixing) and
-    runs compute_band_energies + amp2Log2 on the beams. Does not modify freq.
+    ambisonics MDCT spectrum. Transforms ambisonics -> beams (SPFB from_shd
+    projection) and runs compute_band_energies + amp2Log2 on the beams. Does not
+    modify freq.
     @param mode         CELT mode
     @param freq         Input MDCT spectrum, layout freq[c*N + k] (read-only)
     @param beamFreq     Output beam-domain MDCT, layout beamFreq[b*N + k]
