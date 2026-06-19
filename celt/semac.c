@@ -434,4 +434,68 @@ void oaci_semac_reconstruct(const CELTMode *mode,
 
    RESTORE_STACK;
 }
+
+/* Per-(channel,band) bit-allocation offsets for SEMAC_ENERGY_ALLOC, derived from the
+   bit-exact spatial envelope oldSpatialBandE so encoder and decoder agree with no
+   side-info. Offset = log2(amp_c) - per-band mean(log2 amp): +1 bit/dim per amplitude
+   doubling above the mean; the mean is the conservation pivot (offsets sum to zero across
+   channels per band). Output = signed per-dim BITRES offset in Q6, layout
+   offsets_q6[c*nbEBands + i]; bands.c applies (band_N-1)*offset + floor + renorm.
+   Per-channel amplitude by transport domain:
+     BEAM: transport channel c == beam c -> use the beam envelope directly.
+     SHD : project beam energies to SH per band, E_shd[c] = sum_b to_shd[c,b]^2 E_beam[b].
+   Full transport order only (C == num_beams); else returns zero offsets (equal split). */
+void oaci_semac_compute_bit_weights(const celt_glog *oldSpatialBandE, int num_beams,
+   int C, int input_order, int transport_domain, int nbEBands,
+   int start, int end, oac_int32 *offsets_q6) {
+   int c, b, i, k;
+   const float *to_shd = NULL;
+
+   /* Buffers (here and at the call sites) are sized SEMAC_MAX_BEAMS*SEMAC_MAX_BANDS. */
+   celt_assert(nbEBands <= SEMAC_MAX_BANDS);
+
+   /* Always zero the full output; bands outside [start, end) and equal-fallback paths
+      then read 0 (= no offset = equal split). */
+   for (k = 0; k < C * nbEBands; k++) offsets_q6[k] = 0;
+
+   if (C != num_beams || C > SEMAC_MAX_BEAMS || C <= 0) return;   /* reduced order */
+   if (transport_domain != SEMAC_DOMAIN_BEAM) {
+      to_shd = oaci_semac_get_to_shd_matrix(input_order);
+      if (!to_shd) return;                                        /* no matrix */
+   }
+   for (i = start; i < end; i++) {
+      float log2amp[SEMAC_MAX_BEAMS];          /* log2 amplitude per channel, this band */
+      float mean = 0.f;
+      if (transport_domain == SEMAC_DOMAIN_BEAM) {
+         for (c = 0; c < C; c++) {
+            log2amp[c] = (float)oldSpatialBandE[c*nbEBands + i];   /* already log2 amp */
+            mean += log2amp[c];
+         }
+      } else {
+         double beam_energy[SEMAC_MAX_BEAMS];
+         for (b = 0; b < num_beams; b++) {
+            double amp = pow(2.0, (double)oldSpatialBandE[b*nbEBands + i]);
+            beam_energy[b] = amp*amp;
+         }
+         for (c = 0; c < C; c++) {
+            double sh_energy = 0.0;
+            for (b = 0; b < num_beams; b++) {
+               double coeff = (double)to_shd[c*num_beams + b];
+               sh_energy += coeff*coeff*beam_energy[b];           /* project beams -> SH */
+            }
+            /* 0.5*log2(energy) = log2 amplitude (0.69314718 = ln 2) */
+            log2amp[c] = 0.5f * (float)(log(sh_energy + 1e-30) / 0.6931471805599453);
+            mean += log2amp[c];
+         }
+      }
+      mean /= C;
+      /* Per-dim bit offset = log2(amp_c) - per-band mean (spec's log2(g_c/G_f)), scaled to
+         bands.c units: eighth-bits (1<<BITRES) x Q6 -- the band_N-1 multiply keeps the
+         fractional bits, bands.c shifts the Q6 out. */
+      for (c = 0; c < C; c++) {
+         float off = (log2amp[c] - mean) * (float)((1 << BITRES) * 64);
+         offsets_q6[c*nbEBands + i] = (oac_int32)(off >= 0.f ? off + 0.5f : off - 0.5f);
+      }
+   }
+}
 #endif

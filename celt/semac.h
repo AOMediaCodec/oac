@@ -45,6 +45,14 @@
 /* When defined, enables spatial normalization before ambisonics encoding */
 #define SEMAC_SPATIAL_NORMALIZATION
 
+/* Energy-weighted per-transport-channel bit allocation (experimental, OFF by default).
+ * When SEMAC_ENERGY_ALLOC is defined, SEMAC biases the per-channel PVQ bit split in
+ * quant_all_bands_multi toward higher-energy transport channels: each channel gets
+ * +1 bit/dimension per doubling of amplitude (6.02 dB) above the mean channel
+ * (per-band energy-weighted law). Weights are derived from the bit-exact spatial energy
+ * envelope, so the decoder reproduces them with no extra side-info. Define to enable. */
+/* #define SEMAC_ENERGY_ALLOC */
+
 /** SEMAC transport (coding) domains. Mirrors the public OAC_SEMAC_DOMAIN_*
     values; extend with new domains as they are added. */
 typedef enum {
@@ -59,6 +67,10 @@ typedef enum {
 
 /** Maximum number of beams supported (5th order = 36 beams). */
 #define SEMAC_MAX_BEAMS 36
+
+/** Maximum number of CELT energy bands (standard 48 kHz mode). Per-band SEMAC weight
+    buffers are sized to this; oaci_semac_compute_bit_weights asserts nbEBands <= this. */
+#define SEMAC_MAX_BANDS 21
 
 /** Return the ambisonics order for a given channel count.
     Channel count must be a perfect square: 1, 4, 9, 16, 25, 36. */
@@ -156,5 +168,24 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    int input_order, int transport_domain,
    int start, int effEnd, int end,
    int LM, int arch);
+
+/** Compute Q6 PER-BAND per-transport-channel bit-allocation offsets (signed,
+    per-dimension BITRES) from the BIT-EXACT spatial energy envelope. Layout
+    offsets_q6[c*nbEBands + i]. Length must be C*nbEBands. Deterministic and
+    called identically on encoder and decoder so the per-channel PVQ split stays
+    bit-exact. Beam transport domain uses the envelope directly per band; SHD
+    projects each band's beam energies through the to_shd matrix. Logarithmic
+    curve (+1 bit/dim per amplitude doubling above the per-band mean).
+    @param oldSpatialBandE per-beam envelope, layout [beam*nbEBands + band]
+    @param num_beams       number of beams in the envelope (full input order)
+    @param C               number of transport (coding) channels
+    @param input_order     ambisonics input order (selects the to_shd matrix)
+    @param transport_domain SEMAC_DOMAIN_SHD or SEMAC_DOMAIN_BEAM
+    @param nbEBands        bands per channel
+    @param start,end       coded band range
+    @param offsets_q6      output array of length C*nbEBands (signed per-dim BITRES, Q6) */
+void oaci_semac_compute_bit_weights(const celt_glog *oldSpatialBandE, int num_beams,
+   int C, int input_order, int transport_domain, int nbEBands,
+   int start, int end, oac_int32 *offsets_q6);
 
 #endif /* SEMAC_H */

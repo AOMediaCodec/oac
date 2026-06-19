@@ -141,7 +141,7 @@ void oaci_quant_all_bands(int encode, const CELTMode *m, int start, int end,
     const celt_ener *bandE, int *pulses, int shortBlocks, int spread,
     int dual_stereo, int intensity, int *tf_res, oac_int32 total_bits,
     oac_int32 balance, ec_ctx *ec, int M, int codedBands, oac_uint32 *seed,
-    int complexity, int arch, int disable_inv);
+    int complexity, int arch, int disable_inv, const oac_int32 *chan_bit_w);
 
 void oaci_anti_collapse(const CELTMode *m, celt_norm *X_,
     unsigned char *collapse_masks, int LM, int C, int size, int start,

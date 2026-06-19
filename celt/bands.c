@@ -1672,7 +1672,8 @@ static void quant_all_bands_multi(int encode, const CELTMode *m, int start, int 
                      const celt_ener *bandE, int *pulses, int shortBlocks, int spread,
                      int *tf_res, oac_int32 total_bits,
                      oac_int32 balance, ec_ctx *ec, int LM, int codedBands,
-                     oac_uint32 *seed, int arch, int disable_inv) {
+                     oac_uint32 *seed, int arch, int disable_inv,
+                     const oac_int32 *chan_bit_w) {
     int i, c;
     oac_int32 remaining_bits;
     const oac_int16 * OAC_RESTRICT eBands = m->eBands;
@@ -1759,6 +1760,25 @@ static void quant_all_bands_multi(int encode, const CELTMode *m, int start, int 
         /* Encode each channel independently for this band */
         {
             oac_int32 remaining_per_chan = remaining_bits / C;
+            oac_int32 targets[256];
+            oac_int64 target_sum = 0;
+            /* Energy-weighted split: target_c = b/C + (band_N-1)*offset_c, where
+               chan_bit_w[c,i] = log2(g_c/G_f) per dim (Q6 eighth-bits) and band_N-1 is the
+               shape DOF (gain coded separately). Floor, then renormalize to b. */
+            if (chan_bit_w) {
+                int cc;
+                oac_int32 eq = b / C;
+                /* One-pulse floor, capped (<=5 bits, vs up to 8 in wide HF bands) and
+                   <=1/4 of the equal share, so loud channels aren't over-taxed. */
+                oac_int32 min_target = (oac_int32)IMIN(EC_ILOG(band_N), 5) << BITRES;
+                if (min_target > (eq >> 2)) min_target = eq >> 2;
+                for (cc = 0; cc < C; cc++) {
+                    oac_int32 target = eq + (int)(((oac_int64)(band_N - 1) * chan_bit_w[cc*m->nbEBands + i]) >> 6);
+                    if (target < min_target) target = min_target;
+                    targets[cc] = target; target_sum += target;
+                }
+                if (target_sum <= 0) target_sum = 1;
+            }
             for (c = 0; c < C; c++) {
                 celt_norm *X_c;
                 celt_norm *norm_c = _norm + c*norm_size;
@@ -1766,9 +1786,17 @@ static void quant_all_bands_multi(int encode, const CELTMode *m, int start, int 
                 celt_norm *lowband_out;
                 celt_norm *lb_scratch;
                 unsigned x_cm;
-                int chan_b = b / C;
+                int chan_b;
+                oac_int32 rem_c;
+                if (chan_bit_w) {
+                    chan_b = (int)(((oac_int64)b * targets[c]) / target_sum);
+                    rem_c = remaining_per_chan;
+                } else {
+                    chan_b = b / C;
+                    rem_c = remaining_per_chan;
+                }
                 /* Each channel's PVQ budget cap: current tell + per-channel share */
-                ctx.total_bits = oaci_ec_tell_frac(ec) + remaining_per_chan;
+                ctx.total_bits = oaci_ec_tell_frac(ec) + rem_c;
                 ctx.bandE = bandE + c*m->nbEBands;
             X_c = X_ + c*frame_size + M*eBands[i];
             lowband_out = last ? NULL : norm_c + M*eBands[i] - norm_offset;
@@ -1815,11 +1843,13 @@ void oaci_quant_all_bands(int encode, const CELTMode *m, int start, int end,
                      const celt_ener *bandE, int *pulses, int shortBlocks, int spread,
                      int dual_stereo, int intensity, int *tf_res, oac_int32 total_bits,
                      oac_int32 balance, ec_ctx *ec, int LM, int codedBands,
-                     oac_uint32 *seed, int complexity, int arch, int disable_inv) {
+                     oac_uint32 *seed, int complexity, int arch, int disable_inv,
+                     const oac_int32 *chan_bit_w) {
     if (C <= 2) {
         int M = 1<<LM;
         int frame_size = M*m->shortMdctSize;
         celt_norm *Y_ = (C == 2) ? X_ + frame_size : NULL;
+        (void)chan_bit_w;
         quant_all_bands_twoch(encode, m, start, end, X_, Y_, collapse_masks,
             bandE, pulses, shortBlocks, spread, dual_stereo, intensity,
             tf_res, total_bits, balance, ec, LM, codedBands,
@@ -1828,6 +1858,6 @@ void oaci_quant_all_bands(int encode, const CELTMode *m, int start, int end,
         quant_all_bands_multi(encode, m, start, end, X_, C, collapse_masks,
             bandE, pulses, shortBlocks, spread,
             tf_res, total_bits, balance, ec, LM, codedBands,
-            seed, arch, disable_inv);
+            seed, arch, disable_inv, chan_bit_w);
     }
 }

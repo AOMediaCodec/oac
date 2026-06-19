@@ -1456,10 +1456,21 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
 
     oaci_unquant_fine_energy(mode, start, end, oldBandE, NULL, fine_quant, dec, C);
 
-    oaci_quant_all_bands(0, mode, start, end, X, C, collapse_masks,
-         NULL, pulses, shortBlocks, spread_decision, dual_stereo, intensity, tf_res,
-         len*(8<<BITRES) - anti_collapse_rsv, balance, dec, LM, codedBands, &st->rng, 0,
-         st->arch, st->disable_inv);
+    {
+        const oac_int32 *qab_chan_w = NULL;
+#ifdef SEMAC_ENERGY_ALLOC
+        oac_int32 semac_chan_w[SEMAC_MAX_BEAMS*SEMAC_MAX_BANDS];   /* per-band offsets: c*nbEBands + i */
+        if (semac_active) {
+            oaci_semac_compute_bit_weights(oldSpatialBandE, num_beams, C,
+                oaci_semac_get_order(CC), semac_domain, nbEBands, start, end, semac_chan_w);
+            qab_chan_w = semac_chan_w;
+        }
+#endif
+        oaci_quant_all_bands(0, mode, start, end, X, C, collapse_masks,
+             NULL, pulses, shortBlocks, spread_decision, dual_stereo, intensity, tf_res,
+             len*(8<<BITRES) - anti_collapse_rsv, balance, dec, LM, codedBands, &st->rng, 0,
+             st->arch, st->disable_inv, qab_chan_w);
+    }
 
     if (anti_collapse_rsv > 0) {
         anti_collapse_on = oaci_ec_dec_bits(dec, 1);

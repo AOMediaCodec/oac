@@ -2612,10 +2612,21 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     oaci_quant_fine_energy(mode, start, end, oldBandE, error, NULL, fine_quant, enc, C);
     OAC_CLEAR(energyError, nbEBands*CC);
 
-    oaci_quant_all_bands(1, mode, start, end, X, C, collapse_masks,
-         bandE, pulses, shortBlocks, st->spread_decision,
-         dual_stereo, st->intensity, tf_res, nbCompressedBytes*(8<<BITRES) - anti_collapse_rsv,
-         balance, enc, LM, codedBands, &st->rng, st->complexity, st->arch, st->disable_inv);
+    {
+        const oac_int32 *qab_chan_w = NULL;
+#ifdef SEMAC_ENERGY_ALLOC
+        oac_int32 semac_chan_w[SEMAC_MAX_BEAMS*SEMAC_MAX_BANDS];   /* per-band offsets: c*nbEBands + i */
+        if (semac_active) {
+            oaci_semac_compute_bit_weights(oldSpatialBandE, num_beams, C,
+                oaci_semac_get_order(CC), semac_domain, nbEBands, start, end, semac_chan_w);
+            qab_chan_w = semac_chan_w;
+        }
+#endif
+        oaci_quant_all_bands(1, mode, start, end, X, C, collapse_masks,
+             bandE, pulses, shortBlocks, st->spread_decision,
+             dual_stereo, st->intensity, tf_res, nbCompressedBytes*(8<<BITRES) - anti_collapse_rsv,
+             balance, enc, LM, codedBands, &st->rng, st->complexity, st->arch, st->disable_inv, qab_chan_w);
+    }
 
     if (anti_collapse_rsv > 0) {
         anti_collapse_on = st->consec_transient < 2;
