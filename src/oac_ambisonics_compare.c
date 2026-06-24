@@ -43,6 +43,13 @@
 #include "oac_multistream.h"
 #include "oac_projection.h"
 
+#ifndef ENABLE_SEMAC
+/* OAC_SEMAC_DOMAIN_* are gated on ENABLE_SEMAC in oac_defines.h; define them here so this
+   tool still builds without SEMAC (semac mode then fails at runtime; other modes work). */
+#define OAC_SEMAC_DOMAIN_SHD  0
+#define OAC_SEMAC_DOMAIN_BEAM 1
+#endif
+
 #define MAX_PACKET (1276*36)
 #define MAX_FRAME_SIZE 5760  /* 120ms at 48kHz */
 
