@@ -44,16 +44,16 @@
 
 /* Spatial whitening (level restored at the decoder via the envelope):
    - defined: whiten input beams to unit per-band energy BEFORE forming the transport.
-   - not defined: form the transport, then normalize its per-band overall level. */
-#define SEMAC_SPATIAL_NORMALIZATION
+   - not defined (default): form the transport, then normalize its per-band overall level. */
+/* #define SEMAC_SPATIAL_NORMALIZATION */
 
-/* Energy-weighted per-transport-channel bit allocation (experimental, OFF by default).
+/* Energy-weighted per-transport-channel bit allocation (experimental).
  * When SEMAC_ENERGY_ALLOC is defined, SEMAC biases the per-channel PVQ bit split in
  * quant_all_bands_multi toward higher-energy transport channels: each channel gets
  * +1 bit/dimension per doubling of amplitude (6.02 dB) above the mean channel
  * (per-band energy-weighted law). Weights are derived from the bit-exact spatial energy
- * envelope, so the decoder reproduces them with no extra side-info. Define to enable. */
-/* #define SEMAC_ENERGY_ALLOC */
+ * envelope, so the decoder reproduces them with no extra side-info. On by default. */
+#define SEMAC_ENERGY_ALLOC
 
 /** SEMAC transport (coding) domains. Mirrors the public OAC_SEMAC_DOMAIN_*
     values; extend with new domains as they are added. */
