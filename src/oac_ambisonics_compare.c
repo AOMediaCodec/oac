@@ -63,7 +63,7 @@ static void print_usage(const char *progname) {
     fprintf(stderr, "\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -transport_order <N>  : SEMAC transport order (1-5, default: input order)\n");
-    fprintf(stderr, "  -domain <shd|beam>    : SEMAC transport domain (default shd; beam = full order only)\n");
+    fprintf(stderr, "  -domain <shd|beam>    : SEMAC transport domain (default shd)\n");
 }
 
 static int encode_decode_mapping2(int sampling_rate, int channels, int bitrate,

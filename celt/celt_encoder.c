@@ -2090,8 +2090,8 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
        oaci_semac_compute_spatial_energy(mode, freq, semacBeamFreq,
           spatialBandE, spatialBandLogE,
           input_order, effEnd, end, CC, LM, st->arch);
-       oaci_semac_create_transport_channels(mode, semacBeamFreq, freq,
-          spatialBandE, input_order, effEnd, CC, coding_channels, semac_domain, LM);
+       oaci_semac_create_transport_channels(mode, freq, semacBeamFreq, freq,
+          spatialBandE, input_order, effEnd, coding_channels, semac_domain, LM);
 
        /* Reduce C to coding_channels for the remainder of the encoding pipeline */
        C = coding_channels;

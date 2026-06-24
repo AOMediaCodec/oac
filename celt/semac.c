@@ -204,6 +204,13 @@ static void oaci_semac_downmix_beams(const celt_sig *beams_in, celt_sig *beams_o
    VARDECL(celt_sig, ambi);
    SAVE_STACK;
 
+   /* order_in == order_out: to_shd then from_shd is the identity -> just copy, no round-trip. */
+   if (order_in == order_out) {
+      OAC_COPY(beams_out, beams_in, num_beams * num_bins);
+      RESTORE_STACK;
+      return;
+   }
+
    celt_assert(proj_to_shd != NULL && proj_from_shd != NULL);
 
    ALLOC(ambi, num_beams * num_bins, celt_sig);
@@ -227,6 +234,13 @@ static void oaci_semac_upmix_beams(const celt_sig *beams_in, celt_sig *beams_out
    VARDECL(celt_sig, ambi);
    SAVE_STACK;
 
+   /* order_in == order_out: to_shd then from_shd is the identity -> just copy, no round-trip. */
+   if (order_in == order_out) {
+      OAC_COPY(beams_out, beams_in, num_beams * num_bins);
+      RESTORE_STACK;
+      return;
+   }
+
    celt_assert(proj_to_shd != NULL && proj_from_shd != NULL);
 
    ALLOC(ambi, num_beams * num_bins, celt_sig);
@@ -243,7 +257,7 @@ static void oaci_semac_upmix_beams(const celt_sig *beams_in, celt_sig *beams_out
 /* ========================================================================== */
 
 void oaci_semac_compute_spatial_energy(const CELTMode *mode,
-   const celt_sig *freq, celt_sig *beamFreq,
+   const celt_sig *shdFreq, celt_sig *beamFreq,
    celt_ener *spatialBandE, celt_glog *spatialLogE,
    int input_order, int effEnd, int end, int C, int LM, int arch)
 {
@@ -254,64 +268,93 @@ void oaci_semac_compute_spatial_energy(const CELTMode *mode,
    celt_assert(proj_from_shd != NULL);
 
    /* Transform ambisonics -> beams and extract per-beam band energies. */
-   oaci_semac_project(proj_from_shd, freq, beamFreq, C, N);
+   oaci_semac_project(proj_from_shd, shdFreq, beamFreq, C, N);
    oaci_compute_band_energies(mode, beamFreq, spatialBandE, effEnd, num_beams, LM, arch);
    oaci_amp2Log2(mode, effEnd, end, spatialBandE, spatialLogE, num_beams);
 }
 
+
+/* Normalize each band's pooled energy (over channels and bins) to unit with one gain for all
+   channels (preserves the inter-channel distribution). g = 1/(1e-27 + L2), per
+   oaci_normalise_bands; level restored at the decoder via the envelope. */
+#ifndef SEMAC_SPATIAL_NORMALIZATION
+static void semac_normalize_level(const CELTMode *mode, celt_sig *x, int channels,
+   int effEnd, int M) {
+   const oac_int16 *eb = mode->eBands;
+   int N = mode->shortMdctSize * M;
+   int c, i, k;
+   for (i = 0; i < effEnd; i++) {
+      double e = 0.0;
+      float g;
+      for (c = 0; c < channels; c++)
+         for (k = M * eb[i]; k < M * eb[i + 1]; k++) e += x[c*N+k]*x[c*N+k];
+      g = 1.f / (1e-27f + (float)sqrt(e));
+      for (c = 0; c < channels; c++)
+         for (k = M * eb[i]; k < M * eb[i + 1]; k++) x[c*N+k] *= g;
+   }
+}
+#endif
+
+
 void oaci_semac_create_transport_channels(const CELTMode *mode,
-   const celt_sig *beamFreq, celt_sig *freq,
+   const celt_sig *shdFreq, const celt_sig *beamFreq, celt_sig *outFreq,
    const celt_ener *spatialBandE,
-   int input_order, int effEnd, int C, int coding_channels,
+   int input_order, int effEnd, int coding_channels,
    int transport_domain, int LM)
 {
    int num_beams = oaci_semac_get_channels(input_order);
    int N = mode->shortMdctSize << LM;
+   int c;
 #ifdef SEMAC_SPATIAL_NORMALIZATION
-   /* Normalize input-order beams to unit per-band energy (restored at the
-      decoder), then form the transport channels from the normalized beams. */
+   /* Whiten the input beams to unit per-band energy, then form the transport (from beamFreq;
+      shdFreq unused in this path). */
    int M = 1 << LM;
    VARDECL(celt_norm, beamNorm);
    SAVE_STACK;
+   (void)shdFreq;
    ALLOC(beamNorm, num_beams * N, celt_norm);
    oaci_normalise_bands(mode, beamFreq, beamNorm, spatialBandE, effEnd, num_beams, M);
    if (transport_domain == SEMAC_DOMAIN_BEAM) {
-      /* Downmix to coding_channels transport beams (identity at full order). */
-      oaci_semac_downmix_beams((const celt_sig *)beamNorm, freq,
+      /* Downmix the normalized beams to the transport beams (identity at full order). */
+      oaci_semac_downmix_beams((const celt_sig *)beamNorm, outFreq,
          input_order, oaci_semac_get_order(coding_channels), N);
    } else if (transport_domain == SEMAC_DOMAIN_SHD) {
-      /* Demix the beams back to ambisonics. */
+      /* Project the normalized beams back to ambisonics. */
       const float *proj_to_shd = oaci_semac_get_to_shd_matrix(input_order);
       celt_assert(proj_to_shd != NULL);
-      oaci_semac_project(proj_to_shd, (const celt_sig *)beamNorm, freq, C, N);
+      oaci_semac_project(proj_to_shd, (const celt_sig *)beamNorm, outFreq, num_beams, N);
    } else {
       celt_assert(0); /* unknown transport domain */
    }
    RESTORE_STACK;
 #else /* !SEMAC_SPATIAL_NORMALIZATION */
-   (void)spatialBandE; (void)effEnd; (void)num_beams;
+   int M = 1 << LM;
+   (void)spatialBandE; (void)beamFreq;
    if (transport_domain == SEMAC_DOMAIN_BEAM) {
-      /* Extract transport beams straight from the input ambisonics (held in freq
-         on entry): transport = M_tp * truncated ambisonics. Avoids the demix->mix
-         round-trip and its transform error. */
+      /* Downmix directly from the input ambisonics (shdFreq), then normalize the per-band level. */
       const float *proj_from_shd =
          oaci_semac_get_from_shd_matrix(oaci_semac_get_order(coding_channels));
       VARDECL(celt_sig, tmp);
       SAVE_STACK;
       celt_assert(proj_from_shd != NULL);
       ALLOC(tmp, coding_channels * N, celt_sig);
-      oaci_semac_project(proj_from_shd, freq, tmp, coding_channels, N);
-      OAC_COPY(freq, tmp, coding_channels * N);
+      oaci_semac_project(proj_from_shd, shdFreq, tmp, coding_channels, N);
+      semac_normalize_level(mode, tmp, coding_channels, effEnd, M);
+      OAC_COPY(outFreq, tmp, coding_channels * N);
       RESTORE_STACK;
    } else if (transport_domain == SEMAC_DOMAIN_SHD) {
-      /* SHD: demix the raw beams back to ambisonics. */
-      const float *proj_to_shd = oaci_semac_get_to_shd_matrix(input_order);
-      celt_assert(proj_to_shd != NULL);
-      oaci_semac_project(proj_to_shd, beamFreq, freq, C, N);
+      /* SHD transport = the input ambisonics (first coding_channels SH); normalize per-band level
+         (preserves the SH energy structure). */
+      if (outFreq != shdFreq)
+         OAC_COPY(outFreq, shdFreq, coding_channels * N);
+      semac_normalize_level(mode, outFreq, coding_channels, effEnd, M);
    } else {
       celt_assert(0); /* unknown transport domain */
    }
 #endif /* SEMAC_SPATIAL_NORMALIZATION */
+   /* Zero the untransmitted channels (only the first coding_channels are coded). */
+   for (c = coding_channels; c < num_beams; c++)
+      OAC_CLEAR(outFreq + c * N, N);
 }
 
 /* ========================================================================== */
@@ -373,37 +416,34 @@ void oaci_semac_reconstruct(const CELTMode *mode,
       celt_assert(0); /* unknown transport domain */
    }
 
-   /* Step 3: Per-band normalize beams, apply spatial energies, inverse SPFB */
+   /* Step 3: per-beam correction to the transmitted envelope, then inverse SPFB */
    for (i = start; i < effEnd; i++) {
       band_start = M * eBands[i];
       band_end = M * eBands[i + 1];
 
-      /* Compute per-beam energy for this band */
       for (b = 0; b < num_beams; b++) {
          float sum = 1e-27f;
+         float beamA, spatialGain, correctionGain;
          for (k = band_start; k < band_end; k++)
             sum += beamFreq[b * N + k] * beamFreq[b * N + k];
-         float beamE = (float)sqrt(sum);
-         float g = 1.f / (1e-27f + beamE);
+         beamA = (float)sqrt(sum);
 
-         /* Normalize this beam's band coefficients */
-         for (k = band_start; k < band_end; k++)
-            beamFreq[b * N + k] *= g;
-
-         /* Apply spatial energy: denormalize with the transmitted beam energy.
-            Same approach as denormalise_bands: lg = bandLogE + eMeans, g = exp2_db(lg). */
-         {
+         /* Scale by spatialGain/beamA: re-impose the envelope. lg = bandLogE + eMeans, as denormalise_bands. */
 #ifdef FIXED_POINT
+         {
             celt_glog lg = ADD32(spatialLogE[i + b * nbEBands],
                SHL32((oac_val32)oaci_eMeans[i], DB_SHIFT - 4));
-            oac_val32 spatialGain = celt_exp2_db(lg);
-#else
-            celt_glog lg = spatialLogE[i + b * nbEBands] + oaci_eMeans[i];
-            float spatialGain = celt_exp2_db(MIN32(32.f, lg));
-#endif
-            for (k = band_start; k < band_end; k++)
-               beamFreq[b * N + k] *= spatialGain;
+            spatialGain = (float)celt_exp2_db(lg);
          }
+#else
+         {
+            celt_glog lg = spatialLogE[i + b * nbEBands] + oaci_eMeans[i];
+            spatialGain = celt_exp2_db(MIN32(32.f, lg));
+         }
+#endif
+         correctionGain = spatialGain / (1e-27f + beamA);
+         for (k = band_start; k < band_end; k++)
+            beamFreq[b * N + k] *= correctionGain;
       }
 
       /* Inverse SPFB for this band */

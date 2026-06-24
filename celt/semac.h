@@ -42,7 +42,9 @@
 /** SEMAC transport order is now configured at runtime via encoder controls.
     The compile-time define is kept as documentation but no longer used. */
 
-/* When defined, enables spatial normalization before ambisonics encoding */
+/* Spatial whitening (level restored at the decoder via the envelope):
+   - defined: whiten input beams to unit per-band energy BEFORE forming the transport.
+   - not defined: form the transport, then normalize its per-band overall level. */
 #define SEMAC_SPATIAL_NORMALIZATION
 
 /* Energy-weighted per-transport-channel bit allocation (experimental, OFF by default).
@@ -109,7 +111,7 @@ void oaci_semac_project(const float *proj,
     projection) and runs compute_band_energies + amp2Log2 on the beams. Does not
     modify freq.
     @param mode         CELT mode
-    @param freq         Input MDCT spectrum, layout freq[c*N + k] (read-only)
+    @param shdFreq         Input MDCT spectrum, layout freq[c*N + k] (read-only)
     @param beamFreq     Output beam-domain MDCT, layout beamFreq[b*N + k]
                         [num_beams * N]. Reused by oaci_semac_create_transport_channels.
     @param spatialBandE Output linear band energies [num_beams * nbEBands]
@@ -121,7 +123,7 @@ void oaci_semac_project(const float *proj,
     @param LM           Frame size selector
     @param arch         Architecture flags */
 void oaci_semac_compute_spatial_energy(const CELTMode *mode,
-   const celt_sig *freq, celt_sig *beamFreq,
+   const celt_sig *shdFreq, celt_sig *beamFreq,
    celt_ener *spatialBandE, celt_glog *spatialLogE,
    int input_order, int effEnd, int end, int C, int LM, int arch);
 
@@ -137,14 +139,13 @@ void oaci_semac_compute_spatial_energy(const CELTMode *mode,
     @param spatialBandE    Per-beam linear band energies [num_beams * nbEBands]
     @param input_order     Ambisonics order of the input signal
     @param effEnd          Number of effective bands
-    @param C               Number of channels (SHD demix path)
-    @param coding_channels Number of transport channels (beam domain)
+    @param coding_channels Number of transport channels
     @param transport_domain SEMAC_DOMAIN_* selecting the coding domain
     @param LM              Frame size selector */
 void oaci_semac_create_transport_channels(const CELTMode *mode,
-   const celt_sig *beamFreq, celt_sig *freq,
+   const celt_sig *shdFreq, const celt_sig *beamFreq, celt_sig *outFreq,
    const celt_ener *spatialBandE,
-   int input_order, int effEnd, int C, int coding_channels,
+   int input_order, int effEnd, int coding_channels,
    int transport_domain, int LM);
 
 /** Decoder-side: reconstruct full ambisonics from coded channels + spatial energies.
