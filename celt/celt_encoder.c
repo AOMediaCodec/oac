@@ -2209,7 +2209,22 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
         if (oaci_patch_transient_decision(bandLogE, oldBandE, nbEBands, start, end, C)) {
             isTransient = 1;
             shortBlocks = M;
-            oaci_compute_mdcts(mode, shortBlocks, in, freq, C, CC, LM, st->upsample, st->arch);
+#ifdef ENABLE_SEMAC
+            if (semac_active) {
+                /* The time-domain `in` is the raw HOA input, not the MDCT-domain transport, so
+                   re-MDCT the full input and re-form the SEMAC transport (mirror the main path)
+                   rather than coding raw input channels. */
+                int io = oaci_semac_get_order(CC);
+                oaci_compute_mdcts(mode, shortBlocks, in, freq, CC, CC, LM, st->upsample, st->arch);
+                oaci_semac_compute_spatial_energy(mode, freq, semacBeamFreq, spatialBandE,
+                    spatialBandLogE, io, effEnd, end, CC, LM, st->arch);
+                oaci_semac_create_transport_channels(mode, freq, semacBeamFreq, freq, spatialBandE,
+                    io, effEnd, coding_channels, semac_domain, LM);
+            } else
+#endif
+            {
+                oaci_compute_mdcts(mode, shortBlocks, in, freq, C, CC, LM, st->upsample, st->arch);
+            }
             oaci_compute_band_energies(mode, freq, bandE, effEnd, C, LM, st->arch);
             oaci_amp2Log2(mode, effEnd, end, bandE, bandLogE, C);
             /* Compensate for the scaling of short vs long mdcts */
