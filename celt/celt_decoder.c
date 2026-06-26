@@ -1088,6 +1088,9 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     VARDECL(int, fine_priority);
     VARDECL(int, tf_res);
     VARDECL(unsigned char, collapse_masks);
+#ifdef ENABLE_SEMAC
+    VARDECL(celt_glog, outLogE);   /* full-order output energy for synthesis (SEMAC) */
+#endif
     celt_sig *decode_mem[OAC_MAX_CHANNELS];
     celt_sig *out_syn[OAC_MAX_CHANNELS];
     celt_glog *oldBandE, *oldLogE, *oldLogE2, *backgroundLogE;
@@ -1443,6 +1446,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     ALLOC(collapse_masks, C*nbEBands, unsigned char);
 #ifdef ENABLE_SEMAC
     ALLOC(X, IMAX(CC, C)*N, celt_norm);  /**< Interleaved normalised MDCTs (large enough for both stream and SEMAC) */
+    ALLOC(outLogE, CC*nbEBands, celt_glog);
 #else
     ALLOC(X, C*N, celt_norm);  /**< Interleaved normalised MDCTs */
 #endif
@@ -1461,8 +1465,12 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
 #ifdef SEMAC_ENERGY_ALLOC
         oac_int32 semac_chan_w[SEMAC_MAX_BEAMS*SEMAC_MAX_BANDS];   /* per-band offsets: c*nbEBands + i */
         if (semac_active) {
-            oaci_semac_compute_bit_weights(oldSpatialBandE, num_beams, C,
+#ifdef SEMAC_ALLOC_FROM_ENV
+            oaci_semac_compute_bit_weights_from_env(oldSpatialBandE, num_beams, C,
                 oaci_semac_get_order(CC), semac_domain, nbEBands, start, end, semac_chan_w);
+#else
+            oaci_semac_compute_bit_weights_from_tc(oldBandE, C, nbEBands, start, end, semac_chan_w);
+#endif
             qab_chan_w = semac_chan_w;
         }
 #endif
@@ -1486,7 +1494,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
 #ifdef ENABLE_SEMAC
    /* SEMAC: Reconstruct full ambisonics from coded channels + spatial energies */
     if (semac_active) {
-       oaci_semac_reconstruct(mode, X, oldBandE, oldSpatialBandE,
+       oaci_semac_reconstruct(mode, X, oldBandE, outLogE, oldSpatialBandE,
           coding_channels, CC, oaci_semac_get_order(CC), semac_domain,
           start, effEnd, end, LM, st->arch);
        C = CC;
@@ -1496,12 +1504,22 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     if (silence) {
         for (i = 0; i < C*nbEBands; i++)
             oldBandE[i] = -GCONST(28.f);
+#ifdef ENABLE_SEMAC
+        if (semac_active)
+            for (i = 0; i < CC*nbEBands; i++)
+                outLogE[i] = -GCONST(28.f);
+#endif
     }
     if (st->prefilter_and_fold) {
         oaci_prefilter_and_fold(st, N);
     }
+#ifdef ENABLE_SEMAC
+    oaci_celt_synthesis(mode, X, out_syn, semac_active ? outLogE : oldBandE, start, effEnd,
+                  C, CC, isTransient, LM, st->downsample, silence, st->arch);
+#else
     oaci_celt_synthesis(mode, X, out_syn, oldBandE, start, effEnd,
                   C, CC, isTransient, LM, st->downsample, silence, st->arch);
+#endif
 
     c = 0; do {
         st->postfilter_period = IMAX(st->postfilter_period, COMBFILTER_MINPERIOD);

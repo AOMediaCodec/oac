@@ -2632,8 +2632,12 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
 #ifdef SEMAC_ENERGY_ALLOC
         oac_int32 semac_chan_w[SEMAC_MAX_BEAMS*SEMAC_MAX_BANDS];   /* per-band offsets: c*nbEBands + i */
         if (semac_active) {
-            oaci_semac_compute_bit_weights(oldSpatialBandE, num_beams, C,
+#ifdef SEMAC_ALLOC_FROM_ENV
+            oaci_semac_compute_bit_weights_from_env(oldSpatialBandE, num_beams, C,
                 oaci_semac_get_order(CC), semac_domain, nbEBands, start, end, semac_chan_w);
+#else
+            oaci_semac_compute_bit_weights_from_tc(oldBandE, C, nbEBands, start, end, semac_chan_w);
+#endif
             qab_chan_w = semac_chan_w;
         }
 #endif

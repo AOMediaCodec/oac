@@ -363,6 +363,7 @@ void oaci_semac_create_transport_channels(const CELTMode *mode,
 
 void oaci_semac_reconstruct(const CELTMode *mode,
    celt_norm *X, celt_glog *oldBandE,
+   celt_glog *outLogE,
    const celt_glog *spatialLogE,
    int coding_channels, int output_channels,
    int input_order, int transport_domain,
@@ -469,8 +470,11 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    oaci_compute_band_energies(mode, outFreq, outBandE, effEnd, output_channels, LM, arch);
    oaci_normalise_bands(mode, outFreq, X, outBandE, effEnd, output_channels, M);
 
-   /* Convert to log-domain band energies for oldBandE */
-   oaci_amp2Log2(mode, effEnd, end, outBandE, oldBandE, output_channels);
+   /* Output (full-order) band log-energies for synthesis go to outLogE. oldBandE is left as the
+      DECODED TRANSPORT energy (the value just denormalized in Step 1), matching the encoder's
+      persistent state, so the next frame's transport coarse-energy prediction and the
+      energy-weighted bit allocation use the same transport energy on both sides. */
+   oaci_amp2Log2(mode, effEnd, end, outBandE, outLogE, output_channels);
 
    RESTORE_STACK;
 }
@@ -506,14 +510,34 @@ static void semac_write_band_offsets(const float *log2amp, int C, int nbEBands, 
    }
 }
 
-/* Per-(channel,band) bit-allocation offsets for SEMAC_ENERGY_ALLOC, derived from the bit-exact
-   spatial envelope oldSpatialBandE so encoder and decoder agree with no side-info. Offset =
+/* Per-(channel,band) bit-allocation offsets for SEMAC_ENERGY_ALLOC, derived directly from the
+   coded transport band energies oldBandE (the actual per-channel amplitudes). eMeans is per-band
+   (constant across channels), so it cancels in the per-band mean and oldBandE serves directly as
+   log2-amplitude. Both encoder and decoder hold the same oldBandE (coarse+fine), so no side-info.
+   Offset = log2(amp_c) - per-band mean(log2 amp): +1 bit/dim per amplitude doubling above the mean.
+   This is the default weight source. Layout offsets_q6[c*nbEBands + i]. */
+void oaci_semac_compute_bit_weights_from_tc(const celt_glog *oldBandE, int C, int nbEBands,
+   int start, int end, oac_int32 *offsets_q6) {
+   int c, i, k;
+   for (k = 0; k < C * nbEBands; k++) offsets_q6[k] = 0;
+   if (C <= 0 || C > SEMAC_MAX_BEAMS) return;
+   celt_assert(nbEBands <= SEMAC_MAX_BANDS);
+   for (i = start; i < end; i++) {
+      float log2amp[SEMAC_MAX_BEAMS];
+      for (c = 0; c < C; c++) log2amp[c] = (float)oldBandE[c*nbEBands + i];
+      semac_write_band_offsets(log2amp, C, nbEBands, i, offsets_q6);
+   }
+}
+
+/* Alternative weight source (SEMAC_ALLOC_FROM_ENV): derive the offsets from the spatial energy
+   envelope oldSpatialBandE (a diagonal projection of the per-beam energies) instead of the coded
+   transport energies. Encoder and decoder agree with no side-info. Offset =
    log2(amp_c) - per-band mean(log2 amp): +1 bit/dim per amplitude doubling above the mean.
    Output layout offsets_q6[c*nbEBands + i]. Per-transport-channel energy (diagonal approx):
      SHD          : transport channels are the first C SH channels; project beams -> SH.
      BEAM full    : transport beam c == input beam c; use the envelope directly.
      BEAM reduced : downmix beams -> SH (first C) -> C reduced beams via from_shd[order(C)]. */
-void oaci_semac_compute_bit_weights(const celt_glog *oldSpatialBandE, int num_beams,
+void oaci_semac_compute_bit_weights_from_env(const celt_glog *oldSpatialBandE, int num_beams,
    int C, int input_order, int transport_domain, int nbEBands,
    int start, int end, oac_int32 *offsets_q6) {
    int c, b, i, k;
