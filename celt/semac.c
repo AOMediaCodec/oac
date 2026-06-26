@@ -495,8 +495,9 @@ static void semac_band_beam_energy(const celt_glog *oldSpatialBandE, int num_bea
 }
 
 /* Turn one band's per-channel log2 amplitudes into signed per-dim BITRES offsets in Q6:
-   offset_c = (log2amp_c - per-band mean) scaled to bands.c units ((1<<BITRES) x Q6). The mean
-   is the conservation pivot, so offsets sum to ~0 across channels; bands.c applies
+   offset_c = lambda * (log2amp_c - per-band mean) scaled to bands.c units ((1<<BITRES) x Q6).
+   The mean is the conservation pivot, so offsets sum to ~0 across channels; SEMAC_ALLOC_LAMBDA
+   scales the steering strength (1.0 full, 0.0 equal). bands.c applies
    (band_N-1)*offset + floor + renorm and shifts the Q6 out. */
 static void semac_write_band_offsets(const float *log2amp, int C, int nbEBands, int i,
    oac_int32 *offsets_q6) {
@@ -505,7 +506,7 @@ static void semac_write_band_offsets(const float *log2amp, int C, int nbEBands, 
    for (c = 0; c < C; c++) mean += log2amp[c];
    mean /= C;
    for (c = 0; c < C; c++) {
-      float off = (log2amp[c] - mean) * (float)((1 << BITRES) * 64);
+      float off = SEMAC_ALLOC_LAMBDA * (log2amp[c] - mean) * (float)((1 << BITRES) * 64);
       offsets_q6[c*nbEBands + i] = (oac_int32)(off >= 0.f ? off + 0.5f : off - 0.5f);
    }
 }

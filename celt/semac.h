@@ -61,6 +61,16 @@
  * Both are bit-exact on encoder and decoder. */
 /* #define SEMAC_ALLOC_FROM_ENV */
 
+/* Partial-weighting scalar lambda on the per-channel allocation offset. The offset is
+ * lambda * (log2(a_c) - per-band mean), where a_c is the channel amplitude (= sqrt energy):
+ *   lambda = 0.0 -> equal split
+ *   lambda = 0.5 -> half-amplitude
+ *   lambda = 1.0 -> amplitude law (1 bit/dim per 6.02 dB amplitude doubling)   [default]
+ * Higher lambda steers more bits to the louder channels. */
+#ifndef SEMAC_ALLOC_LAMBDA
+#define SEMAC_ALLOC_LAMBDA 1.0f
+#endif
+
 /** SEMAC transport (coding) domains. Mirrors the public OAC_SEMAC_DOMAIN_*
     values; extend with new domains as they are added. */
 typedef enum {
