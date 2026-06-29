@@ -2324,11 +2324,14 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
           num_beams, LM, (nbCompressedBytes*8 - oaci_ec_tell(enc)) >> 3, 0,
           &st->delayedIntraSpatial, 1, st->loss_rate, 0);
 
-       /* Fine quantization for spatial energies */
+       /* Fine quantization for spatial energies. Rate-adaptive fine-bit count, keyed on the
+          per-transport-channel budget and signalled (2 bits) so the decoder can mirror it. */
        {
            int spatial_fine_quant[21]; /* nbEBands is 21 max */
+           int sfb = SEMAC_SPATIAL_FINE_BITS(nbCompressedBytes*8 / coding_channels);
+           oaci_ec_enc_bits(enc, sfb, 2);
            for (i = 0; i < nbEBands; i++) {
-              spatial_fine_quant[i] = (i >= start && i < end) ? SPATIAL_FINE_BITS : 0;
+              spatial_fine_quant[i] = (i >= start && i < end) ? sfb : 0;
            }
            oaci_quant_fine_energy(mode, start, end, oldSpatialBandE, spatialError, NULL, spatial_fine_quant, enc, num_beams);
        }

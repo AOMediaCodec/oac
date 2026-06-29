@@ -1376,11 +1376,12 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
           oaci_unquant_coarse_energy(mode, start, end, oldSpatialBandE,
              spatial_intra, dec, num_beams, LM);
 
-          /* Fine quantization for spatial energies */
+          /* Fine quantization for spatial energies (rate-adaptive fine-bit count, signalled). */
           {
               int spatial_fine_quant[21]; /* nbEBands is 21 max */
+              int sfb = oaci_ec_dec_bits(dec, 2);
               for (i = 0; i < nbEBands; i++) {
-                 spatial_fine_quant[i] = (i >= start && i < end) ? SPATIAL_FINE_BITS : 0;
+                 spatial_fine_quant[i] = (i >= start && i < end) ? sfb : 0;
               }
               oaci_unquant_fine_energy(mode, start, end, oldSpatialBandE, NULL, spatial_fine_quant, dec, num_beams);
           }
