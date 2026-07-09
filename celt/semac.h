@@ -44,7 +44,8 @@
 
 /* Spatial whitening (level restored at the decoder via the envelope):
    - defined: whiten input beams to unit per-band energy BEFORE forming the transport.
-   - not defined (default): form the transport, then normalize its per-band overall level. */
+   - not defined (default): form the transport at natural per-band level. For beam full-transport
+     this makes the envelope redundant (see oaci_semac_envelope_skipped). */
 /* #define SEMAC_SPATIAL_NORMALIZATION */
 
 /* Energy-weighted per-transport-channel bit allocation (experimental).
@@ -115,6 +116,21 @@ static OAC_INLINE int oaci_semac_get_channels(int order)
    return (order + 1) * (order + 1);
 }
 
+/** True when the spatial envelope is redundant, so it is neither coded nor restored: the beam
+    domain at FULL transport in the non-normalized regime (transport carries the natural per-beam
+    energy, already coded by CELT). Never in the normalized regime (whitened transport needs the
+    envelope). Encoder and decoder agree, so no signalling is needed. */
+static OAC_INLINE int oaci_semac_envelope_skipped(int transport_domain, int coding_channels,
+   int num_beams)
+{
+#ifdef SEMAC_SPATIAL_NORMALIZATION
+   (void)transport_domain; (void)coding_channels; (void)num_beams;
+   return 0;
+#else
+   return transport_domain == SEMAC_DOMAIN_BEAM && coding_channels == num_beams;
+#endif
+}
+
 /** Get the SPFB from_shd projection matrix (ambisonics -> beams) for the given order.
     Returns NULL if the order is unsupported. */
 const float *oaci_semac_get_from_shd_matrix(int order);
@@ -155,9 +171,9 @@ void oaci_semac_compute_spatial_energy(const CELTMode *mode,
 /** Encoder-side step 2: create the transport channels (written into outFreq). When
     SEMAC_SPATIAL_NORMALIZATION is defined the input beams (beamFreq) are first normalized to
     unit per-band energy (restored at the decoder from the spatial envelope); otherwise the
-    transport is formed from the input ambisonics (shdFreq) and only its per-band level is
-    normalized. SEMAC_DOMAIN_SHD yields ambisonics transport channels; SEMAC_DOMAIN_BEAM
-    downmixes to coding_channels transport beams (identity at full order).
+    transport is formed at its natural per-band level. SEMAC_DOMAIN_SHD yields ambisonics
+    transport channels; SEMAC_DOMAIN_BEAM downmixes to coding_channels transport beams (identity
+    at full order).
     @param mode            CELT mode
     @param shdFreq         Input ambisonics MDCT, layout [c*N + k] (read-only)
     @param beamFreq        Beam-domain MDCT from oaci_semac_compute_spatial_energy (read-only)

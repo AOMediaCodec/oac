@@ -1371,6 +1371,9 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     /* SEMAC: Decode spatial beam energies right after coarse energy (mirrors encoder) */
     if (semac_active) {
        oac_int32 spatial_bits_left = len*8 - oaci_ec_tell(dec);
+       /* Mirror the encoder: skip reading the envelope where it was skipped on encode. */
+       if (oaci_semac_envelope_skipped(semac_domain, coding_channels, num_beams))
+          spatial_bits_left = 0;
        if (spatial_bits_left > 0) {
           int spatial_intra = spatial_bits_left > 3 ? oaci_ec_dec_bit_logp(dec, 3) : 0;
           oaci_unquant_coarse_energy(mode, start, end, oldSpatialBandE,

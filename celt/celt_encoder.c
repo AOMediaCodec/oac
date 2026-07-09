@@ -2319,6 +2319,9 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     if (semac_active) {
        oac_int32 spatial_budget;
        spatial_budget = nbCompressedBytes*8;
+       /* Skip the redundant envelope for beam full-transport, freeing the bits for the shapes. */
+       if (!oaci_semac_envelope_skipped(semac_domain, coding_channels, num_beams))
+     {
        oaci_quant_coarse_energy(mode, start, end, effEnd, spatialBandLogE,
           oldSpatialBandE, spatial_budget, spatialError, enc,
           num_beams, LM, (nbCompressedBytes*8 - oaci_ec_tell(enc)) >> 3, 0,
@@ -2335,6 +2338,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
            }
            oaci_quant_fine_energy(mode, start, end, oldSpatialBandE, spatialError, NULL, spatial_fine_quant, enc, num_beams);
        }
+     }
     }
 #endif
 
