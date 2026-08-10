@@ -165,15 +165,14 @@ if __name__ == '__main__':
                 if have_schedule:
                     lambda_schedule = 1 - .8*np.exp(-batch/4000.)
                     scale_reg_weight = min(2., 5e-10*batch*batch)
-                    cont_weight = torch.clamp(cont_weight_q[torch.clamp(q, max=15)]*0.1/(1+batch/12000), min=0.03)
                     corr_weight = .1/(1+batch/800)
                     bias_weight = 1e-5*min(1, batch/8000)
                 else:
                     lambda_schedule = 1
                     scale_reg_weight = 2.
-                    cont_weight = .03
                     corr_weight = 1e-4
                     bias_weight = 1e-5
+                cont_weight = cont_weight_q[torch.clamp(q, max=15)]*0.1
                 batch_lambda = lambda_schedule*model.qlambda[q]
                 nb_pre = 2
                 pre = target[:, :nb_pre*160]

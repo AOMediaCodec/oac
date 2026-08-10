@@ -217,6 +217,13 @@ class FWConv(nn.Module):
 def n(x):
     return torch.clamp(x + (1./127.)*(torch.rand_like(x)-.5), min=-1., max=1.)
 
+def sim_iir(x):
+    x = F.pad(x, (10, 0))
+    x = (x[...,10:] + .7*x[...,9:-1] + 0.49*x[...,8:-2] + 0.343*x[...,7:-3] + 0.2401*x[...,6:-4]
+      + 0.16807*x[...,5:-5] + 0.117649*x[...,4:-6] + 0.082354*x[...,3:-7] + 0.057648*x[...,2:-8] + 0.040354*x[...,1:-9]
+      + 0.028248*x[...,:-10])
+    return x
+
 class DCELPCond(nn.Module):
     def __init__(self, feature_dim=20, cond_size=256, pembed_dims=12, nb_subframes=2, softquant=False):
         super(DCELPCond, self).__init__()
@@ -510,10 +517,8 @@ class DCELP(nn.Module):
         sig = torch.cat(sig_list, dim=1)
         wsig = torch.cat(wsig_list, dim=1)
         wtarget = torch.cat(wtarget_list, dim=1)
-        wsig = F.pad(wsig, (3, 0))
-        wtarget = F.pad(wtarget, (3, 0))
-        wsig = wsig[...,3:] + .5*wsig[...,2:-1] + .25*wsig[...,1:-2] + .125*wsig[...,:-3]
-        wtarget = wtarget[...,3:] + .5*wtarget[...,2:-1] + .25*wtarget[...,1:-2] + .125*wtarget[...,:-3]
+        wsig = sim_iir(wsig)
+        wtarget = sim_iir(wtarget)
         latent_var = torch.stack(latent_var_list, dim=0)
 
         return sig, torch.mean(latent_var, 0), res_corr/(nb_frames*self.nb_subframes), wsig, wtarget
