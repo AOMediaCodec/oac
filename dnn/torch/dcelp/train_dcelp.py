@@ -177,7 +177,7 @@ if __name__ == '__main__':
                 batch_lambda = lambda_schedule*model.qlambda[q]
                 nb_pre = 2
                 pre = target[:, :nb_pre*160]
-                sig, latent_var, res_corr = model(features, target, q, target.size(1)//160 - nb_pre, pre=pre)
+                sig, latent_var, res_corr, wsig, wtarget = model(features, target, q, target.size(1)//160 - nb_pre, pre=pre)
                 error = sig - target[:, nb_pre*160:]
                 error_trunk = error[...,:sig.shape[-1]//320*320]
                 bias50 = torch.mean(torch.mean(torch.reshape(32768*error_trunk, (-1, 320)), 0)**2)
@@ -186,7 +186,8 @@ if __name__ == '__main__':
                 bias = .1*bias50 + .1*bias100 + .8*bias200
                 sig = torch.cat([pre, sig], -1)
 
-                cont_loss = torch.mean(cont_weight*dcelp.sig_loss_split(target[:, nb_pre*160:], sig[:, nb_pre*160:])/(batch_lambda**lcomp))
+                #cont_loss = torch.mean(cont_weight*dcelp.sig_loss_split(target[:, nb_pre*160:], sig[:, nb_pre*160:])/(batch_lambda**lcomp))
+                cont_loss = torch.mean(cont_weight*dcelp.sig_loss_split(wtarget, wsig)/(batch_lambda**lcomp))
                 cont_metric = torch.mean(dcelp.sig_loss(target[:, nb_pre*160:], sig[:, nb_pre*160:])/(batch_lambda**lcomp))
 
                 sig = torch.cat([sig[:,:80]*start_window, sig[:,80:-80], sig[:,-80:]*end_window], -1)

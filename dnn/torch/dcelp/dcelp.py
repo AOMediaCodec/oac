@@ -468,12 +468,15 @@ class DCELP(nn.Module):
         target_padded = F.pad(target, (pitch_mem_size, 0))
         nb_pre_frames = pre.size(1)//self.frame_size if pre is not None else 0
 
-        gamma=0.9
+        gamma=0.85
         bw = gamma**(torch.arange(0, 17, device=device))
         wlpc = lpc*bw
         syn = filters.filter_iir_response(lpc, self.subframe_size+20)
 
         sig_list = []
+        wsig_list = []
+        wtarget_list = []
+        wsig_mem = torch.zeros((batch_size, 16), device=device)
         latent_var_list = []
 
         cond = self.cond_net(cond_features, period)
@@ -498,8 +501,19 @@ class DCELP(nn.Module):
                     sig_list.append(out)
                     latent_var_list.append(e_var)
                     res_corr += corr
+                    tmp = filters.batched_fir(torch.cat([wsig_mem,out],-1), wlpc[:, 4+n,:].flip(-1))[:,16:]
+                    wsig_list.append(tmp)
+                    tmp = filters.batched_fir(target_mem[:,-self.subframe_size-16:], wlpc[:, 4+n,:].flip(-1))[:,16:]
+                    wtarget_list.append(tmp)
+                wsig_mem = out[:,-16:]
 
         sig = torch.cat(sig_list, dim=1)
+        wsig = torch.cat(wsig_list, dim=1)
+        wtarget = torch.cat(wtarget_list, dim=1)
+        wsig = F.pad(wsig, (3, 0))
+        wtarget = F.pad(wtarget, (3, 0))
+        wsig = wsig[...,3:] + .5*wsig[...,2:-1] + .25*wsig[...,1:-2] + .125*wsig[...,:-3]
+        wtarget = wtarget[...,3:] + .5*wtarget[...,2:-1] + .25*wtarget[...,1:-2] + .125*wtarget[...,:-3]
         latent_var = torch.stack(latent_var_list, dim=0)
 
-        return sig, torch.mean(latent_var, 0), res_corr/(nb_frames*self.nb_subframes)
+        return sig, torch.mean(latent_var, 0), res_corr/(nb_frames*self.nb_subframes), wsig, wtarget

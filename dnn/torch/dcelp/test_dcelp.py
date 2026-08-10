@@ -138,7 +138,7 @@ if __name__ == '__main__':
     curr_rate = model.fsq.rate_metric(torch.tensor(q, device=device))
     print("curr rate:", curr_rate.detach().cpu().numpy())
 
-    sig, var, _ = model(features, audio, q, nb_frames - 4)
+    sig, var, _, _, _ = model(features, audio, q, nb_frames - 4)
     print(var.detach().cpu().numpy())
     sig = sig.detach().numpy().flatten()
     sig = lfilter(np.array([1.]), np.array([1., -.85]), sig)
