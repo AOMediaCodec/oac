@@ -73,7 +73,7 @@
 void oaci_clt_mdct_forward_neon(const mdct_lookup *l, kiss_fft_scalar *in,
     kiss_fft_scalar * OAC_RESTRICT out,
     const oac_val16 *window, int overlap,
-    int shift, int stride, int arch);
+    int shift, int stride, kiss_fft_scalar *mem, int arch);
 
 void oaci_clt_mdct_backward_neon(const mdct_lookup *l, kiss_fft_scalar *in,
     kiss_fft_scalar * OAC_RESTRICT out,
@@ -82,8 +82,8 @@ void oaci_clt_mdct_backward_neon(const mdct_lookup *l, kiss_fft_scalar *in,
 
 # if !defined(OAC_HAVE_RTCD)
 #  define OVERRIDE_OAC_MDCT (1)
-#  define oaci_clt_mdct_forward(_l, _in, _out, _window, _int, _shift, _stride, _arch) \
-        oaci_clt_mdct_forward_neon(_l, _in, _out, _window, _int, _shift, _stride, _arch)
+#  define oaci_clt_mdct_forward(_l, _in, _out, _window, _int, _shift, _stride, _mem, _arch) \
+        oaci_clt_mdct_forward_neon(_l, _in, _out, _window, _int, _shift, _stride, _mem, _arch)
 #  define oaci_clt_mdct_backward(_l, _in, _out, _window, _int, _shift, _stride, _arch) \
         oaci_clt_mdct_backward_neon(_l, _in, _out, _window, _int, _shift, _stride, _arch)
 # endif /* OAC_HAVE_RTCD */

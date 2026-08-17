@@ -81,6 +81,14 @@
 #define MAX_PACKET (1500)
 #define MAX_FRAME_SAMP (5760)
 
+/* Lossless (OLAC) packets are the one kind the decoder rejects, rather than
+   decodes, when it can tell the payload is corrupt, so a random payload behind
+   such a ToC may come back as OAC_INVALID_PACKET -- from every decoder alike,
+   as the final range checks below also verify. */
+static int olac_rejected(const unsigned char *packet, oac_int32 len, int out_samples) {
+    return out_samples == OAC_INVALID_PACKET && oac_packet_is_lossless(packet, len) == 1;
+}
+
 int test_decoder_code0(int no_fuzz) {
     static const oac_int32 fsv[5] = {48000, 24000, 16000, 12000, 8000};
     int err, skip, plen;
@@ -218,6 +226,7 @@ int test_decoder_code0(int no_fuzz) {
                 oac_decoder_ctl(dec[t], OAC_SET_COMPLEXITY(fast_rand()%11));
 #endif
                 out_samples = oac_decode(dec[t], packet, 3, outbuf, MAX_FRAME_SAMP, 0);
+                if (olac_rejected(packet, 3, out_samples)) continue;
                 if (out_samples != expected[t]) test_failed();
                 if (oac_decoder_ctl(dec[t], OAC_GET_LAST_PACKET_DURATION(&dur)) != OAC_OK) test_failed();
                 if (dur != out_samples) test_failed();
@@ -329,6 +338,7 @@ int test_decoder_code0(int no_fuzz) {
                 oac_decoder_ctl(dec[t], OAC_SET_COMPLEXITY(fast_rand()%11));
 #endif
                 out_samples = oac_decode(dec[t], packet, j + 1, outbuf, MAX_FRAME_SAMP, 0);
+                if (olac_rejected(packet, j + 1, out_samples)) continue;
                 if (out_samples != expected[t]) test_failed();
                 oac_decoder_ctl(dec[t], OAC_GET_FINAL_RANGE(&dec_final_range1));
                 if (t == 0) dec_final_range2 = dec_final_range1;
@@ -358,6 +368,7 @@ int test_decoder_code0(int no_fuzz) {
             oac_decoder_ctl(dec[t], OAC_SET_COMPLEXITY(fast_rand()%11));
 #endif
             out_samples = oac_decode(dec[t], packet, plen + 1, outbuf, MAX_FRAME_SAMP, 0);
+            if (olac_rejected(packet, plen + 1, out_samples)) continue;
             if (out_samples != expected[t]) test_failed();
             if (t == 0) dec_final_range2 = dec_final_range1;
             else if (dec_final_range1 != dec_final_range2) test_failed();
@@ -379,7 +390,7 @@ int test_decoder_code0(int no_fuzz) {
 #endif
             for (j = 0; j < plen; j++) packet[j + 1] = (fast_rand()|fast_rand())&255;
             out_samples = oac_decode(dec[t], packet, plen + 1, outbuf, MAX_FRAME_SAMP, 0);
-            if (out_samples != expected) test_failed();
+            if (out_samples != expected && !olac_rejected(packet, plen + 1, out_samples)) test_failed();
         }
     }
     fprintf(stdout, "  dec[%3d] random packets, all mode pairs (4096)*10, %d bytes/frame OK.\n", t, plen + 1);

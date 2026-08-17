@@ -11,7 +11,7 @@ DIST_SUBDIRS = doc
 
 AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/celt -I$(top_srcdir)/silk \
               -I$(top_srcdir)/silk/float -I$(top_srcdir)/silk/fixed $(NE10_CFLAGS) \
-              -I$(top_srcdir)/dnn
+              -I$(top_srcdir)/dnn -I$(top_srcdir)/olac
 
 include celt_sources.mk
 include lpcnet_sources.mk
@@ -165,6 +165,7 @@ noinst_PROGRAMS = celt/tests/test_unit_cwrs32 \
                   celt/tests/test_unit_types \
                   oac_compare \
                   oac_demo \
+                  olac_demo \
                   repacketizer_demo \
                   silk/tests/test_unit_LPC_inv_pred_gain \
                   tests/test_oac_api \
@@ -172,6 +173,7 @@ noinst_PROGRAMS = celt/tests/test_unit_cwrs32 \
                   tests/test_oac_dred \
                   tests/test_oac_encode \
                   tests/test_oac_extensions \
+                  tests/test_oac_lossless \
                   tests/test_oac_padding \
                   tests/test_oac_projection \
                   trivial_example
@@ -190,6 +192,7 @@ TESTS = celt/tests/test_unit_cwrs32 \
         tests/test_oac_decode \
         tests/test_oac_encode \
         tests/test_oac_extensions \
+        tests/test_oac_lossless \
         tests/test_oac_padding \
         tests/test_oac_projection
 
@@ -199,6 +202,10 @@ oac_demo_SOURCES += $(LOSSGEN_SOURCES)
 endif
 
 oac_demo_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+
+olac_demo_SOURCES = olac/olac_demo.c olac/olac.c olac/olac_encoder.c olac/olac_decoder.c olac/olac_lpc.c celt/entenc.c celt/entdec.c celt/entcode.c
+olac_demo_CFLAGS = $(AM_CFLAGS)
+olac_demo_LDADD = $(LIBM)
 
 repacketizer_demo_SOURCES = src/repacketizer_demo.c
 
@@ -221,6 +228,9 @@ tests_test_oac_decode_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
 
 tests_test_oac_padding_SOURCES = tests/test_oac_padding.c tests/test_oac_common.h
 tests_test_oac_padding_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+
+tests_test_oac_lossless_SOURCES = tests/test_oac_lossless.c tests/test_oac_common.h
+tests_test_oac_lossless_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
 
 tests_test_oac_dred_SOURCES = tests/test_oac_dred.c tests/test_oac_common.h
 tests_test_oac_dred_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
@@ -374,6 +384,7 @@ EXTRA_DIST = oac.pc.in \
              celt/tests/meson.build \
              dnn/meson.build \
              dnn/README.md \
+             olac/README.md \
              silk/meson.build \
              silk/tests/meson.build \
              src/meson.build \

@@ -66,7 +66,9 @@
 #include "oac.h"
 #include "celt.h"
 #include "mathops.h"
+#include "float_cast.h"
 #include "oac_private.h"
+#include "olac.h"
 
 #ifndef DISABLE_FLOAT_API
 
@@ -349,14 +351,14 @@ int oaci_validate_config(int mode, int format, int channels, int nb_frames) {
         return OAC_INVALID_PACKET;
     if (nb_frames < 1 || nb_frames > OAC_MAX_FRAMES_PER_PACKET)
         return OAC_INVALID_PACKET;
-    /* SILK and hybrid only ever code one or two channels of the standard
+    /* SILK, hybrid and OLAC only ever code one or two channels of the standard
        format. Order-0 ambisonics is also one channel, but the encoder forces
-       CELT for every ambisonics order, so a speech-mode ambisonics packet is
-       something we can never produce and will not accept. The two modes are
-       listed explicitly rather than as "anything but CELT" so that the modes
-       still to come (lossless, other speech modes) have to state their own
-       policy here instead of silently inheriting this one. */
-    if ((mode == MODE_SILK_ONLY || mode == MODE_HYBRID)
+       CELT for every ambisonics order, so a non-CELT ambisonics packet is
+       something we can never produce and will not accept. The modes are listed
+       explicitly rather than as "anything but CELT" so that the modes still to
+       come (other speech or lossless modes) have to state their own policy
+       here instead of silently inheriting this one. */
+    if ((mode == MODE_SILK_ONLY || mode == MODE_HYBRID || mode == MODE_OLAC)
         && (channels > 2 || format != OAC_FORMAT_STANDARD))
         return OAC_INVALID_PACKET;
     return OAC_OK;
@@ -370,7 +372,11 @@ int oaci_validate_config(int mode, int format, int channels, int nb_frames) {
 int oaci_toc_mode(unsigned char toc) {
     int mode;
     if (toc&0x80) {
-        mode = MODE_CELT_ONLY;
+        int config = toc>>3;
+        if (config >= 16 && config <= 19)
+            mode = MODE_OLAC;
+        else
+            mode = MODE_CELT_ONLY;
     } else if ((toc&0x60) == 0x60) {
         mode = MODE_HYBRID;
     } else {
@@ -382,9 +388,14 @@ int oaci_toc_mode(unsigned char toc) {
 int oaci_toc_bandwidth(unsigned char toc) {
     int bandwidth;
     if (toc&0x80) {
-        bandwidth = OAC_BANDWIDTH_MEDIUMBAND + ((toc>>5)&0x3);
-        if (bandwidth == OAC_BANDWIDTH_MEDIUMBAND)
-            bandwidth = OAC_BANDWIDTH_NARROWBAND;
+        int config = toc>>3;
+        if (config >= 16 && config <= 19) {
+            bandwidth = OAC_BANDWIDTH_FULLBAND;
+        } else {
+            bandwidth = OAC_BANDWIDTH_MEDIUMBAND + ((toc>>5)&0x3);
+            if (bandwidth == OAC_BANDWIDTH_MEDIUMBAND)
+                bandwidth = OAC_BANDWIDTH_NARROWBAND;
+        }
     } else if ((toc&0x60) == 0x60) {
         bandwidth = (toc&0x10) ? OAC_BANDWIDTH_FULLBAND :
                     OAC_BANDWIDTH_SUPERWIDEBAND;
@@ -625,4 +636,60 @@ int oac_packet_parse(const unsigned char *data, oac_int32 len,
                      oac_int32 size[OAC_MAX_FRAMES_PER_PACKET], int *payload_offset) {
     return oac_packet_parse_impl(data, len, 0, out_toc,
                                  frames, size, payload_offset, NULL, NULL, NULL);
+}
+
+int oac_packet_is_lossless(const unsigned char packet[], oac_int32 len) {
+    int ret = oaci_packet_parse_toc(packet, len, NULL, NULL, NULL, NULL);
+    if (ret < 0)
+        return ret;
+    return oaci_toc_mode(packet[0]) == MODE_OLAC;
+}
+
+
+/* CELT <-> OLAC memory handoff. OLAC keeps integer memories in 24-bit units,
+   scaled down by the ctz of the frame that produced them; CELT keeps celt_sig.
+   The pre-emphasis memory holds the last sample times the 0.85 coefficient on
+   the CELT side and the plain last sample on the OLAC side, so the coefficient
+   is applied (in OLAC's integer domain, which is the same in every build) on
+   the way across. The TDAC memories have the same layout on both sides by
+   construction of the CELT MDCT. Being pre-emphasised and folded, they exceed
+   24 bits on loud high-frequency material (by up to 1.85*sqrt(2)), so the
+   bound is four times full scale: that is CELT's SIG_SAT in these units, and
+   OLAC's own range leaves room for it. */
+#define OLAC_MEM_MAX 33554431
+#define OLAC_CLAMP_MEM(x) IMAX(-OLAC_MEM_MAX, IMIN(OLAC_MEM_MAX, (x)))
+
+static oac_int32 oaci_sig_to_olac(celt_sig x) {
+    oac_res r;
+#ifdef FIXED_POINT
+    /* SIG2RES() rounds with an add, which must not overflow on whatever a
+       corrupt packet left in CELT's memories. */
+    x = MAX32(-SIG_SAT, MIN32(SIG_SAT, x));
+#endif
+    r = SIG2RES(x);
+    r = MAX32(-INT24TORES(OLAC_MEM_MAX), MIN32(INT24TORES(OLAC_MEM_MAX), r));
+    return RES2INT24(r);
+}
+
+void oaci_celt_to_olac_mem(const celt_sig *preemph, const celt_sig *tdac, int channels,
+                           oac_int32 *olac_preemph, oac_int32 *olac_tdac) {
+    int c, i;
+    for (c = 0; c < channels; c++) {
+        olac_preemph[c] = OLAC_CLAMP_MEM(OLAC_MUL16_32_P15(INV_PREEMPH_Q15, oaci_sig_to_olac(preemph[c])));
+        for (i = 0; i < HALF_OVERLAP; i++)
+            olac_tdac[c*HALF_OVERLAP + i] = oaci_sig_to_olac(tdac[c*HALF_OVERLAP + i]);
+    }
+}
+
+void oaci_olac_to_celt_mem(const oac_int32 *olac_preemph, const oac_int32 *olac_tdac, int channels, int ctz,
+                           celt_sig *preemph, celt_sig *tdac) {
+    int c, i;
+    for (c = 0; c < channels; c++) {
+        oac_int32 p = OLAC_CLAMP_MEM(OLAC_MUL16_32_P15(PREEMPH_Q15, OLAC_SHL32(olac_preemph[c], ctz)));
+        preemph[c] = RES2SIG(INT24TORES(p));
+        for (i = 0; i < HALF_OVERLAP; i++) {
+            oac_int32 t = OLAC_CLAMP_MEM(OLAC_SHL32(olac_tdac[c*HALF_OVERLAP + i], ctz));
+            tdac[c*HALF_OVERLAP + i] = RES2SIG(INT24TORES(t));
+        }
+    }
 }

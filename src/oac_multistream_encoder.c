@@ -273,7 +273,7 @@ void oaci_surround_analysis(const CELTMode *celt_mode, const void *pcm, celt_glo
 
     freq_size = celt_mode->shortMdctSize<<LM;
 
-    ALLOC(in, frame_size + overlap, oac_val32);
+    ALLOC(in, frame_size, oac_val32);
     ALLOC(x, len, oac_res);
     ALLOC(freq, freq_size, oac_val32);
 
@@ -287,17 +287,16 @@ void oaci_surround_analysis(const CELTMode *celt_mode, const void *pcm, celt_glo
         int frame;
         int nb_frames = frame_size/freq_size;
         celt_assert(nb_frames*freq_size == frame_size);
-        OAC_COPY(in, mem + c*overlap, overlap);
         (*copy_channel_in)(x, 1, pcm, channels, c, len, NULL);
-        oaci_celt_preemphasis(x, in + overlap, frame_size, 1, upsample, celt_mode->preemph, preemph_mem + c, 0);
+        oaci_celt_preemphasis(x, in, frame_size, 1, upsample, celt_mode->preemph, preemph_mem + c, 0);
 #ifndef FIXED_POINT
         {
             oac_val32 sum;
-            sum = oaci_celt_inner_prod(in, in, frame_size + overlap, 0);
+            sum = oaci_celt_inner_prod(in, in, frame_size, 0);
             /* This should filter out both NaNs and ridiculous signals that could
                cause NaNs further down. */
             if (!(sum < 1e18f) || oaci_celt_isnan(sum)) {
-                OAC_CLEAR(in, frame_size + overlap);
+                OAC_CLEAR(in, frame_size);
                 preemph_mem[c] = 0;
             }
         }
@@ -306,7 +305,7 @@ void oaci_surround_analysis(const CELTMode *celt_mode, const void *pcm, celt_glo
         for (frame = 0; frame < nb_frames; frame++) {
             oac_val32 tmpE[21];
             oaci_clt_mdct_forward(&celt_mode->mdct, in + freq_size*frame, freq, celt_mode->window,
-               overlap, celt_mode->maxLM - LM, 1, arch);
+               overlap, celt_mode->maxLM - LM, 1, mem + c*(overlap/2), arch);
             if (upsample != 1) {
                 int bound = freq_size/upsample;
                 for (i = 0; i < bound; i++)
@@ -338,15 +337,6 @@ void oaci_surround_analysis(const CELTMode *celt_mode, const void *pcm, celt_glo
                 maskLogE[2][i] = oaci_logSum(maskLogE[2][i], bandLogE[21*c + i] - GCONST(.5f));
             }
         }
-#if 0
-        for (i = 0; i < 21; i++)
-            printf("%f ", bandLogE[21*c + i]);
-        float sum = 0;
-        for (i = 0; i < 21; i++)
-            sum += bandLogE[21*c + i];
-        printf("%f ", sum/21);
-#endif
-        OAC_COPY(mem + c*overlap, in + frame_size, overlap);
     }
     for (i = 0; i < 21; i++)
         maskLogE[1][i] = MIN32(maskLogE[0][i], maskLogE[2][i]);
@@ -450,6 +440,11 @@ static int oac_multistream_encoder_init_impl(
     if ((channels > 255) || (channels < 1) || (coupled_streams > streams)
         || (streams < 1) || (coupled_streams < 0) || (streams > 255 - coupled_streams)
         || (streams + coupled_streams > channels))
+        return OAC_BAD_ARG;
+    /* The output buffer is split between the streams as they are coded, so a
+       stream that cannot code its frame losslessly would fail after the
+       streams before it have already moved on. */
+    if (application == OAC_APPLICATION_LOSSLESS)
         return OAC_BAD_ARG;
 
     coupled_size = oac_encoder_init(NULL, Fs, 2, OAC_FORMAT_STANDARD, application);
@@ -1189,6 +1184,11 @@ int oac_multistream_encoder_ctl_va_list(OacMSEncoder *st, int request,
             int s;
             /* This works for int32 params */
             oac_int32 value = va_arg(ap, oac_int32);
+            /* See oac_multistream_encoder_init_impl(). */
+            if (request == OAC_SET_APPLICATION_REQUEST && value == OAC_APPLICATION_LOSSLESS) {
+                ret = OAC_BAD_ARG;
+                break;
+            }
             for (s = 0; s < st->layout.nb_streams; s++) {
                 OacEncoder *enc;
 

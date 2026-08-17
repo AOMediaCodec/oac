@@ -81,6 +81,7 @@
 #include "stack_alloc.h"
 #include "float_cast.h"
 #include "oac_private.h"
+#include "olac.h"
 #include "os_support.h"
 #include "structs.h"
 #include "define.h"
@@ -99,6 +100,7 @@
 struct OacDecoder {
     int celt_dec_offset;
     int silk_dec_offset;
+    int olac_dec_offset;
     int channels;
     int format;
     oac_int32 Fs;           /** Sampling rate (at the API level) */
@@ -118,6 +120,9 @@ struct OacDecoder {
     int bandwidth;
     int mode;
     int prev_mode;
+    /* prev_mode is MODE_CELT_ONLY after an OLAC frame; this says the CELT
+       memories are stale and must be refreshed from OLAC's before CELT runs. */
+    int prev_olac;
     int frame_size;
     int prev_redundancy;
     int last_packet_duration;
@@ -158,7 +163,7 @@ static void validate_oac_decoder(OacDecoder *st) {
 #endif
 
 int oac_decoder_get_size(int channels, int format) {
-    int silkDecSizeBytes, celtDecSizeBytes;
+    int silkDecSizeBytes, celtDecSizeBytes, olacDecSizeBytes;
     int ret;
     int skip_silk;
     if (!oaci_validate_format_channels(format, channels))
@@ -174,14 +179,15 @@ int oac_decoder_get_size(int channels, int format) {
     } else {
         silkDecSizeBytes = 0;
     }
-    celtDecSizeBytes = oaci_celt_decoder_get_size(channels);
-    return oaci_align(sizeof(OacDecoder)) + silkDecSizeBytes + celtDecSizeBytes;
+    celtDecSizeBytes = oaci_align(oaci_celt_decoder_get_size(channels));
+    olacDecSizeBytes = oaci_align(sizeof(OlacDecoder));
+    return oaci_align(sizeof(OacDecoder)) + silkDecSizeBytes + celtDecSizeBytes + olacDecSizeBytes;
 }
 
 int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
     void *silk_dec;
     CELTDecoder *celt_dec;
-    int ret, silkDecSizeBytes;
+    int ret, silkDecSizeBytes, celtDecSizeBytes;
     int skip_silk;
 
     if ((Fs != 48000 && Fs != 24000 && Fs != 16000 && Fs != 12000 && Fs != 8000
@@ -213,6 +219,8 @@ int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
         st->celt_dec_offset = oaci_align(sizeof(OacDecoder));
         silk_dec = NULL;
     }
+    celtDecSizeBytes = oaci_align(oaci_celt_decoder_get_size(channels));
+    st->olac_dec_offset = st->celt_dec_offset + celtDecSizeBytes;
     celt_dec = (CELTDecoder*)((char*)st + st->celt_dec_offset);
     st->stream_channels = st->channels = channels;
     st->format = format;
@@ -290,6 +298,87 @@ static void oaci_smooth_fade(const oac_res *in1, const oac_res *in2,
     }
 }
 
+/* Changes the channel count of the OLAC decoder's memories the way the CELT
+   decoder's output changes with it: mono is duplicated, stereo is averaged. */
+static void oaci_olac_set_channels(OlacDecoder *dec, int channels) {
+    int i;
+    if (dec->nb_channels == 1 && channels == 2) {
+        dec->dmem[1] = dec->dmem[0];
+        OAC_COPY(dec->untdac_mem[1], dec->untdac_mem[0], HALF_OVERLAP);
+    } else if (dec->nb_channels == 2 && channels == 1) {
+        dec->dmem[0] = OLAC_PSHR32_ovflw(OLAC_ADD32_ovflw(dec->dmem[0], dec->dmem[1]), 1);
+        for (i = 0; i < HALF_OVERLAP; i++)
+            dec->untdac_mem[0][i] = OLAC_PSHR32_ovflw(OLAC_ADD32_ovflw(dec->untdac_mem[0][i], dec->untdac_mem[1][i]), 1);
+    }
+    dec->nb_channels = channels;
+}
+
+/* Decodes an OLAC frame where oac_decode_frame() would otherwise decode a
+   CELT frame. OLAC only runs at 48 kHz; until it gets a proper resampler, a
+   decoder at another rate gets the nearest 48 kHz sample (samples are dropped
+   below 48 kHz and repeated at 96 kHz). */
+static int oaci_olac_decode_frame(OacDecoder *st, CELTDecoder *celt_dec, const unsigned char *data,
+                                  oac_int32 len, oac_res *pcm, int frame_size) {
+    OlacDecoder *olac_dec = (OlacDecoder*)((char*)st + st->olac_dec_offset);
+    int olac_frame_size = frame_size*48000/st->Fs;
+    int ret;
+    int i, c;
+    VARDECL(oac_int32, pcm_int32);
+    SAVE_STACK;
+
+    /* oaci_validate_config() rejects OLAC beyond stereo. */
+    celt_assert(st->channels <= MAX_CHANNELS && st->stream_channels <= MAX_CHANNELS);
+    ALLOC(pcm_int32, olac_frame_size*st->stream_channels, oac_int32);
+
+    if (!st->prev_olac) {
+        /* First OLAC frame since CELT last ran (or since a reset): continue
+           from CELT's overlap and pre-emphasis memories, which are zero if
+           CELT was just reset, so that the switch is seamless. Below 48 kHz
+           CELT runs at 48 kHz internally and only decimates its output, so
+           those memories are what OLAC needs; at 96 kHz they are not (twice
+           the overlap, another de-emphasis filter), so until OLAC frames are
+           properly resampled a 96 kHz decoder starts from silence instead. */
+        olac_decoder_init(olac_dec, st->channels, st->Fs);
+        if (st->Fs <= 48000) {
+            celt_sig preemph[MAX_CHANNELS];
+            celt_sig tdac[MAX_CHANNELS*HALF_OVERLAP];
+            MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_GET_PREEMPHASIS(preemph)));
+            MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_GET_TDAC_MEM(tdac)));
+            oaci_celt_to_olac_mem(preemph, tdac, st->channels, olac_dec->dmem, &olac_dec->untdac_mem[0][0]);
+        }
+    }
+    /* The stream may not have the decoder's channel count (as right above),
+       and mono and stereo streams may follow each other. */
+    if (olac_dec->nb_channels != st->stream_channels)
+        oaci_olac_set_channels(olac_dec, st->stream_channels);
+    ret = olac_decode(olac_dec, data, len, pcm_int32, olac_frame_size);
+    if (ret != OAC_OK) {
+        /* Corrupt packet: silence, and start afresh as after a reset. */
+        olac_decoder_init(olac_dec, st->stream_channels, st->Fs);
+        OAC_CLEAR(pcm, frame_size*st->channels);
+        st->rangeFinal = 0;
+        RESTORE_STACK;
+        return ret;
+    }
+    if (st->channels == 1 && st->stream_channels == 2) {
+        /* Stereo stream in a mono decoder: average, as CELT does. */
+        for (i = 0; i < frame_size; i++) {
+            const oac_int32 *in = pcm_int32 + 2*(i*olac_frame_size/frame_size);
+            pcm[i] = INT24TORES(OLAC_PSHR32_ovflw(OLAC_ADD32_ovflw(in[0], in[1]), 1));
+        }
+    } else {
+        /* Same channel count, or a mono stream duplicated in a stereo decoder. */
+        for (c = 0; c < st->channels; c++) {
+            const oac_int32 *in = pcm_int32 + IMIN(c, st->stream_channels - 1);
+            for (i = 0; i < frame_size; i++)
+                pcm[i*st->channels + c] = INT24TORES(in[st->stream_channels*(i*olac_frame_size/frame_size)]);
+        }
+    }
+    st->rangeFinal = olac_dec->rng;
+    RESTORE_STACK;
+    return frame_size;
+}
+
 static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
                             oac_int32 len, oac_res *pcm, int frame_size, int decode_fec) {
     void *silk_dec;
@@ -307,6 +396,7 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
 
     int audiosize;
     int mode;
+    int olac;
     int bandwidth;
     int transition = 0;
     int start_band;
@@ -378,6 +468,11 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
                 audiosize = F5;
         }
     }
+    /* An OLAC frame takes the place of a CELT frame and is treated as one by
+       all the mode transition logic below; only the actual decoding differs. */
+    olac = mode == MODE_OLAC;
+    if (olac)
+        mode = MODE_CELT_ONLY;
 
     /* In fixed-point, we can tell CELT to do the accumulation on top of the
        SILK PCM buffer. This saves some stack space. */
@@ -407,6 +502,25 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
         return OAC_BAD_ARG;
     } else {
         frame_size = audiosize;
+    }
+
+    if (st->prev_olac && !olac) {
+        /* Going from OLAC to CELT is a CELT reset, here and in the encoder:
+           nothing CELT remembers from before the OLAC frames (band energies,
+           post-filter history) is used again. */
+        MUST_SUCCEED(celt_decoder_ctl(celt_dec, OAC_RESET_STATE));
+        if (st->Fs <= 48000) {
+            /* Resume CELT (or its PLC) from where OLAC left off (a 96 kHz decoder
+               cannot yet, see oaci_olac_decode_frame()). */
+            OlacDecoder *olac_dec = (OlacDecoder*)((char*)st + st->olac_dec_offset);
+            celt_sig preemph[MAX_CHANNELS];
+            celt_sig tdac[MAX_CHANNELS*HALF_OVERLAP];
+            oaci_olac_set_channels(olac_dec, st->channels);
+            oaci_olac_to_celt_mem(olac_dec->dmem, &olac_dec->untdac_mem[0][0], st->channels, olac_dec->last_ctz,
+                                  preemph, tdac);
+            MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_SET_PREEMPHASIS(preemph)));
+            MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_SET_TDAC_MEM(tdac)));
+        }
     }
 
     /* SILK processing */
@@ -607,14 +721,21 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
         /* Make sure to discard any previous CELT state */
         if (mode != st->prev_mode && st->prev_mode > 0 && !st->prev_redundancy)
             MUST_SUCCEED(celt_decoder_ctl(celt_dec, OAC_RESET_STATE));
-        /* Decode CELT */
-        celt_ret = oaci_celt_decode_with_ec_dred(celt_dec, decode_fec ? NULL : data,
-                                     len, pcm, celt_frame_size, &dec, celt_accum
+        /* Decode CELT (or OLAC in its place) */
+        if (olac) {
+            celt_ret = oaci_olac_decode_frame(st, celt_dec, data, len, pcm, celt_frame_size);
+            /* A rejected packet comes out as silence: nothing to cross-fade into. */
+            if (celt_ret < 0)
+                transition = 0;
+        } else {
+            celt_ret = oaci_celt_decode_with_ec_dred(celt_dec, decode_fec ? NULL : data,
+                                         len, pcm, celt_frame_size, &dec, celt_accum
 #ifdef ENABLE_DEEP_PLC
-            , &st->lpcnet
+                , &st->lpcnet
 #endif
-            );
-        celt_decoder_ctl(celt_dec, OAC_GET_FINAL_RANGE(&st->rangeFinal));
+                );
+            celt_decoder_ctl(celt_dec, OAC_GET_FINAL_RANGE(&st->rangeFinal));
+        }
     } else {
         unsigned char silence[2] = {0xFF, 0xFF};
         if (!celt_accum) {
@@ -692,6 +813,7 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
         st->rangeFinal ^= redundant_rng;
 
     st->prev_mode = mode;
+    st->prev_olac = olac;
     st->prev_redundancy = redundancy && !celt_to_silk;
 
     if (celt_ret >= 0) {
@@ -807,7 +929,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
         int duration_copy;
         int ret;
         /* If no FEC can be present, run the PLC (recursive call) */
-        if (frame_size < packet_frame_size || packet_mode == MODE_CELT_ONLY || st->mode == MODE_CELT_ONLY)
+        if (frame_size < packet_frame_size || packet_mode == MODE_CELT_ONLY || packet_mode == MODE_OLAC
+            || st->mode == MODE_CELT_ONLY || st->mode == MODE_OLAC)
             return oac_decode_native(st, NULL, 0, pcm, frame_size, 0, 0, NULL, soft_clip, NULL, 0);
         /* Otherwise, run the PLC on everything except the size for which we might have FEC */
         duration_copy = st->last_packet_duration;
@@ -1114,7 +1237,9 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
             if (!value) {
                 goto bad_arg;
             }
-            if (st->prev_mode == MODE_CELT_ONLY)
+            if (st->prev_olac)
+                *value = 0;
+            else if (st->prev_mode == MODE_CELT_ONLY)
                 ret = celt_decoder_ctl(celt_dec, OAC_GET_PITCH(value));
             else
                 *value = st->DecControl.prevPitchLag;
@@ -1281,8 +1406,8 @@ int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len) {
     if (ret <= 0)
         return ret;
     packet_mode = oaci_toc_mode(packet[0]);
-    /* CELT has no LBRR, and neither does an empty first frame. */
-    if (packet_mode == MODE_CELT_ONLY || size[0] == 0)
+    /* CELT and OLAC have no LBRR, and neither does an empty first frame. */
+    if (packet_mode == MODE_CELT_ONLY || packet_mode == MODE_OLAC || size[0] == 0)
         return 0;
     packet_frame_size = oaci_toc_samples_per_frame(packet[0], 48000);
     if (packet_frame_size > 960)
