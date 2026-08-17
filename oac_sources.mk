@@ -1,4 +1,8 @@
 OAC_SOURCES = \
+olac/olac.c \
+olac/olac_encoder.c \
+olac/olac_decoder.c \
+olac/olac_lpc.c \
 src/oac.c \
 src/oac_decoder.c \
 src/oac_encoder.c \
