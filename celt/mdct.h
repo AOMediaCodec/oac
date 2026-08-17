@@ -93,11 +93,11 @@ typedef struct {
 int oaci_clt_mdct_init(mdct_lookup *l, int N, int maxshift, int arch);
 void oaci_clt_mdct_clear(mdct_lookup *l, int arch);
 
-/** Compute a forward MDCT and scale by 4/N, trashes the input array */
+/** Compute a forward MDCT and scale by 4/N, trashes the input array and updates TDAC mem */
 void oaci_clt_mdct_forward_c(const mdct_lookup *l, kiss_fft_scalar *in,
     kiss_fft_scalar * OAC_RESTRICT out,
     const celt_coef *window, int overlap,
-    int shift, int stride, int arch);
+    int shift, int stride, kiss_fft_scalar *mem, int arch);
 
 /** Compute a backward MDCT (no scaling) and performs weighted overlap-add
     (scales implicitly by 1/2) */
@@ -113,12 +113,12 @@ void oaci_clt_mdct_backward_c(const mdct_lookup *l, kiss_fft_scalar *in,
 extern void (*const OACI_CLT_MDCT_FORWARD_IMPL[OAC_ARCHMASK + 1])(
       const mdct_lookup *l, kiss_fft_scalar *in,
       kiss_fft_scalar * OAC_RESTRICT out, const celt_coef *window,
-      int overlap, int shift, int stride, int arch);
+      int overlap, int shift, int stride, kiss_fft_scalar *mem, int arch);
 
-#  define oaci_clt_mdct_forward(_l, _in, _out, _window, _overlap, _shift, _stride, _arch) \
+#  define oaci_clt_mdct_forward(_l, _in, _out, _window, _overlap, _shift, _stride, _mem, _arch) \
         ((*OACI_CLT_MDCT_FORWARD_IMPL[(arch)&OAC_ARCHMASK])(_l, _in, _out, \
                                                        _window, _overlap, _shift, \
-                                                       _stride, _arch))
+                                                       _stride, _mem, _arch))
 
 extern void (*const OACI_CLT_MDCT_BACKWARD_IMPL[OAC_ARCHMASK + 1])(
       const mdct_lookup *l, kiss_fft_scalar *in,
@@ -132,8 +132,8 @@ extern void (*const OACI_CLT_MDCT_BACKWARD_IMPL[OAC_ARCHMASK + 1])(
 
 # else /* if defined(OAC_HAVE_RTCD) && defined(HAVE_ARM_NE10) */
 
-#  define oaci_clt_mdct_forward(_l, _in, _out, _window, _overlap, _shift, _stride, _arch) \
-        oaci_clt_mdct_forward_c(_l, _in, _out, _window, _overlap, _shift, _stride, _arch)
+#  define oaci_clt_mdct_forward(_l, _in, _out, _window, _overlap, _shift, _stride, _mem, _arch) \
+        oaci_clt_mdct_forward_c(_l, _in, _out, _window, _overlap, _shift, _stride, _mem, _arch)
 
 #  define oaci_clt_mdct_backward(_l, _in, _out, _window, _overlap, _shift, _stride, _arch) \
         oaci_clt_mdct_backward_c(_l, _in, _out, _window, _overlap, _shift, _stride, _arch)

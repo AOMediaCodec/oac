@@ -310,6 +310,7 @@ target_include_directories(
           ${CMAKE_CURRENT_SOURCE_DIR}
           ${CMAKE_CURRENT_SOURCE_DIR}/dnn
           celt
+          olac
           silk)
 
 target_link_libraries(oac PRIVATE ${OAC_REQUIRED_LIBRARIES})
@@ -680,6 +681,16 @@ if(OAC_BUILD_PROGRAMS)
   target_link_libraries(oac_demo PRIVATE oac ${OAC_REQUIRED_LIBRARIES})
   target_compile_definitions(oac_demo PRIVATE OAC_BUILD)
 
+  add_executable(olac_demo ${olac_demo_sources})
+  target_include_directories(olac_demo PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+  target_include_directories(olac_demo PRIVATE include)
+  target_include_directories(olac_demo PRIVATE silk) # debug.h
+  target_include_directories(olac_demo PRIVATE celt) # arch.h
+  target_include_directories(olac_demo PRIVATE dnn)
+  target_include_directories(olac_demo PRIVATE olac)
+  target_link_libraries(olac_demo PRIVATE ${OAC_REQUIRED_LIBRARIES})
+  target_compile_definitions(olac_demo PRIVATE OAC_BUILD)
+
   # compare
   add_executable(oac_compare ${oac_compare_sources})
   target_include_directories(oac_compare PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
@@ -709,6 +720,19 @@ if(BUILD_TESTING AND NOT BUILD_SHARED_LIBS)
   target_link_libraries(test_oac_padding PRIVATE oac)
   add_test(NAME test_oac_padding COMMAND ${CMAKE_COMMAND}
            -DTEST_EXECUTABLE=$<TARGET_FILE:test_oac_padding>
+           -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
+           -P "${PROJECT_SOURCE_DIR}/cmake/RunTest.cmake")
+
+  add_executable(test_oac_lossless ${test_oac_lossless_sources})
+  target_include_directories(test_oac_lossless
+                             PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+  target_link_libraries(test_oac_lossless PRIVATE oac)
+  target_compile_definitions(test_oac_lossless PRIVATE OAC_BUILD)
+  if(NOT OAC_ENABLE_FLOAT_API)
+    target_compile_definitions(test_oac_lossless PRIVATE DISABLE_FLOAT_API)
+  endif()
+  add_test(NAME test_oac_lossless COMMAND ${CMAKE_COMMAND}
+           -DTEST_EXECUTABLE=$<TARGET_FILE:test_oac_lossless>
            -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
            -P "${PROJECT_SOURCE_DIR}/cmake/RunTest.cmake")
 
