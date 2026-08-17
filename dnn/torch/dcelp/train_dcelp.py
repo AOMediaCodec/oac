@@ -100,7 +100,7 @@ dataset = DCELPDataset(features_file, signal_file, sequence_length=sequence_leng
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=0)
 
 
-optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=adam_betas, eps=adam_eps, fused=True)
+optimizer = torch.optim.AdamW(model.parameters(), weight_decay=1e-4, lr=lr, betas=adam_betas, eps=adam_eps, fused=True)
 
 
 # learning rate scheduler
@@ -197,7 +197,7 @@ if __name__ == '__main__':
                 specc_metric = torch.mean(specc)
                 #w_loss = wass_loss(sig, target)
 
-                reg = max(0, min((batch-10000)/20000., 20))
+                reg = max(0, min((batch-10000)/20000., 10))
                 rate_loss = torch.mean(model.fsq.rates(q, reg)*(batch_lambda**(1-lcomp)))
                 rate_metric = torch.mean(model.fsq.rate_metric(q))
                 rate_low = model.fsq.rate_metric(torch.tensor(nb_quant-1, device=device))
@@ -218,10 +218,10 @@ if __name__ == '__main__':
                 loss = cont_loss + specc_loss + rate_loss + .01*lambda_schedule*rate_error + .05*var_loss + 0*scale_reg_weight*scale_reg + bias_weight*bias - corr_weight*res_corr
                 batch += 1
 
-                greater = all_rates > curr_rate_target + .21
-                lower = all_rates < curr_rate_target - .21
+                greater = all_rates > curr_rate_target + .32
+                lower = all_rates < curr_rate_target - .32
                 lambda_adjust = 5e-3*lambda_schedule
-                model.qlambda[:nb_quant] = model.qlambda[:nb_quant]*(1 + lambda_adjust*greater - lambda_adjust*lower)
+                model.qlambda[:nb_quant] = torch.clamp(model.qlambda[:nb_quant]*(1 + lambda_adjust*greater - lambda_adjust*lower), max=1.)
 
 
                 loss.backward()
