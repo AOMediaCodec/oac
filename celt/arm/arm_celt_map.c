@@ -200,7 +200,7 @@ void (*const OACI_CLT_MDCT_FORWARD_IMPL[OAC_ARCHMASK + 1])(const mdct_lookup *l,
                                                      kiss_fft_scalar * OAC_RESTRICT out,
                                                      const oac_val16 *window,
                                                      int overlap, int shift,
-                                                     int stride, int arch) = {
+                                                     int stride, kiss_fft_scalar *mem, int arch) = {
     oaci_clt_mdct_forward_c,          /* ARMv4 */
     oaci_clt_mdct_forward_c,          /* EDSP */
     oaci_clt_mdct_forward_c,          /* Media */
