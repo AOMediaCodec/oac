@@ -78,11 +78,15 @@ void oaci_clt_mdct_forward_neon(const mdct_lookup *l,
                            kiss_fft_scalar *in,
                            kiss_fft_scalar * OAC_RESTRICT out,
                            const oac_val16 *window,
-                           int overlap, int shift, int stride, int arch) {
+                           int overlap, int shift, int stride, kiss_fft_scalar *mem, int arch) {
     int i;
     int N, N2, N4;
+    int K, K4;
     VARDECL(kiss_fft_scalar, f);
     VARDECL(kiss_fft_cpx, f2);
+    VARDECL(kiss_fft_scalar, overlap_mem);
+    kiss_fft_scalar *l_fold;
+    kiss_fft_scalar *r_fold;
     const kiss_fft_state *st = l->kfft[shift];
     const kiss_twiddle_scalar *trig;
 
@@ -96,45 +100,54 @@ void oaci_clt_mdct_forward_neon(const mdct_lookup *l,
     }
     N2 = N>>1;
     N4 = N>>2;
+    K = overlap>>1;
+    K4 = (overlap + 3)>>2;
 
     ALLOC(f, N2, kiss_fft_scalar);
     ALLOC(f2, N4, kiss_fft_cpx);
+    ALLOC(overlap_mem, overlap, kiss_fft_scalar);
+    l_fold = overlap_mem;
+    r_fold = overlap_mem + K;
 
-    /* Consider the input to be composed of four blocks: [a, b, c, d] */
-    /* Window, shuffle, fold */
+    /* 1. Left fold from mem */
+    for (i = 0; i < K; i++) {
+        l_fold[i] = mem[K - 1 - i];
+    }
+
+    /* 2. Right fold from in and window, update mem for next frame */
+    for (i = 0; i < K; i++) {
+        kiss_fft_scalar a = in[N2 - 1 - i];
+        kiss_fft_scalar b = in[N2 - overlap + i];
+        oac_val16 w1 = window[i];
+        oac_val16 w2 = window[overlap - 1 - i];
+
+        r_fold[i] = ADD32(S_MUL(b, w2), S_MUL(a, w1));
+        mem[i] = SUB32(S_MUL(a, w2), S_MUL(b, w1));
+    }
+
+    /* 3. Shuffle into f */
     {
-        /* Temp pointers to make it really clear to the compiler what we're doing */
-        const kiss_fft_scalar * OAC_RESTRICT xp1 = in + (overlap>>1);
-        const kiss_fft_scalar * OAC_RESTRICT xp2 = in + N2 - 1 + (overlap>>1);
         kiss_fft_scalar * OAC_RESTRICT yp = f;
-        const oac_val16 * OAC_RESTRICT wp1 = window + (overlap>>1);
-        const oac_val16 * OAC_RESTRICT wp2 = window + (overlap>>1) - 1;
-        for (i = 0; i < ((overlap + 3)>>2); i++) {
-            /* Real part arranged as -d-cR, Imag part arranged as -b+aR*/
-            *yp++ = MULT16_32_Q15(*wp2, xp1[N2]) + MULT16_32_Q15(*wp1, *xp2);
-            *yp++ = MULT16_32_Q15(*wp1, *xp1)    - MULT16_32_Q15(*wp2, xp2[-N2]);
-            xp1 += 2;
-            xp2 -= 2;
-            wp1 += 2;
-            wp2 -= 2;
+
+        for (i = 0; i < K4; i++) {
+            *yp++ = r_fold[K - 1 - 2*i];
+            *yp++ = l_fold[2*i];
         }
-        wp1 = window;
-        wp2 = window + overlap - 1;
-        for (; i < N4 - ((overlap + 3)>>2); i++) {
-            /* Real part arranged as a-bR, Imag part arranged as -c-dR */
-            *yp++ = *xp2;
-            *yp++ = *xp1;
-            xp1 += 2;
-            xp2 -= 2;
+
+        {
+            const kiss_fft_scalar * OAC_RESTRICT xp1 = in + N2 - overlap - 1;
+            const kiss_fft_scalar * OAC_RESTRICT xp2 = in;
+            for (; i < N4 - K4; i++) {
+                *yp++ = *xp1;
+                *yp++ = *xp2;
+                xp1 -= 2;
+                xp2 += 2;
+            }
         }
+
         for (; i < N4; i++) {
-            /* Real part arranged as a-bR, Imag part arranged as -c-dR */
-            *yp++ =  -MULT16_32_Q15(*wp1, xp1[-N2]) + MULT16_32_Q15(*wp2, *xp2);
-            *yp++ = MULT16_32_Q15(*wp2, *xp1)     + MULT16_32_Q15(*wp1, xp2[N2]);
-            xp1 += 2;
-            xp2 -= 2;
-            wp1 += 2;
-            wp2 -= 2;
+            *yp++ = l_fold[N2 - 1 - 2*i];
+            *yp++ = r_fold[2*i - (N2 - K)];
         }
     }
     /* Pre-rotation */
