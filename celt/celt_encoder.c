@@ -2829,6 +2829,50 @@ int oac_custom_encoder_ctl(CELTEncoder * OAC_RESTRICT st, int request, ...) {
             *value = st->disable_inv;
         }
         break;
+        case CELT_SET_PREEMPHASIS_REQUEST:
+        {
+            const celt_sig *value = va_arg(ap, const celt_sig*);
+            int c;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++)
+                st->preemph_memE[c] = value[c];
+        }
+        break;
+        case CELT_GET_PREEMPHASIS_REQUEST:
+        {
+            celt_sig *value = va_arg(ap, celt_sig*);
+            int c;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++)
+                value[c] = st->preemph_memE[c];
+        }
+        break;
+        case CELT_SET_TDAC_MEM_REQUEST:
+        {
+            const celt_sig *value = va_arg(ap, const celt_sig*);
+            int c;
+            int half_overlap = st->mode->overlap / 2;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++) {
+                OAC_COPY(st->in_mem + c * half_overlap, value + c * half_overlap, half_overlap);
+            }
+            OAC_CLEAR(st->in_mem + st->channels * half_overlap, st->channels * QEXT_SCALE(COMBFILTER_MAXPERIOD));
+            st->prefilter_period = 0;
+            st->prefilter_gain = 0;
+            st->prefilter_tapset = 0;
+        }
+        break;
+        case CELT_GET_TDAC_MEM_REQUEST:
+        {
+            celt_sig *value = va_arg(ap, celt_sig*);
+            int c;
+            int half_overlap = st->mode->overlap / 2;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++) {
+                OAC_COPY(value + c * half_overlap, st->in_mem + c * half_overlap, half_overlap);
+            }
+        }
+        break;
         case OAC_RESET_STATE:
         {
             int i;
