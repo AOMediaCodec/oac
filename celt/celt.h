@@ -127,6 +127,9 @@ typedef struct {
 
 #define celt_check_glog_ptr(ptr) ((ptr) + ((ptr) - (celt_glog*)(ptr)))
 
+#define celt_check_sig_ptr(ptr) ((ptr) + ((ptr) - (celt_sig*)(ptr)))
+#define celt_check_const_sig_ptr(ptr) ((ptr) + ((ptr) - (const celt_sig*)(ptr)))
+
 /* Encoder/decoder Requests */
 
 
@@ -178,6 +181,18 @@ typedef struct {
 
 #define CELT_SET_SILK_INFO_REQUEST    10028
 #define CELT_SET_SILK_INFO(x) CELT_SET_SILK_INFO_REQUEST, celt_check_silkinfo_ptr(x)
+
+#define CELT_SET_PREEMPHASIS_REQUEST    10030
+#define CELT_SET_PREEMPHASIS(x) CELT_SET_PREEMPHASIS_REQUEST, celt_check_const_sig_ptr(x)
+
+#define CELT_GET_PREEMPHASIS_REQUEST    10031
+#define CELT_GET_PREEMPHASIS(x) CELT_GET_PREEMPHASIS_REQUEST, celt_check_sig_ptr(x)
+
+#define CELT_SET_TDAC_MEM_REQUEST       10032
+#define CELT_SET_TDAC_MEM(x) CELT_SET_TDAC_MEM_REQUEST, celt_check_const_sig_ptr(x)
+
+#define CELT_GET_TDAC_MEM_REQUEST       10033
+#define CELT_GET_TDAC_MEM(x) CELT_GET_TDAC_MEM_REQUEST, celt_check_sig_ptr(x)
 
 /* Highest bit-rate the frame length signalling can represent: a full
    OAC_SIZE_MAX payload every 20 ms. Only used to saturate the bits<->bit-rate
