@@ -1637,6 +1637,64 @@ int oac_custom_decoder_ctl(CELTDecoder * OAC_RESTRICT st, int request, ...) {
             *value = st->overlap/st->downsample;
         }
         break;
+        case CELT_SET_PREEMPHASIS_REQUEST:
+        {
+            const celt_sig *value = va_arg(ap, const celt_sig*);
+            int c;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++)
+                st->preemph_memD[c] = value[c];
+        }
+        break;
+        case CELT_GET_PREEMPHASIS_REQUEST:
+        {
+            celt_sig *value = va_arg(ap, celt_sig*);
+            int c;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++)
+                value[c] = st->preemph_memD[c];
+        }
+        break;
+        case CELT_SET_TDAC_MEM_REQUEST:
+        {
+            const celt_sig *value = va_arg(ap, const celt_sig*);
+            int c;
+            int half_overlap = st->overlap / 2;
+            int decode_buffer_size;
+#ifdef ENABLE_QEXT
+            int qext_scale = st->qext_scale;
+#endif
+            decode_buffer_size = QEXT_SCALE(DECODE_BUFFER_SIZE);
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++) {
+                celt_sig *decode_mem = st->_decode_mem + c * (decode_buffer_size + st->overlap);
+                OAC_COPY(decode_mem + decode_buffer_size, value + c * half_overlap, half_overlap);
+            }
+            st->postfilter_period = 0;
+            st->postfilter_gain = 0;
+            st->postfilter_tapset = 0;
+            st->postfilter_period_old = 0;
+            st->postfilter_gain_old = 0;
+            st->postfilter_tapset_old = 0;
+        }
+        break;
+        case CELT_GET_TDAC_MEM_REQUEST:
+        {
+            celt_sig *value = va_arg(ap, celt_sig*);
+            int c;
+            int half_overlap = st->overlap / 2;
+            int decode_buffer_size;
+#ifdef ENABLE_QEXT
+            int qext_scale = st->qext_scale;
+#endif
+            decode_buffer_size = QEXT_SCALE(DECODE_BUFFER_SIZE);
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++) {
+                celt_sig *decode_mem = st->_decode_mem + c * (decode_buffer_size + st->overlap);
+                OAC_COPY(value + c * half_overlap, decode_mem + decode_buffer_size, half_overlap);
+            }
+        }
+        break;
         case OAC_RESET_STATE:
         {
             int i;
