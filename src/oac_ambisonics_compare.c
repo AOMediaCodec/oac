@@ -53,6 +53,9 @@
 #define MAX_PACKET (1276*36)
 #define MAX_FRAME_SIZE 5760  /* 120ms at 48kHz */
 
+/* VBR mode: 1 = variable bitrate (default), 0 = constant (CBR) via -cbr. */
+static int g_vbr = 1;
+
 static void print_usage(const char *progname) {
     fprintf(stderr, "Usage: %s <mode> <sampling_rate> <channels> <bitrate> <input.pcm> <output.pcm> [options]\n", progname);
     fprintf(stderr, "\n");
@@ -71,6 +74,7 @@ static void print_usage(const char *progname) {
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -transport_order <N>  : SEMAC transport order (1-5, default: input order)\n");
     fprintf(stderr, "  -domain <shd|beam>    : SEMAC transport domain (default shd)\n");
+    fprintf(stderr, "  -cbr                  : constant bitrate (default: VBR)\n");
 }
 
 static int encode_decode_mapping2(int sampling_rate, int channels, int bitrate,
@@ -117,6 +121,7 @@ static int encode_decode_mapping2(int sampling_rate, int channels, int bitrate,
     fprintf(stderr, "  Streams: %d (coupled: %d)\n", streams, coupled_streams);
 
     oac_multistream_encoder_ctl(enc, OAC_SET_BITRATE(bitrate));
+    oac_multistream_encoder_ctl(enc, OAC_SET_VBR(g_vbr));
     oac_multistream_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
 
     dec = oac_multistream_decoder_create(sampling_rate, channels,
@@ -209,6 +214,7 @@ static int encode_decode_mapping3(int sampling_rate, int channels, int bitrate,
     fprintf(stderr, "  Streams: %d (coupled: %d)\n", streams, coupled_streams);
 
     oac_projection_encoder_ctl(enc, OAC_SET_BITRATE(bitrate));
+    oac_projection_encoder_ctl(enc, OAC_SET_VBR(g_vbr));
     oac_projection_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
 
     oac_projection_encoder_ctl(enc, OAC_PROJECTION_GET_DEMIXING_MATRIX_SIZE_REQUEST, &matrix_size);
@@ -320,6 +326,7 @@ static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
     }
 
     oac_encoder_ctl(enc, OAC_SET_BITRATE(bitrate));
+    oac_encoder_ctl(enc, OAC_SET_VBR(g_vbr));
     oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
 
 #ifdef ENABLE_SEMAC
@@ -400,6 +407,8 @@ int main(int argc, char *argv[]) {
     for (int i = 7; i < argc; i++) {
         if (strcmp(argv[i], "-transport_order") == 0 && i + 1 < argc) {
             transport_order = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-cbr") == 0) {
+            g_vbr = 0;
         } else if (strcmp(argv[i], "-domain") == 0 && i + 1 < argc) {
             const char *d = argv[++i];
             if (strcmp(d, "shd") == 0) {
