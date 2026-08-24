@@ -104,7 +104,7 @@ static void syn_filter(oac_int32 *out, const oac_int32 *in, int len, const oac_i
         for (j=0;j<order;j++) {
             pred += mem[j]*(oac_int64)aks[offset + j];
         }
-        out[i] = in[i] + OLAC_PSHR64(pred, COEF_SHIFT);
+        out[i] = in[i] + OLAC_PSHR64(pred, OLAC_COEF_SHIFT);
         for (j=order-2;j>=0;j--) {
             mem[j+1] = mem[j];
         }
@@ -253,5 +253,6 @@ oac_int32 olac_decode(OlacDecoder *st, const unsigned char *data, int len, oac_i
         OAC_COPY(ref, residual, frame_size);
     }
     st->last_ctz = ctz;
+    st->rng = dec.rng;
     return OAC_OK;
 }
