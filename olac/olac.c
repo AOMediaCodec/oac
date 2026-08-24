@@ -100,10 +100,10 @@ void olac_aks_from_rc(oac_int32 *aks, const oac_int32 *rc, int order) {
             ak[ k ]         = tmp1 + OLAC_PSHR64(rc[n] * (oac_int64)tmp2, RC_SHIFT);
             ak[ n - k - 1 ] = tmp2 + OLAC_PSHR64(rc[n] * (oac_int64)tmp1, RC_SHIFT);
         }
-#if COEF_SHIFT > RC_SHIFT
-        ak[ n ] = OLAC_SHL32(rc[n], COEF_SHIFT-RC_SHIFT);
+#if OLAC_COEF_SHIFT > RC_SHIFT
+        ak[ n ] = OLAC_SHL32(rc[n], OLAC_COEF_SHIFT-RC_SHIFT);
 #else
-        ak[ n ] = OLAC_SHR32(rc[n], RC_SHIFT-COEF_SHIFT);
+        ak[ n ] = OLAC_SHR32(rc[n], RC_SHIFT-OLAC_COEF_SHIFT);
 #endif
         for (k=0;k<=n;k++) *aks++ = -ak[ k ];
     }

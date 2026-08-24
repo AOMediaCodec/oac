@@ -43,11 +43,12 @@
 #define HALF_OVERLAP (OVERLAP_SIZE/2)
 #define PREEMPH (0.85f)
 #define PREEMPH_Q15 (27853)
+#define INV_PREEMPH_Q15 (38550)
 #define PREEMPH_MOD (2 * (32767 / (32768 - PREEMPH_Q15)) + 1)
 #define MAX_SHIFT 24
 #define MAX_CHANNELS 2
-#define COEF_SHIFT 20
-#define COEF_SCALE (1<<COEF_SHIFT)
+#define OLAC_COEF_SHIFT 20
+#define OLAC_COEF_SCALE (1<<OLAC_COEF_SHIFT)
 #define RC_SHIFT 20
 #define RC_SCALE (1<<RC_SHIFT)
 
@@ -77,6 +78,7 @@ typedef struct {
     int nb_channels;
     oac_int32 sampling_rate;
     int last_ctz;
+    oac_uint32 rng;
     oac_int32 mem_modulo[MAX_CHANNELS];
     oac_int32 last_last_sample[MAX_CHANNELS];
     oac_int32 pmem[MAX_CHANNELS];
@@ -88,6 +90,7 @@ typedef struct {
     int nb_channels;
     oac_int32 sampling_rate;
     int last_ctz;
+    oac_uint32 rng;
     oac_int32 dmem[MAX_CHANNELS];
     oac_int32 untdac_mem[MAX_CHANNELS][HALF_OVERLAP];
 } OlacDecoder;
