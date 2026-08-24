@@ -110,7 +110,7 @@ static void pred_filter(oac_int32 *out, const oac_int32 *in, int len, const oac_
         for (j=0;j<order;j++) {
             pred += mem[j]*(oac_int64)aks[offset + j];
         }
-        out[i] = in[i] - OLAC_PSHR64(pred, COEF_SHIFT);
+        out[i] = in[i] - OLAC_PSHR64(pred, OLAC_COEF_SHIFT);
         for (j=order-2;j>=0;j--) {
             mem[j+1] = mem[j];
         }
@@ -456,9 +456,12 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
         code_residual(&enc, residual, frame_size, (c==0) ? NULL : ref);
         OAC_COPY(ref, residual, frame_size);
     }
-    nbCompressedBytes = IMIN(nbCompressedBytes, (oaci_ec_tell(&enc)+7)>>3);
-    oaci_ec_enc_shrink(&enc, nbCompressedBytes);
+    if (!enc.error) {
+        nbCompressedBytes = IMIN(nbCompressedBytes, (oaci_ec_tell(&enc)+7)>>3);
+        oaci_ec_enc_shrink(&enc, nbCompressedBytes);
+    }
     oaci_ec_enc_done(&enc);
     st->last_ctz = ctz;
+    st->rng = enc.rng;
     return enc.error ? OAC_BUFFER_TOO_SMALL : nbCompressedBytes;
 }
