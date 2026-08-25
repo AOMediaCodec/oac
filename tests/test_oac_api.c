@@ -312,7 +312,10 @@ oac_int32 test_dec_api(void) {
         int bw;
         packet[0] = i;
         bw = packet[0]>>4;
-        bw = OAC_BANDWIDTH_NARROWBAND + (((((bw&7)*9)&(63 - (bw&8))) + 2 + 12*((bw&8) != 0))>>4);
+        if ((packet[0]>>3) >= 16 && (packet[0]>>3) <= 19)
+            bw = OAC_BANDWIDTH_FULLBAND;
+        else
+            bw = OAC_BANDWIDTH_NARROWBAND + (((((bw&7)*9)&(63 - (bw&8))) + 2 + 12*((bw&8) != 0))>>4);
         if (bw != oac_packet_get_bandwidth(packet)) test_failed();
         cfgs++;
     }

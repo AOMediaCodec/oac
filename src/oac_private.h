@@ -180,6 +180,7 @@ typedef void (*oac_copy_channel_out_func)(
 #define MODE_SILK_ONLY          1000
 #define MODE_HYBRID             1001
 #define MODE_CELT_ONLY          1002
+#define MODE_OLAC               1003
 
 #define OAC_SET_VOICE_RATIO_REQUEST         11018
 #define OAC_GET_VOICE_RATIO_REQUEST         11019
