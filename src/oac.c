@@ -349,14 +349,14 @@ int oaci_validate_config(int mode, int format, int channels, int nb_frames) {
         return OAC_INVALID_PACKET;
     if (nb_frames < 1 || nb_frames > OAC_MAX_FRAMES_PER_PACKET)
         return OAC_INVALID_PACKET;
-    /* SILK and hybrid only ever code one or two channels of the standard
+    /* SILK, hybrid and OLAC only ever code one or two channels of the standard
        format. Order-0 ambisonics is also one channel, but the encoder forces
-       CELT for every ambisonics order, so a speech-mode ambisonics packet is
-       something we can never produce and will not accept. The two modes are
-       listed explicitly rather than as "anything but CELT" so that the modes
-       still to come (lossless, other speech modes) have to state their own
-       policy here instead of silently inheriting this one. */
-    if ((mode == MODE_SILK_ONLY || mode == MODE_HYBRID)
+       CELT for every ambisonics order, so a non-CELT ambisonics packet is
+       something we can never produce and will not accept. The modes are listed
+       explicitly rather than as "anything but CELT" so that the modes still to
+       come (other speech or lossless modes) have to state their own policy
+       here instead of silently inheriting this one. */
+    if ((mode == MODE_SILK_ONLY || mode == MODE_HYBRID || mode == MODE_OLAC)
         && (channels > 2 || format != OAC_FORMAT_STANDARD))
         return OAC_INVALID_PACKET;
     return OAC_OK;
@@ -370,7 +370,11 @@ int oaci_validate_config(int mode, int format, int channels, int nb_frames) {
 int oaci_toc_mode(unsigned char toc) {
     int mode;
     if (toc&0x80) {
-        mode = MODE_CELT_ONLY;
+        int config = toc>>3;
+        if (config >= 16 && config <= 19)
+            mode = MODE_OLAC;
+        else
+            mode = MODE_CELT_ONLY;
     } else if ((toc&0x60) == 0x60) {
         mode = MODE_HYBRID;
     } else {
@@ -382,9 +386,14 @@ int oaci_toc_mode(unsigned char toc) {
 int oaci_toc_bandwidth(unsigned char toc) {
     int bandwidth;
     if (toc&0x80) {
-        bandwidth = OAC_BANDWIDTH_MEDIUMBAND + ((toc>>5)&0x3);
-        if (bandwidth == OAC_BANDWIDTH_MEDIUMBAND)
-            bandwidth = OAC_BANDWIDTH_NARROWBAND;
+        int config = toc>>3;
+        if (config >= 16 && config <= 19) {
+            bandwidth = OAC_BANDWIDTH_FULLBAND;
+        } else {
+            bandwidth = OAC_BANDWIDTH_MEDIUMBAND + ((toc>>5)&0x3);
+            if (bandwidth == OAC_BANDWIDTH_MEDIUMBAND)
+                bandwidth = OAC_BANDWIDTH_NARROWBAND;
+        }
     } else if ((toc&0x60) == 0x60) {
         bandwidth = (toc&0x10) ? OAC_BANDWIDTH_FULLBAND :
                     OAC_BANDWIDTH_SUPERWIDEBAND;

@@ -81,6 +81,7 @@
 #include "stack_alloc.h"
 #include "float_cast.h"
 #include "oac_private.h"
+#include "olac.h"
 #include "os_support.h"
 #include "structs.h"
 #include "define.h"
@@ -99,6 +100,7 @@
 struct OacDecoder {
     int celt_dec_offset;
     int silk_dec_offset;
+    int olac_dec_offset;
     int channels;
     int format;
     oac_int32 Fs;           /** Sampling rate (at the API level) */
@@ -158,7 +160,7 @@ static void validate_oac_decoder(OacDecoder *st) {
 #endif
 
 int oac_decoder_get_size(int channels, int format) {
-    int silkDecSizeBytes, celtDecSizeBytes;
+    int silkDecSizeBytes, celtDecSizeBytes, olacDecSizeBytes;
     int ret;
     int skip_silk;
     if (!oaci_validate_format_channels(format, channels))
@@ -175,13 +177,14 @@ int oac_decoder_get_size(int channels, int format) {
         silkDecSizeBytes = 0;
     }
     celtDecSizeBytes = oaci_celt_decoder_get_size(channels);
-    return oaci_align(sizeof(OacDecoder)) + silkDecSizeBytes + celtDecSizeBytes;
+    olacDecSizeBytes = (channels <= 2) ? oaci_align(sizeof(OlacDecoder)) : 0;
+    return oaci_align(sizeof(OacDecoder)) + silkDecSizeBytes + celtDecSizeBytes + olacDecSizeBytes;
 }
 
 int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
     void *silk_dec;
     CELTDecoder *celt_dec;
-    int ret, silkDecSizeBytes;
+    int ret, silkDecSizeBytes, celtDecSizeBytes;
     int skip_silk;
 
     if ((Fs != 48000 && Fs != 24000 && Fs != 16000 && Fs != 12000 && Fs != 8000
@@ -213,6 +216,8 @@ int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
         st->celt_dec_offset = oaci_align(sizeof(OacDecoder));
         silk_dec = NULL;
     }
+    celtDecSizeBytes = oaci_celt_decoder_get_size(channels);
+    st->olac_dec_offset = st->celt_dec_offset + celtDecSizeBytes;
     celt_dec = (CELTDecoder*)((char*)st + st->celt_dec_offset);
     st->stream_channels = st->channels = channels;
     st->format = format;
@@ -233,6 +238,11 @@ int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
     if (ret != OAC_OK) return OAC_INTERNAL_ERROR;
 
     celt_decoder_ctl(celt_dec, CELT_SET_SIGNALLING(0));
+
+    if (channels <= 2) {
+        OlacDecoder *olac_dec = (OlacDecoder*)((char*)st + st->olac_dec_offset);
+        olac_decoder_init(olac_dec, channels, Fs);
+    }
 
     st->prev_mode = 0;
     st->frame_size = Fs/400;
@@ -386,8 +396,8 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
     pcm_transition_silk_size = ALLOC_NONE;
     pcm_transition_celt_size = ALLOC_NONE;
     if (data != NULL && st->prev_mode > 0 && (
-            (mode == MODE_CELT_ONLY && st->prev_mode != MODE_CELT_ONLY && !st->prev_redundancy)
-            || (mode != MODE_CELT_ONLY && st->prev_mode == MODE_CELT_ONLY))
+            (mode == MODE_CELT_ONLY && st->prev_mode != MODE_CELT_ONLY && st->prev_mode != MODE_OLAC && !st->prev_redundancy)
+            || (mode != MODE_CELT_ONLY && mode != MODE_OLAC && (st->prev_mode == MODE_CELT_ONLY || st->prev_mode == MODE_OLAC)))
         ) {
         transition = 1;
         /* Decide where to allocate the stack memory for pcm_transition */
@@ -409,6 +419,103 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
         frame_size = audiosize;
     }
 
+    if (mode == MODE_OLAC) {
+        if (data != NULL) {
+            OlacDecoder *olac_dec = (OlacDecoder*)((char*)st + st->olac_dec_offset);
+            VARDECL(oac_int32, pcm_int32);
+            int olac_ret;
+            int downsample = 48000 / st->Fs;
+            int olac_frame_size = frame_size * downsample;
+            int j;
+            olac_dec->nb_channels = st->stream_channels;
+            ALLOC(pcm_int32, olac_frame_size * st->stream_channels, oac_int32);
+
+            if (st->prev_mode == MODE_CELT_ONLY) {
+                celt_sig celt_preemph[OAC_MAX_CHANNELS];
+                celt_sig celt_tdac[OAC_MAX_CHANNELS * 60];
+                ec_dec temp_dec;
+                int ctz;
+                oaci_ec_dec_init(&temp_dec, (unsigned char*)data, len);
+                ctz = oaci_ec_dec_uint(&temp_dec, 25);
+                celt_decoder_ctl(celt_dec, CELT_GET_PREEMPHASIS(celt_preemph));
+                celt_decoder_ctl(celt_dec, CELT_GET_TDAC_MEM(celt_tdac));
+                olac_dec->last_ctz = ctz;
+                for (c = 0; c < st->stream_channels; c++) {
+#ifdef FIXED_POINT
+                    olac_dec->dmem[c] = (SIG2RES(MULT16_32_Q15(INV_PREEMPH_Q15, celt_preemph[c]))) >> ctz;
+                    for (j = 0; j < 60; j++)
+                        olac_dec->untdac_mem[c][j] = (SIG2RES(celt_tdac[c * 60 + j])) >> ctz;
+#else
+                    olac_dec->dmem[c] = RES2INT24(SIG2RES(celt_preemph[c]) * (1.f / 0.85f)) >> ctz;
+                    for (j = 0; j < 60; j++)
+                        olac_dec->untdac_mem[c][j] = RES2INT24(SIG2RES(celt_tdac[c * 60 + j])) >> ctz;
+#endif
+                }
+            }
+
+            olac_ret = olac_decode(olac_dec, data, len, pcm_int32, olac_frame_size);
+            if (olac_ret == OAC_OK) {
+                for (j = 0; j < frame_size; j++) {
+                    for (c = 0; c < st->channels; c++) {
+                        int src_c = IMIN(c, st->stream_channels - 1);
+                        pcm[j * st->channels + c] = INT24TORES(pcm_int32[(j * downsample) * st->stream_channels + src_c]);
+                    }
+                }
+
+                st->rangeFinal = olac_dec->rng;
+                st->prev_mode = MODE_OLAC;
+                st->prev_redundancy = 0;
+                RESTORE_STACK;
+                return frame_size;
+            }
+        }
+        /* Packet loss or corrupted packet: transfer OLAC state to CELT and run CELT PLC */
+        {
+            OlacDecoder *olac_dec = (OlacDecoder*)((char*)st + st->olac_dec_offset);
+            celt_sig celt_preemph[OAC_MAX_CHANNELS];
+            celt_sig celt_tdac[OAC_MAX_CHANNELS * 60];
+            int j;
+            for (c = 0; c < st->stream_channels; c++) {
+#ifdef FIXED_POINT
+                celt_preemph[c] = MULT16_32_Q15(PREEMPH_Q15, RES2SIG(olac_dec->dmem[c]));
+                for (j = 0; j < 60; j++)
+                    celt_tdac[c * 60 + j] = RES2SIG(olac_dec->untdac_mem[c][j]);
+#else
+                celt_preemph[c] = RES2SIG(INT24TORES(olac_dec->dmem[c])) * 0.85f;
+                for (j = 0; j < 60; j++)
+                    celt_tdac[c * 60 + j] = RES2SIG(INT24TORES(olac_dec->untdac_mem[c][j]));
+#endif
+            }
+            celt_decoder_ctl(celt_dec, CELT_SET_PREEMPHASIS(celt_preemph));
+            celt_decoder_ctl(celt_dec, CELT_SET_TDAC_MEM(celt_tdac));
+            celt_decoder_ctl(celt_dec, CELT_SET_PREDICTION(0));
+            mode = MODE_CELT_ONLY;
+            data = NULL;
+            len = 0;
+        }
+    }
+
+    if (mode == MODE_CELT_ONLY && st->prev_mode == MODE_OLAC) {
+        OlacDecoder *olac_dec = (OlacDecoder*)((char*)st + st->olac_dec_offset);
+        celt_sig celt_preemph[OAC_MAX_CHANNELS];
+        celt_sig celt_tdac[OAC_MAX_CHANNELS * 60];
+        int j;
+        int last_ctz = olac_dec->last_ctz;
+        for (c = 0; c < st->stream_channels; c++) {
+#ifdef FIXED_POINT
+            celt_preemph[c] = MULT16_32_Q15(PREEMPH_Q15, RES2SIG(olac_dec->dmem[c] << last_ctz));
+            for (j = 0; j < 60; j++)
+                celt_tdac[c * 60 + j] = RES2SIG(olac_dec->untdac_mem[c][j] << last_ctz);
+#else
+            celt_preemph[c] = RES2SIG(INT24TORES(olac_dec->dmem[c] << last_ctz)) * 0.85f;
+            for (j = 0; j < 60; j++)
+                celt_tdac[c * 60 + j] = RES2SIG(INT24TORES(olac_dec->untdac_mem[c][j] << last_ctz));
+#endif
+        }
+        celt_decoder_ctl(celt_dec, CELT_SET_PREEMPHASIS(celt_preemph));
+        celt_decoder_ctl(celt_dec, CELT_SET_TDAC_MEM(celt_tdac));
+    }
+
     /* SILK processing */
     if (mode != MODE_CELT_ONLY) {
         int lost_flag, decoded_samples;
@@ -425,7 +532,7 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
         else
             pcm_ptr = pcm;
 
-        if (st->prev_mode == MODE_CELT_ONLY)
+        if (st->prev_mode == MODE_CELT_ONLY || st->prev_mode == MODE_OLAC)
             oaci_silk_ResetDecoder( silk_dec );
 
         /* The SILK PLC cannot produce frames of less than 10 ms */
@@ -472,8 +579,8 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
             /* at this point, mode can only be MODE_SILK_ONLY or MODE_HYBRID */
             st->DecControl.osce_extended_mode = mode == MODE_SILK_ONLY ? OSCE_MODE_SILK_ONLY : OSCE_MODE_HYBRID;
         }
-        if (st->prev_mode == MODE_CELT_ONLY) {
-            /* Update extended mode for CELT->SILK transition */
+        if (st->prev_mode == MODE_CELT_ONLY || st->prev_mode == MODE_OLAC) {
+            /* Update extended mode for CELT/OLAC->SILK transition */
             st->DecControl.prev_osce_extended_mode = OSCE_MODE_CELT_ONLY;
         }
 # endif
@@ -605,7 +712,7 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
     {
         int celt_frame_size = IMIN(F20, frame_size);
         /* Make sure to discard any previous CELT state */
-        if (mode != st->prev_mode && st->prev_mode > 0 && !st->prev_redundancy)
+        if (mode != st->prev_mode && st->prev_mode > 0 && st->prev_mode != MODE_OLAC && !st->prev_redundancy)
             MUST_SUCCEED(celt_decoder_ctl(celt_dec, OAC_RESET_STATE));
         /* Decode CELT */
         celt_ret = oaci_celt_decode_with_ec_dred(celt_dec, decode_fec ? NULL : data,
@@ -807,7 +914,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
         int duration_copy;
         int ret;
         /* If no FEC can be present, run the PLC (recursive call) */
-        if (frame_size < packet_frame_size || packet_mode == MODE_CELT_ONLY || st->mode == MODE_CELT_ONLY)
+        if (frame_size < packet_frame_size || packet_mode == MODE_CELT_ONLY || packet_mode == MODE_OLAC
+            || st->mode == MODE_CELT_ONLY || st->mode == MODE_OLAC)
             return oac_decode_native(st, NULL, 0, pcm, frame_size, 0, 0, NULL, soft_clip, NULL, 0);
         /* Otherwise, run the PLC on everything except the size for which we might have FEC */
         duration_copy = st->last_packet_duration;
@@ -1075,6 +1183,10 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
                 - ((char*)&st->OAC_DECODER_RESET_START - (char*)st));
 
             celt_decoder_ctl(celt_dec, OAC_RESET_STATE);
+            if (st->channels <= 2) {
+                OlacDecoder *olac_dec = (OlacDecoder*)((char*)st + st->olac_dec_offset);
+                olac_decoder_init(olac_dec, st->channels, st->Fs);
+            }
             /* silk_dec_offset is zero whenever oac_decoder_init() skipped the
                SILK decoder, and silk_dec then aliases the OacDecoder header
                itself, so resetting it here would write SILK state over our own
@@ -1116,6 +1228,8 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
             }
             if (st->prev_mode == MODE_CELT_ONLY)
                 ret = celt_decoder_ctl(celt_dec, OAC_GET_PITCH(value));
+            else if (st->prev_mode == MODE_OLAC)
+                *value = 0;
             else
                 *value = st->DecControl.prevPitchLag;
         }
@@ -1281,8 +1395,8 @@ int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len) {
     if (ret <= 0)
         return ret;
     packet_mode = oaci_toc_mode(packet[0]);
-    /* CELT has no LBRR, and neither does an empty first frame. */
-    if (packet_mode == MODE_CELT_ONLY || size[0] == 0)
+    /* CELT and OLAC have no LBRR, and neither does an empty first frame. */
+    if (packet_mode == MODE_CELT_ONLY || packet_mode == MODE_OLAC || size[0] == 0)
         return 0;
     packet_frame_size = oaci_toc_samples_per_frame(packet[0], 48000);
     if (packet_frame_size > 960)

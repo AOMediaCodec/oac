@@ -211,10 +211,11 @@ static int ref_toc2_valid(int toc, int ext) {
     } else {
         channels = 2*(ext&0x07) + S + 1;
     }
-    /* SILK (configs 0-11) and hybrid (configs 12-15) only ever code one or two
-       channels of the standard format; CELT (16-31) codes any number. Order-0
-       ambisonics is a single channel but is still ruled out by the format. */
-    return !(config < 16 && (channels > 2 || format != OAC_FORMAT_STANDARD));
+    /* SILK (configs 0-11), hybrid (configs 12-15) and OLAC (configs 16-19)
+       only ever code one or two channels of the standard format; CELT (20-31)
+       codes any number. Order-0 ambisonics is a single channel but is still
+       ruled out by the format. */
+    return !(config < 20 && (channels > 2 || format != OAC_FORMAT_STANDARD));
 }
 
 /* Inverse of the above: the F value that packs exactly nb_frames frames of the
@@ -467,7 +468,10 @@ oac_int32 test_dec_api(void) {
         memset(packet, 0, 8);
         packet[0] = i;
         bw = packet[0]>>4;
-        bw = OAC_BANDWIDTH_NARROWBAND + (((((bw&7)*9)&(63 - (bw&8))) + 2 + 12*((bw&8) != 0))>>4);
+        if ((packet[0]>>3) >= 16 && (packet[0]>>3) <= 19)
+            bw = OAC_BANDWIDTH_FULLBAND;
+        else
+            bw = OAC_BANDWIDTH_NARROWBAND + (((((bw&7)*9)&(63 - (bw&8))) + 2 + 12*((bw&8) != 0))>>4);
         if (bw != oac_packet_get_bandwidth(packet, 8)) test_failed();
         cfgs++;
     }
@@ -1006,7 +1010,7 @@ oac_int32 test_parse(void) {
         if (ret != OAC_INVALID_PACKET) test_failed();
     }
     /*...and the same for the channel escape byte*/
-    for (config = 16; config < 32; config++) {
+    for (config = 20; config < 32; config++) {
         hdr = ref_put_toc(packet, config, 0, 0, 0, 0, 64, 0);
         if (hdr != 3) test_failed();
         UNDEFINE_FOR_PARSE
@@ -1191,10 +1195,11 @@ oac_int32 test_parse(void) {
     cfgs_total += cfgs; cfgs = 0;
 
     /*Standard multichannel. C and S resolve 1..15 channels directly and
-      C=7,S=1 escapes to an explicit count in a third ToC byte. SILK and hybrid
-      only ever code one or two channels, so anything above that is rejected.*/
+      C=7,S=1 escapes to an explicit count in a third ToC byte. SILK, hybrid
+      and OLAC only ever code one or two channels, so anything above that is
+      rejected.*/
     for (config = 0; config < 32; config++) {
-        int max_channels = config < 16 ? 2 : TEST_MAX_CHANNELS;
+        int max_channels = config < 20 ? 2 : TEST_MAX_CHANNELS;
         for (j = 1; j <= TEST_MAX_CHANNELS; j++) {
             hdr = ref_put_toc(packet, config, 0, 0, 0, 0, j, 0);
             if (hdr != (j > 15 ? 3 : 2)) test_failed();
@@ -1238,9 +1243,10 @@ oac_int32 test_parse(void) {
     cfgs_total += cfgs; cfgs = 0;
 
     /*Ambisonics: 2*C+S is the order, so orders 0..15 are all representable and
-      the escape byte is never needed. None of them fit in a SILK or hybrid
-      packet: the encoder codes ambisonics with CELT at every order, including
-      order 0, which is a single channel but still not the standard format.*/
+      the escape byte is never needed. None of them fit in a SILK, hybrid or
+      OLAC packet: the encoder codes ambisonics with CELT at every order,
+      including order 0, which is a single channel but still not the standard
+      format.*/
     for (config = 0; config < 32; config++) {
         for (j = 0; j <= 15; j++) {
             hdr = ref_put_toc(packet, config, 0, 0, 0, 1, (j + 1)*(j + 1), 0);
@@ -1248,7 +1254,7 @@ oac_int32 test_parse(void) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, hdr + 7, &toc, frames, size, &payload_offset);
             cfgs++;
-            if (config >= 16) {
+            if (config >= 20) {
                 if (oac_packet_get_nb_channels(packet, hdr) != (j + 1)*(j + 1)) test_failed();
                 if (oac_packet_get_format(packet, hdr) != OAC_FORMAT_AMBISONICS) test_failed();
                 cfgs += 2;

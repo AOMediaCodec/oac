@@ -136,7 +136,7 @@ int oaci_validate_config(int mode, int format, int channels, int nb_frames);
  * building. The public oac_packet_get_*() functions wrap them with a call to
  * oaci_packet_parse_toc() so that they cannot describe a packet oac_decode()
  * would reject. */
-int oaci_toc_mode(unsigned char toc);          /**< MODE_SILK_ONLY/HYBRID/CELT_ONLY */
+int oaci_toc_mode(unsigned char toc);          /**< MODE_SILK_ONLY/HYBRID/CELT_ONLY/OLAC */
 int oaci_toc_bandwidth(unsigned char toc);     /**< OAC_BANDWIDTH_* */
 int oaci_toc_samples_per_frame(unsigned char toc, oac_int32 Fs);
 
@@ -265,6 +265,7 @@ typedef void (*oac_copy_channel_out_func)(
 #define MODE_SILK_ONLY          1000
 #define MODE_HYBRID             1001
 #define MODE_CELT_ONLY          1002
+#define MODE_OLAC               1003
 
 #define OAC_SET_VOICE_RATIO_REQUEST         11018
 #define OAC_GET_VOICE_RATIO_REQUEST         11019
