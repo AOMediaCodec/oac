@@ -411,6 +411,31 @@ static void code_residual(ec_enc *enc, oac_int32 *residual, int len, const oac_i
     }
 }
 
+static int downshift_signal(oac_int32 *sig, oac_int32 *lsbs, int frame_size, int max_bits) {
+    int i, shift;
+    oac_int32 maxval=1;
+    for (i=0;i<frame_size;i++) {
+        if ((oac_int32)OLAC_ABS(sig[i]) > maxval) maxval = OLAC_ABS(sig[i]);
+    }
+    shift = EC_ILOG(maxval) - max_bits;
+    if (shift < 0) shift=0;
+    for (i=0;i<frame_size;i++) {
+        lsbs[i] = sig[i] & ((1 << shift) - 1);
+        sig[i] = OLAC_SHR32(sig[i], shift);
+    }
+    return shift;
+}
+
+static int code_lsbs(ec_enc *enc, oac_int32 *lsbs, int frame_size, int shift) {
+    int s, i;
+    for (s=0;s<shift;s++) {
+        for (i=0;i<frame_size;i++) {
+            oaci_ec_enc_bits(enc, (lsbs[i] >> (shift - s - 1)) & 1, 1 );
+        }
+    }
+    return 0;
+}
+
 int olac_encoder_init(OlacEncoder *st, int channels, int sampling_rate) {
     st->nb_channels = channels;
     st->sampling_rate = sampling_rate;
@@ -428,6 +453,7 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
     oac_uint32 lsb_mask=0;
     int ctz=0;
     oac_int32 sig[FRAME_SIZE];
+    oac_int32 lsbs[FRAME_SIZE];
     oac_int32 residual[FRAME_SIZE];
     oac_int32 ref[FRAME_SIZE];
     oaci_ec_enc_init(&enc, data, nbCompressedBytes);
@@ -438,6 +464,7 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
     }
     oaci_ec_enc_uint(&enc, ctz, 25);
     for (c=0;c<st->nb_channels;c++) {
+        int shift;
         for (i=0;i<frame_size;i++) {
             sig[i] = OLAC_SHR32(pcm[i*st->nb_channels+c], ctz);
         }
@@ -452,8 +479,12 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
         st->last_last_sample[c] = sig[frame_size-1];
         olac_preemphasis(sig, frame_size, &st->pmem[c]);
         tdac(sig, frame_size, st->tdac_mem[c]);
+        shift = downshift_signal(sig, lsbs, frame_size, 12);
+        celt_assert(shift < 16);
+        oaci_ec_enc_bits(&enc, shift, 4);
         predict(&enc, residual, sig, frame_size, st->last_ctz, ctz);
         code_residual(&enc, residual, frame_size, (c==0) ? NULL : ref);
+        code_lsbs(&enc, lsbs, frame_size, shift);
         OAC_COPY(ref, residual, frame_size);
     }
     if (!enc.error) {

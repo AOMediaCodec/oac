@@ -137,7 +137,7 @@ oac_int16 rc_factor(oac_int32 rc) {
     return olac_sqrt(IMAX(1<<24, x2));
 }
 
-#if 0
+#ifdef TEST_OLAC
 int main() {
     int i;
     int packet_len;

@@ -207,6 +207,20 @@ static int decode_residual(ec_dec *dec, oac_int32 *residual, int len, oac_int32 
     return 0;
 }
 
+static int decode_lsbs(ec_dec *dec, oac_int32 *sig, int frame_size, int shift) {
+    int s, i;
+    oac_int32 lsbs[FRAME_SIZE]={0};
+    for (s=0;s<shift;s++) {
+        for (i=0;i<frame_size;i++) {
+            lsbs[i] |= oaci_ec_dec_bits(dec, 1 ) << (shift - s - 1);
+        }
+    }
+    for (i=0;i<frame_size;i++) {
+        sig[i] = (sig[i] << shift) | lsbs[i];
+    }
+    return 0;
+}
+
 int olac_decoder_init(OlacDecoder *st, int channels, int sampling_rate) {
     st->last_ctz = 0;
     st->nb_channels = channels;
@@ -230,11 +244,14 @@ oac_int32 olac_decode(OlacDecoder *st, const unsigned char *data, int len, oac_i
     for (c=0;c<st->nb_channels;c++) {
         int i;
         int modulo, offset;
+        int shift;
         modulo = oaci_ec_dec_uint(&dec, PREEMPH_MOD);
+        shift = oaci_ec_dec_bits(&dec, 4);
         order = unquantize_coefs(&dec, rc);
         if (order < 0) return OAC_INVALID_PACKET;
         if (decode_residual(&dec, residual, frame_size, (c==0) ? NULL : ref)) return OAC_INVALID_PACKET;
         syn_filter(sig, residual, frame_size, rc, order, st->last_ctz, ctz);
+        decode_lsbs(&dec, sig, frame_size, shift);
         untdac(sig, frame_size, st->untdac_mem[c]);
         offset = (st->dmem[c] - modulo) % PREEMPH_MOD;
         if (offset < 0) offset += PREEMPH_MOD;
