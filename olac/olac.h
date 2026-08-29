@@ -51,6 +51,8 @@
 #define OLAC_COEF_SCALE (1<<OLAC_COEF_SHIFT)
 #define RC_SHIFT 20
 #define RC_SCALE (1<<RC_SHIFT)
+#define SIGNAL_BITS 13
+#define COEF_BITS 13
 
 extern oac_int32 lift_p[];
 extern oac_int32 lift_q[];
@@ -108,6 +110,8 @@ float olac_burg_analysis(              /* O    returns residual energy          
 );
 
 oac_int16 rc_factor(oac_int32 rc);
+
+int aks_downshift(const oac_int32 *aks, oac_int16 *aks16, int order);
 
 void olac_aks_from_rc(oac_int32 *aks, const oac_int32 *rc, int order);
 

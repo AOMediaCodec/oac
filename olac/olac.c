@@ -137,6 +137,25 @@ oac_int16 rc_factor(oac_int32 rc) {
     return olac_sqrt(IMAX(1<<24, x2));
 }
 
+int aks_downshift(const oac_int32 *aks, oac_int16 *aks16, int order) {
+    int i;
+    int N;
+    int maxval = 1;
+    int shift;
+    N = order*(order+1)/2;
+    for (i=0;i<N;i++) {
+        if ((oac_int32)OLAC_ABS(aks[i]) > maxval) {
+            maxval = OLAC_ABS(aks[i]);
+        }
+    }
+    shift = EC_ILOG(maxval) - COEF_BITS;
+    if (shift < 0) shift = 0;
+    for (i=0;i<N;i++) {
+        aks16[i] = OLAC_PSHR32(aks[i], shift);
+    }
+    return shift;
+}
+
 #ifdef TEST_OLAC
 int main() {
     int i;
