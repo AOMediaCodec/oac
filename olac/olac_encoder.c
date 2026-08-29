@@ -94,13 +94,13 @@ static void pred_filter(oac_int32 *out, const oac_int32 *in, int len, const oac_
     oac_int16 aks16[PRED_ORDER*(PRED_ORDER+1)/2];
     int i;
     int shift;
-    oac_int32 mem[PRED_ORDER] = {0};
+    oac_int16 mem[PRED_ORDER] = {0};
     olac_aks_from_rc(aks, rc, order);
     shift = aks_downshift(aks, aks16, order);
     for (i=0;i<len;i++) {
         int j;
         int offset;
-        oac_int64 pred = 0;
+        oac_int32 pred = 0;
         if (i==HALF_OVERLAP && last_ctz != curr_ctz) {
             if (last_ctz > curr_ctz) {
                 for (j=0;j<order;j++) mem[j] = OLAC_SHL32(mem[j], last_ctz-curr_ctz);
@@ -111,9 +111,9 @@ static void pred_filter(oac_int32 *out, const oac_int32 *in, int len, const oac_
         offset = order*(order-1)/2;
         if (i < order) offset = i*(i-1)/2;
         for (j=0;j<order;j++) {
-            pred += mem[j]*(oac_int64)aks16[offset + j];
+            pred = OLAC_MAC16_16(pred, mem[j], aks16[offset + j]);
         }
-        out[i] = in[i] - OLAC_PSHR64(pred, OLAC_COEF_SHIFT-shift);
+        out[i] = in[i] - OLAC_PSHR32(pred, OLAC_COEF_SHIFT-shift);
         for (j=order-2;j>=0;j--) {
             mem[j+1] = mem[j];
         }

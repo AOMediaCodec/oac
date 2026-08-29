@@ -51,7 +51,7 @@
 #define OLAC_COEF_SCALE (1<<OLAC_COEF_SHIFT)
 #define RC_SHIFT 20
 #define RC_SCALE (1<<RC_SHIFT)
-#define SIGNAL_BITS 13
+#define SIGNAL_BITS 12
 #define COEF_BITS 13
 
 extern oac_int32 lift_p[];
@@ -73,6 +73,8 @@ extern oac_int8 rc_scale[PRED_ORDER];
 #define OLAC_MUL16_16_Q15(a, b) (((oac_int32)(a)*(oac_int32)(b)) >> 15)
 #define OLAC_MUL16_16_P15(a, b) (((oac_int32)(a)*(oac_int32)(b)+(1<<14)) >> 15)
 #define OLAC_MUL16_32_P15(a, b) (((oac_int64)(a)*(oac_int64)(b)+(1<<14)) >> 15)
+
+#define OLAC_MAC16_16(c,a,b) ((oac_int32)(c) + ((oac_int32)(oac_int16)(a)*(oac_int16)(b)))
 
 #define MOD(a, b) (((a)%(b)+(b))%(b))
 
