@@ -256,19 +256,62 @@ static void predict(ec_enc *enc, oac_int32 *residual, const oac_int32 *pcm, int 
 #endif
 }
 
+static oac_int32 res_max(oac_int32 *res, int frame_size) {
+    int i;
+    oac_int32 maxval=1;
+    for (i=0;i<frame_size;i++) {
+        if ((oac_int32)OLAC_ABS(res[i]) > maxval) maxval = OLAC_ABS(res[i]);
+    }
+    return maxval;
+}
+
 static void find_residual_params(const oac_int32 *residual, int len, int *s_ptr, int *t_ptr, int *split_ptr) {
     int s, i;
     oac_int32 res[FRAME_SIZE];
     oac_int32 L[MAX_SHIFT+1] = {0};
     oac_int32 R[MAX_SHIFT+1] = {0};
     oac_int32 min_bits = 2000000000;
+    int max_shift, min_shift;
     int best_s = 0, best_t = 0, best_split = 0;
 
     for (i=0; i<len; i++) {
         res[i] = 2*OLAC_ABS(residual[i]) - (residual[i]<0);
     }
+
+    max_shift = EC_ILOG(res_max(res, len))-1;
+    max_shift = IMIN(MAX_SHIFT, IMAX(1, max_shift));
+    {
+        oac_int32 left=0, right=0;
+        oac_int32 lbest, rbest;
+        oac_int32 best;
+        int lpos, rpos;
+        for (i=0;i<IMIN(8,len);i++) {
+            left += res[i];
+            right += res[len-i-1];
+        }
+        rbest = right;
+        lbest = left;
+        rpos = 8;
+        lpos = 8;
+        for (i=8;i<len/2;i++) {
+            left += res[i];
+            right += res[len-i-1];
+            if (left*lpos < lbest*i) {
+                lbest = left;
+                lpos = i;
+            }
+            if (right*rpos < rbest*i) {
+                rbest = right;
+                rpos = i;
+            }
+        }
+        best = IMIN(lbest/lpos, rbest/rpos);
+        if (best == 0) min_shift = 0;
+        else min_shift = IMAX(1, EC_ILOG(best)-1);
+        min_shift = IMIN(min_shift, max_shift);
+    }
     /* 1. Calculate bits and initial right-side totals (entire frame) */
-    for (s=0; s<=MAX_SHIFT; s++) {
+    for (s=min_shift; s<=max_shift; s++) {
         for (i=0; i<len; i++) {
             oac_int32 b;
             int s2 = s - 1 + (i<4) + (i==0);
@@ -283,7 +326,7 @@ static void find_residual_params(const oac_int32 *residual, int len, int *s_ptr,
     }
 
     /* 2. Establish NO SPLIT baseline */
-    for (s=0; s<=MAX_SHIFT; s++) {
+    for (s=min_shift; s<=max_shift; s++) {
         if (R[s] + 1 < min_bits) {
             min_bits = R[s] + 1;
             best_s = s;
@@ -298,7 +341,7 @@ static void find_residual_params(const oac_int32 *residual, int len, int *s_ptr,
         int min_R = 2000000000, local_t = 0;
 
         /* Shift one element, and track the independent minimums */
-        for (s=0; s<=MAX_SHIFT; s++) {
+        for (s=min_shift; s<=max_shift; s++) {
             oac_int32 b;
             int s2 = s - 1 + (i<4) + (i==0);
             if (s > 0) {
@@ -330,6 +373,7 @@ static void find_residual_params(const oac_int32 *residual, int len, int *s_ptr,
             best_split = i+1;
         }
     }
+    /*printf("%d %d %d %d\n", IMIN(best_t, best_s), IMAX(best_s, best_t), max_shift, min_shift);*/
 
     min_bits += OLAC_ABS(best_s-best_t);
     *s_ptr = best_s;
