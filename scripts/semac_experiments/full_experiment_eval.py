@@ -2,12 +2,12 @@
 """Score the SEMAC transport factorial with BINAQUAL.
 
 Reads every coded render under $WORK/binaural/alloc_*/*kbits/ and scores it against the uncoded
-3rd-order reference for the same signal, writing $WORK/results.csv.
+uncoded reference of the same order for the same signal, writing $WORK/results.csv.
 
 Filename shape:
-  {sig}_Ambix3_semac_{shd|beam}_{norm|nonorm}_{tc}_alloc{1|0p5|equal}_{256kb|512kb|768kb}_bin.wav
+  {sig}_Ambix{N}_semac_{shd|beam}_{norm|nonorm}_{tc}_alloc{1|equal}_{256kb|512kb|768kb}_bin.wav
 
-The alloc tag encodes SEMAC_ALLOC_LAMBDA: 1 -> 1.0, 0p5 -> 0.5, equal -> 0.0 (equal split).
+The alloc tag encodes SEMAC_ALLOC_LAMBDA: 1 -> 1.0, equal -> 0.0 (equal split).
 Run render_cmf3.sh + score_cmf3.py for the baseline this is compared against.
 """
 
@@ -28,31 +28,26 @@ from bq_score import score_file  # noqa: E402
 from scipy import stats  # noqa: E402
 
 # ============================= SITE CONFIGURATION ============================================
-# Must match WORK in run_full_experiment_factorial.sh.
-EXP = f"/data/users/{getpass.getuser()}/scratch/oac_run/full_experiment"
+# Must match WORK in run_full_experiment_factorial.sh; SEMAC_EXP points a sweep at its own tree.
+EXP = os.environ.get(
+    "SEMAC_EXP", f"/data/users/{getpass.getuser()}/scratch/oac_run/full_experiment"
+)
 NJOBS = 16
 # =============================================================================================
 
-SIGNALS = [
-    "BandDry",
-    "BandWet",
-    "Clapping",
-    "MachineAer",
-    "MovingPink",
-    "Orchestra",
-    "Scene",
-    "Eigenmike",
-]
+# Authoritative: the render glob is filtered on this list. Keep in step with SEMAC_SIGNALS in
+# run_full_experiment_factorial.sh.
+SIGNALS = os.environ.get(
+    "SEMAC_SIGNALS",
+    "BandDry BandWet Clapping MachineAer MovingPink Orchestra Scene",
+).split()
 NORMS = ["norm", "nonorm"]
 DOMAINS = ["shd", "beam"]
-TCS = ["tc4", "tc9", "tc16"]
 BRATES = ["256kb", "512kb", "768kb"]
-ALLOCS = ["equal", "0p5", "1"]
+ALLOCS = ["equal", "1"]
 
-TCRIT = stats.t.ppf(0.975, df=len(SIGNALS) - 1)
-TC_ORDER = {tc: i for i, tc in enumerate(TCS)}
 PAT = re.compile(
-    r"(?P<sig>.+?)_Ambix3_semac_(?P<dom>shd|beam)_(?P<norm>nonorm|norm)"
+    r"(?P<sig>.+?)_Ambix(?P<order>\d+)_semac_(?P<dom>shd|beam)_(?P<norm>nonorm|norm)"
     r"_(?P<tc>tc\d+)_alloc(?P<alloc>[0-9a-z]+)_(?P<br>\d+kb)(?:_bin)?$"
 )
 
@@ -60,7 +55,9 @@ PAT = re.compile(
 def score(path):
     m = PAT.match(Path(path).stem)
     sig = m.group("sig")
-    lag, ls = score_file(path, f"{EXP}/binaural/ref/{sig}_Ambix3_ref_bin.wav")
+    # The reference carries the same Ambix{N} tag as the item.
+    ref = f"{EXP}/binaural/ref/{sig}_Ambix{m.group('order')}_ref_bin.wav"
+    lag, ls = score_file(path, ref)
     return dict(
         sig=sig,
         norm=m.group("norm"),
@@ -78,11 +75,22 @@ def mean_ci(values):
     a = np.asarray(values, float)
     if a.size == 0:
         return float("nan"), float("nan")
-    return a.mean(), (a.std(ddof=1) / np.sqrt(a.size) * TCRIT if a.size > 1 else 0.0)
+    if a.size < 2:
+        return a.mean(), 0.0
+    # t from the actual sample size, so the CI tracks the data rather than the declared list.
+    tcrit = stats.t.ppf(0.975, df=a.size - 1)
+    return a.mean(), a.std(ddof=1) / np.sqrt(a.size) * tcrit
 
 
 def main():
-    jobs = sorted(glob.glob(f"{EXP}/binaural/alloc_*/*kbits/*_semac_*_bin.wav"))
+    # Filtered, not "whatever is on disk": renders from another configuration must not be averaged in.
+    jobs = sorted(
+        p
+        for p in glob.glob(f"{EXP}/binaural/alloc_*/*kbits/*_semac_*_bin.wav")
+        if (m := PAT.match(Path(p).stem))
+        and m.group("sig") in SIGNALS
+        and m.group("alloc") in ALLOCS
+    )
     if not jobs:
         raise SystemExit(
             f"no renders found under {EXP}/binaural/alloc_*/ "
@@ -110,13 +118,14 @@ def main():
         )
 
     nsig = len({r["sig"] for r in rows})
+    tcs = sorted({r["tc"] for r in rows}, key=lambda t: int(t[2:]))
     print(f"\n=== BINAQUAL LS by allocation lambda, mean over {nsig} signals ===")
     for norm in NORMS:
         for dom in DOMAINS:
             print(f"\n#### spatial_norm={norm}  domain={dom} ####")
             for br in BRATES:
-                print(f"-- {br} --      {'equal':>13} {'a0p5':>13} {'a1':>13}")
-                for tc in TCS:
+                print(f"-- {br} --      {'equal':>13} {'a1':>13}")
+                for tc in tcs:
                     means = [cell(norm, dom, tc, br, a)[0] for a in ALLOCS]
                     print(f"  {tc:>4}: " + " ".join(f"{m:13.3f}" for m in means))
 
@@ -131,7 +140,7 @@ def main():
             key=lambda x: (
                 x["norm"],
                 x["dom"],
-                TC_ORDER[x["tc"]],
+                int(x["tc"][2:]),
                 x["bitrate"],
                 x["alloc"],
                 x["sig"],

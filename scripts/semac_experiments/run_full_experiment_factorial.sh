@@ -1,56 +1,77 @@
 #!/bin/bash
-# SEMAC transport factorial. Input and output are ALWAYS 3rd-order (16ch); what varies is the
-# TRANSPORT the codec squeezes them through:
+# SEMAC transport factorial. Input and output are the same ambisonic order (REFERENCE_ORDER below);
+# what varies is the TRANSPORT the codec squeezes them through:
 #
-#   transport order   tc4 / tc9 / tc16     (4, 9 or 16 transport channels)
+#   transport order   tc4 / tc9 / tc16 / tc25 / tc36   ((n+1)^2 transport channels)
 #   transport domain  shd / beam           (spherical-harmonic or beam-projection)
 #   spatial norm      norm / nonorm        (SEMAC_SPATIAL_NORMALIZATION on/off)
-#   allocation        alloc_1 / alloc_0p5 / alloc_equal   (SEMAC_ALLOC_LAMBDA 1.0 / 0.5 / 0.0)
+#   allocation        alloc_1 / alloc_equal   (SEMAC_ALLOC_LAMBDA 1.0 / 0.0)
 #   total bitrate     256k / 512k / 768k
 #
-# 8 signals x 2 domains x 3 transport orders x 3 bitrates x 2 norms x 3 allocations = 864 items.
-# Norm and allocation are COMPILE-TIME (semac.h is edited and the codec rebuilt for each of the 6
-# combinations); transport order and domain are runtime flags.
+# 7 signals x 2 domains x 5 transport orders x 3 bitrates x 2 norms x 2 allocations = 840 items at
+# the default REFERENCE_ORDER=5. Norm and allocation are COMPILE-TIME (semac.h is edited and the codec
+# rebuilt for each of the 4 combinations); transport order and domain are runtime flags.
 #
 # This experiment holds the TOTAL bitrate fixed, so a smaller transport means more bits per
 # channel. That confound is what the separate per-channel-rate study exists to remove -- keep the
 # two straight when comparing results.
 #
-# Encoding is VBR. The -cbr option did not exist when these results were produced.
+# Encoding is VBR.
 #
 # Run order:  this script -> full_experiment_eval.py -> render_cmf3.sh -> score_cmf3.py
-# Layout:     $WORK/{ambix,binaural}/alloc_{1,0p5,equal}/{256,512,768}kbits/
+# Layout:     $WORK/{ambix,binaural}/alloc_{1,equal}/{256,512,768}kbits/
 #             $WORK/{ambix,binaural}/ref/
-# Filename:   {sig}_Ambix3_semac_{shd|beam}_{norm|nonorm}_{tc}_alloc{tag}_{256kb|512kb|768kb}[_bin]
+# Filename:   {sig}_Ambix{N}_semac_{shd|beam}_{norm|nonorm}_{tc}_alloc{tag}_{256kb|512kb|768kb}[_bin]
 set -e
 
 # ============================= SITE CONFIGURATION ============================================
-# Plain constants, no environment variables. Edit these for your machine; the repo root is
-# derived from this script's own location. See README.md for the external dependencies.
+# The repo root is derived from this script's own location. See README.md for external dependencies.
+# Every SEMAC_* override below exists so a sweep can point successive iterations at separate output
+# directories -- without that, every iteration overwrites the same tree.
 DATA=/data/users/$USER                          # data root; edit if your layout differs
-WORK=$DATA/scratch/oac_run/full_experiment      # where renders and results go
-SRC=$DATA/scratch/HOA/AMBIX                     # {signal}_AMBIX.wav 3rd-order sources
+WORK=${SEMAC_WORK:-$DATA/scratch/oac_run/full_experiment}   # where renders and results go
+SRC=${SEMAC_SRC:-$DATA/scratch/HOA/AMBIX}       # {signal}_AMBIX.wav sources, ACN/SN3D, 5th order
 SOFA=$DATA/scratch/HRTFs/HRIR_L2702.sofa        # HRIR set for the binaural render
 RENDER=$DATA/OAC-Meta/render_ambi2bin.py        # ambisonics -> binaural renderer
 PY=$HOME/.conda/envs/test/bin/python            # interpreter with numpy/scipy/soundfile
+REFERENCE_ORDER=${SEMAC_REFERENCE_ORDER:-5}     # SH5. Input = output = reference = decode order.
 # =============================================================================================
+
+# ---- order configuration --------------------------------------------------------------------
+# ONE order governs the study: SEMAC's input, its output and the reference are all at REFERENCE_ORDER.
+# The codec may downmix to a lower TRANSPORT order internally but restores the full order at the
+# decoder, so -transport_order never changes the emitted channel count. Being the reference order it
+# is also the magLS decode order, which is what lets the CMF3 arms -- whose output really does stay at
+# the transport order -- be zero-padded back up exactly (the absent degrees are genuinely zero).
 
 OAC=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)      # repo root
 SH=$OAC/celt/semac.h
 
-SIGNALS="BandDry BandWet Clapping MachineAer MovingPink Orchestra Scene Eigenmike"
+# Eigenmike is excluded: it is a 4th-order recording (25 real channels, zero-padded to 32 in the
+# source file), so it cannot supply the 36 channels a 5th-order condition needs. Keeping it would
+# mean mixing input orders within one condition.
+# Must be kept in step with full_experiment_eval.py, which filters its render glob on the same list.
+SIGNALS=${SEMAC_SIGNALS:-"BandDry BandWet Clapping MachineAer MovingPink Orchestra Scene"}
 DOMAINS="shd beam"
-TORDERS="1 2 3"                  # transport order -> tc4 / tc9 / tc16
-NORMS="norm nonorm"
-ALLOCS="1 0p5 equal"             # folder alloc_<tag>, lambda from LAMBDA below
+TORDERS=${SEMAC_TORDERS:-$(seq -s' ' 1 "$REFERENCE_ORDER")}   # transport order -> tc4 / ... / tc36
+NORMS=${SEMAC_NORMS:-"norm nonorm"}
+ALLOCS=${SEMAC_ALLOCS:-"1 equal"}   # folder alloc_<tag>, lambda from LAMBDA below
 # "<bits per second>:<tag>". The tag goes in the FILENAME as-is; the folder is the tag + "its"
 # (so tag 256kb -> folder 256kbits). Do not change the tags -- the scorer matches on them.
 BRATES="256000:256kb 512000:512kb 768000:768kb"
-NJOBS=8                          # parallel per-item workers; raise to the core count if idle
+NJOBS=${SEMAC_NJOBS:-8}          # parallel per-item workers; raise to the core count if idle
 
-declare -A TC=( [1]=tc4 [2]=tc9 [3]=tc16 )
+declare -A TC=( [1]=tc4 [2]=tc9 [3]=tc16 [4]=tc25 [5]=tc36 )
+# 0p5 is kept here but not in the ALLOCS default, so SEMAC_ALLOCS="1 0p5 equal" still works.
 declare -A LAMBDA=( [1]=1.0 [0p5]=0.5 [equal]=0.0 )
-MAP16=$(seq -s'|' 0 15)
+# The reference order drives the channel count, the ffmpeg channelmap and the Ambix{N} filename tag.
+# AmbiX is ACN-ordered, which is nested by degree, so taking the first (N+1)^2 channels of a
+# higher-order source is exactly the order-N signal -- no separate per-order material is needed.
+IN_CH=$(( (REFERENCE_ORDER + 1) * (REFERENCE_ORDER + 1) ))
+MAP=$(seq -s'|' 0 $((IN_CH - 1)))
+for _t in $TORDERS; do
+  [ "$_t" -le "$REFERENCE_ORDER" ] || { echo "transport order $_t exceeds REFERENCE_ORDER $REFERENCE_ORDER" >&2; exit 1; }
+done
 TMP=/tmp/sem_factorial
 
 # Pin each worker single-threaded so NJOBS workers map to NJOBS cores (no BLAS/FFT oversubscription).
@@ -73,44 +94,45 @@ restore(){
 trap restore EXIT
 
 # ---------------------------------------------------------------------------------------------
-bin_render(){ "$PY" "$RENDER" "$1" "$2" --hrirs_sofa_file "$SOFA" --gain_db -12 >/dev/null 2>&1; }
+# --order is pinned to REFERENCE_ORDER so every item goes through one identical magLS decoder,
+# independent of how many channels the arm emitted. A no-op for the SEMAC arm, which always emits
+# IN_CH channels (verified bit-identical), but load-bearing in render_cmf3.sh.
+bin_render(){ "$PY" "$RENDER" "$1" "$2" --order "$REFERENCE_ORDER" --hrirs_sofa_file "$SOFA" --gain_db -12 >/dev/null 2>&1; }
 throttle(){   while [ "$(jobs -r | wc -l)" -ge "$NJOBS" ]; do wait -n; done; }
 
-# The 16ch input PCM for each signal, first 5 s, built once and shared by every build and job.
+# Built once and shared by every build and job.
 prep_inputs(){
   local s
   for s in $SIGNALS; do
-    ffmpeg -y -i "$SRC/${s}_AMBIX.wav" -ss 0 -to 5 -af "channelmap=map=$MAP16" \
+    ffmpeg -y -i "$SRC/${s}_AMBIX.wav" -ss 0 -to 5 -af "channelmap=map=$MAP" \
        -c:a pcm_s16le -f s16le "$TMP/in_${s}.pcm" 2>/dev/null
   done
 }
 
-# The uncoded 3rd-order reference every coded item is scored against.
 render_refs(){
-  local s
+  local s ref
   for s in $SIGNALS; do
     throttle
-    ( ffmpeg -y -i "$SRC/${s}_AMBIX.wav" -ss 0 -to 5 -af "channelmap=map=$MAP16" \
-         -c:a pcm_s16le "$WORK/ambix/ref/${s}_Ambix3_ref.wav" 2>/dev/null
-      bin_render "$WORK/ambix/ref/${s}_Ambix3_ref.wav" "$WORK/binaural/ref/${s}_Ambix3_ref_bin.wav" ) &
+    ref="$WORK/ambix/ref/${s}_Ambix${REFERENCE_ORDER}_ref.wav"
+    ( ffmpeg -y -i "$SRC/${s}_AMBIX.wav" -ss 0 -to 5 -af "channelmap=map=$MAP" \
+         -c:a pcm_s16le "$ref" 2>/dev/null
+      bin_render "$ref" "$WORK/binaural/ref/${s}_Ambix${REFERENCE_ORDER}_ref_bin.wav" ) &
   done
   wait; echo "  refs done"
 }
 
-# One coded item: encode+decode, wrap the raw PCM as a wav, then binaural render.
 render_one(){
   local sig=$1 dom=$2 torder=$3 bps=$4 tag=$5 norm=$6 alloc=$7
-  local base="${sig}_Ambix3_semac_${dom}_${norm}_${TC[$torder]}_alloc${alloc}_${tag}"
+  local base="${sig}_Ambix${REFERENCE_ORDER}_semac_${dom}_${norm}_${TC[$torder]}_alloc${alloc}_${tag}"
   local pcm="$TMP/out_a${alloc}_${base}.pcm"
   local ambix="$WORK/ambix/alloc_$alloc/${tag}its/$base.wav"
-  "$OAC/oac_ambisonics_compare" semac 48000 16 "$bps" "$TMP/in_${sig}.pcm" "$pcm" \
+  "$OAC/oac_ambisonics_compare" semac 48000 "$IN_CH" "$bps" "$TMP/in_${sig}.pcm" "$pcm" \
      -transport_order "$torder" -domain "$dom" >/dev/null 2>&1
-  ffmpeg -y -f s16le -ar 48000 -ac 16 -i "$pcm" -c:a pcm_s16le "$ambix" 2>/dev/null
+  ffmpeg -y -f s16le -ar 48000 -ac "$IN_CH" -i "$pcm" -c:a pcm_s16le "$ambix" 2>/dev/null
   bin_render "$ambix" "$WORK/binaural/alloc_$alloc/${tag}its/${base}_bin.wav"
   rm -f "$pcm"
 }
 
-# Every coded item for the build that is currently compiled.
 render_all(){
   local norm=$1 alloc=$2 sig dom torder rate
   for sig in $SIGNALS; do for dom in $DOMAINS; do for torder in $TORDERS; do
@@ -134,7 +156,7 @@ for dm in ambix binaural; do for alloc in $ALLOCS; do for rate in $BRATES; do
 done; done; done
 
 echo "prep inputs (NJOBS=$NJOBS)"; prep_inputs
-echo "== references (uncoded 3rd order) =="; render_refs
+echo "== references (uncoded order $REFERENCE_ORDER, $IN_CH ch) =="; render_refs
 
 alloc_on                                  # energy allocation on for the whole factorial
 for alloc in $ALLOCS; do

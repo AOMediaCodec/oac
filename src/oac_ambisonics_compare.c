@@ -56,6 +56,18 @@
 /* VBR mode: 1 = variable bitrate (default), 0 = constant (CBR) via -cbr. */
 static int g_vbr = 1;
 
+/* Achieved rate, which differs from nominal (packet overhead, CBR rounding, VBR).
+   coding_channels counts waveform-coded channels, so kbps_per_ch is the core coder's rate. */
+static void report_achieved_rate(long total_bytes, long frames, int frame_size,
+                                 int sampling_rate, int coding_channels) {
+    double seconds, kbps;
+    if (frames <= 0) return;
+    seconds = (double)frames * frame_size / sampling_rate;
+    kbps = total_bytes * 8.0 / seconds / 1000.0;
+    fprintf(stderr, "RATE frames=%ld bytes=%ld total_kbps=%.3f coding_channels=%d kbps_per_ch=%.3f\n",
+            frames, total_bytes, kbps, coding_channels, kbps / coding_channels);
+}
+
 static void print_usage(const char *progname) {
     fprintf(stderr, "Usage: %s <mode> <sampling_rate> <channels> <bitrate> <input.pcm> <output.pcm> [options]\n", progname);
     fprintf(stderr, "\n");
@@ -92,6 +104,7 @@ static int encode_decode_mapping2(int sampling_rate, int channels, int bitrate,
 
     int frame_size = sampling_rate / 50;  /* 20ms frames */
     int in_samples;
+    long total_bytes = 0, frames = 0;
 
     fprintf(stderr, "=== Mapping Family 2 (Standard Ambisonics Multistream) ===\n");
     fprintf(stderr, "  Sampling rate: %d Hz\n", sampling_rate);
@@ -148,6 +161,9 @@ static int encode_decode_mapping2(int sampling_rate, int channels, int bitrate,
             goto cleanup;
         }
 
+        total_bytes += nb_bytes;
+        frames++;
+
         int out_samples = oac_multistream_decode(dec, packet, nb_bytes, outbuf, MAX_FRAME_SIZE, 0);
         if (out_samples < 0) {
             fprintf(stderr, "Error: Decoding failed: %s\n", oac_strerror(out_samples));
@@ -158,6 +174,7 @@ static int encode_decode_mapping2(int sampling_rate, int channels, int bitrate,
         fwrite(outbuf, sizeof(short), out_samples * channels, fout);
     }
 
+    report_achieved_rate(total_bytes, frames, frame_size, sampling_rate, channels);
     fprintf(stderr, "  Done.\n");
 
 cleanup:
@@ -183,6 +200,7 @@ static int encode_decode_mapping3(int sampling_rate, int channels, int bitrate,
 
     int frame_size = sampling_rate / 50;
     int in_samples;
+    long total_bytes = 0, frames = 0;
     int streams, coupled_streams;
     oac_int32 matrix_size;
     oac_int32 matrix_gain_q8 = 0;
@@ -263,6 +281,9 @@ static int encode_decode_mapping3(int sampling_rate, int channels, int bitrate,
             goto cleanup;
         }
 
+        total_bytes += nb_bytes;
+        frames++;
+
         int out_samples = oac_projection_decode(dec, packet, nb_bytes, outbuf, MAX_FRAME_SIZE, 0);
         if (out_samples < 0) {
             fprintf(stderr, "Error: Decoding failed: %s\n", oac_strerror(out_samples));
@@ -273,6 +294,7 @@ static int encode_decode_mapping3(int sampling_rate, int channels, int bitrate,
         fwrite(outbuf, sizeof(short), out_samples * channels, fout);
     }
 
+    report_achieved_rate(total_bytes, frames, frame_size, sampling_rate, channels);
     fprintf(stderr, "  Done.\n");
 
 cleanup:
@@ -299,6 +321,11 @@ static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
 
     int frame_size = sampling_rate / 50;
     int in_samples;
+    long total_bytes = 0, frames = 0;
+    /* transport_order < 0 means "input order", i.e. all input channels are coded. */
+    int coding_channels = transport_order < 0 ? channels
+        : (transport_order + 1) * (transport_order + 1);
+    if (coding_channels > channels) coding_channels = channels;
 
     fprintf(stderr, "=== SEMAC ===\n");
     fprintf(stderr, "  Sampling rate: %d Hz\n", sampling_rate);
@@ -360,6 +387,9 @@ static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
             goto cleanup;
         }
 
+        total_bytes += nb_bytes;
+        frames++;
+
         int out_samples = oac_decode(dec, packet, nb_bytes, outbuf, MAX_FRAME_SIZE, 0);
         if (out_samples < 0) {
             fprintf(stderr, "Error: Decoding failed: %s\n", oac_strerror(out_samples));
@@ -370,6 +400,7 @@ static int encode_decode_semac(int sampling_rate, int channels, int bitrate,
         fwrite(outbuf, sizeof(short), out_samples * channels, fout);
     }
 
+    report_achieved_rate(total_bytes, frames, frame_size, sampling_rate, coding_channels);
     fprintf(stderr, "  Done.\n");
 
 cleanup:
