@@ -1389,6 +1389,10 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
               oaci_unquant_fine_energy(mode, start, end, oldSpatialBandE, NULL, spatial_fine_quant, dec, num_beams);
           }
        }
+#ifdef SEMAC_ENVELOPE_SIDECAR
+       /* Envelope was not in the bitstream: pick it up from the side channel instead. */
+       oaci_semac_sidecar_get(oldSpatialBandE, num_beams * nbEBands);
+#endif
     }
 #endif
 

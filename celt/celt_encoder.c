@@ -87,6 +87,9 @@
 #ifdef ENABLE_SEMAC
 #include "semac.h"
 #endif
+#ifdef SEMAC_TRACE_ENVELOPE_BITS
+#include <stdio.h>
+#endif
 #include "rate.h"
 #include "stack_alloc.h"
 #include "mathops.h"
@@ -2318,6 +2321,9 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
        bits to PVQ accordingly. */
     if (semac_active) {
        oac_int32 spatial_budget;
+#ifdef SEMAC_TRACE_ENVELOPE_BITS
+       int spatial_tell0 = oaci_ec_tell(enc);
+#endif
        spatial_budget = nbCompressedBytes*8;
        /* Skip the redundant envelope for beam full-transport, freeing the bits for the shapes. */
        if (!oaci_semac_envelope_skipped(semac_domain, coding_channels, num_beams))
@@ -2339,6 +2345,16 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
            oaci_quant_fine_energy(mode, start, end, oldSpatialBandE, spatialError, NULL, spatial_fine_quant, enc, num_beams);
        }
      }
+#ifdef SEMAC_ENVELOPE_SIDECAR
+       /* Envelope leaves the bitstream entirely (skipped above): hand it to the decoder
+          unquantised, spending no bits, so the core coder keeps the whole budget. */
+       oaci_semac_sidecar_put(spatialBandLogE, num_beams * nbEBands);
+#endif
+#ifdef SEMAC_TRACE_ENVELOPE_BITS
+       /* Outside the skip test, so this reports the envelope's true in-band cost in every
+          configuration -- 0 when it is skipped or carried out of band. */
+       fprintf(stderr, "SPENV beams=%d bits=%d\n", num_beams, oaci_ec_tell(enc) - spatial_tell0);
+#endif
     }
 #endif
 

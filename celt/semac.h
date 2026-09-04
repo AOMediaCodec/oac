@@ -116,20 +116,71 @@ static OAC_INLINE int oaci_semac_get_channels(int order)
    return (order + 1) * (order + 1);
 }
 
-/** True when the spatial envelope is redundant, so it is neither coded nor restored: the beam
-    domain at FULL transport in the non-normalized regime (transport carries the natural per-beam
-    energy, already coded by CELT). Never in the normalized regime (whitened transport needs the
-    envelope). Encoder and decoder agree, so no signalling is needed. */
+/* Experiment override for the envelope decision below. AUTO is the shipping behaviour; the
+   FORCE_* values exist so an ablation can hold the envelope on or off across every regime.
+   FORCE_OFF is only meaningful without SEMAC_SPATIAL_NORMALIZATION -- a whitened transport
+   gives the decoder no other way to restore level. */
+#define SEMAC_ENVELOPE_AUTO      0
+#define SEMAC_ENVELOPE_FORCE_ON  1
+#define SEMAC_ENVELOPE_FORCE_OFF 2
+#define SEMAC_ENVELOPE_OVERRIDE SEMAC_ENVELOPE_AUTO
+
+/* Trace the coded size of the spatial envelope to stderr, one "SPENV beams=N bits=M" line per
+   frame, for calibrating its rate. Off by default (per-frame and noisy). */
+/* #define SEMAC_TRACE_ENVELOPE_BITS */
+
+/* DEBUG ONLY. Carry the envelope out of band through a process-local side channel instead of
+   coding it into the bitstream, so the core coder gets the whole budget and arms with and without
+   restoration share an identical core bitstream. Two deliberate consequences:
+     - the envelope is passed UNQUANTISED, so this measures what a perfect envelope buys, an upper
+       bound on the shipped 0.75 dB one;
+     - its rate is NOT accounted anywhere.
+   Requires encode and decode to run in one process, in lockstep (as oac_ambisonics_compare does).
+   Never a shippable configuration. */
+/* #define SEMAC_ENVELOPE_SIDECAR */
+
+/** True when the spatial envelope is not carried in the bitstream, so neither side codes it:
+    the beam domain at FULL transport in the non-normalized regime (transport carries the natural
+    per-beam energy, already coded by CELT), or any regime under the overrides above. Never in the
+    normalized regime (whitened transport needs the envelope). Encoder and decoder agree, so no
+    signalling is needed. */
 static OAC_INLINE int oaci_semac_envelope_skipped(int transport_domain, int coding_channels,
    int num_beams)
 {
-#ifdef SEMAC_SPATIAL_NORMALIZATION
+#ifdef SEMAC_ENVELOPE_SIDECAR
+   (void)transport_domain; (void)coding_channels; (void)num_beams;
+   return 1;                    /* out of band instead -- see oaci_semac_envelope_absent */
+#elif SEMAC_ENVELOPE_OVERRIDE != SEMAC_ENVELOPE_AUTO
+   (void)transport_domain; (void)coding_channels; (void)num_beams;
+   return SEMAC_ENVELOPE_OVERRIDE == SEMAC_ENVELOPE_FORCE_OFF;
+#elif defined(SEMAC_SPATIAL_NORMALIZATION)
    (void)transport_domain; (void)coding_channels; (void)num_beams;
    return 0;
 #else
    return transport_domain == SEMAC_DOMAIN_BEAM && coding_channels == num_beams;
 #endif
 }
+
+/** True when NO valid envelope is available at the decoder, so re-imposition must collapse to
+    identity. Normally the same condition as oaci_semac_envelope_skipped, but the sidecar carries
+    a valid envelope out of band, so "not in the bitstream" and "not available" diverge there. */
+static OAC_INLINE int oaci_semac_envelope_absent(int transport_domain, int coding_channels,
+   int num_beams)
+{
+#ifdef SEMAC_ENVELOPE_SIDECAR
+   (void)transport_domain; (void)coding_channels; (void)num_beams;
+   return 0;
+#else
+   return oaci_semac_envelope_skipped(transport_domain, coding_channels, num_beams);
+#endif
+}
+
+#ifdef SEMAC_ENVELOPE_SIDECAR
+/** Stash / fetch one frame's per-beam band log-energies on the out-of-band side channel.
+    n = num_beams * nbEBands. */
+void oaci_semac_sidecar_put(const celt_glog *spatialLogE, int n);
+void oaci_semac_sidecar_get(celt_glog *spatialLogE, int n);
+#endif
 
 /** Get the SPFB from_shd projection matrix (ambisonics -> beams) for the given order.
     Returns NULL if the order is unsupported. */
