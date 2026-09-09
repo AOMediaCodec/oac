@@ -34,6 +34,19 @@ if not extra_programs.disabled()
                install: false)
   endforeach
 
+  executable('olac_demo',
+             ['../olac/olac_demo.c',
+              '../olac/olac.c',
+              '../olac/olac_encoder.c',
+              '../olac/olac_decoder.c',
+              '../olac/olac_lpc.c',
+              '../celt/entenc.c',
+              '../celt/entdec.c',
+              '../celt/entcode.c'],
+             include_directories: oac_includes,
+             dependencies: libm,
+             install: false)
+
   if opt_custom_modes
     executable('oac_custom_demo', '../celt/oac_custom_demo.c',
                include_directories: oac_includes,
