@@ -14,7 +14,7 @@ host_cpu_family = host_machine.cpu_family()
 top_srcdir = meson.current_source_dir()
 top_builddir = meson.current_build_dir()
 
-oac_includes = include_directories('.', 'include', 'celt', 'silk', 'dnn')
+oac_includes = include_directories('.', 'include', 'celt', 'silk', 'dnn', 'olac')
 oac_public_includes = include_directories('include')
 
 add_project_arguments('-DOAC_BUILD', language: 'c')

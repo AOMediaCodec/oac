@@ -55,6 +55,7 @@ get_oac_sources(DNN_SOURCES_DOTPROD lpcnet_sources.mk dnn_sources_arm_dotprod)
 get_oac_sources(DNN_SOURCES_ARM_RTCD lpcnet_sources.mk dnn_sources_arm_rtcd)
 
 get_oac_sources(oac_demo_SOURCES Makefile.am oac_demo_sources)
+get_oac_sources(olac_demo_SOURCES Makefile.am olac_demo_sources)
 get_oac_sources(oac_custom_demo_SOURCES Makefile.am oac_custom_demo_sources)
 get_oac_sources(oac_compare_SOURCES Makefile.am oac_compare_sources)
 get_oac_sources(tests_test_oac_api_SOURCES Makefile.am test_oac_api_sources)

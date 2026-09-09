@@ -165,6 +165,7 @@ noinst_PROGRAMS = celt/tests/test_unit_cwrs32 \
                   celt/tests/test_unit_types \
                   oac_compare \
                   oac_demo \
+                  olac_demo \
                   repacketizer_demo \
                   silk/tests/test_unit_LPC_inv_pred_gain \
                   tests/test_oac_api \
@@ -199,6 +200,10 @@ oac_demo_SOURCES += $(LOSSGEN_SOURCES)
 endif
 
 oac_demo_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+
+olac_demo_SOURCES = olac/olac_demo.c olac/olac.c olac/olac_encoder.c olac/olac_decoder.c olac/olac_lpc.c celt/entenc.c celt/entdec.c celt/entcode.c
+olac_demo_CFLAGS = $(AM_CFLAGS)
+olac_demo_LDADD = $(LIBM)
 
 repacketizer_demo_SOURCES = src/repacketizer_demo.c
 
