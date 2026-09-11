@@ -310,6 +310,7 @@ target_include_directories(
           ${CMAKE_CURRENT_SOURCE_DIR}
           ${CMAKE_CURRENT_SOURCE_DIR}/dnn
           celt
+          olac
           silk)
 
 target_link_libraries(oac PRIVATE ${OAC_REQUIRED_LIBRARIES})
