@@ -91,22 +91,16 @@ jobs:
             args: "-DCMAKE_TOOLCHAIN_FILE=${ANDROID_HOME}/ndk/${NDK_VERSION}/build/cmake/android.toolchain.cmake -DANDROID_ABI=x86_64 -DBUILD_SHARED_LIBS=ON"
           }
         - {
-            name: "Windows/Dll/X86/Release",
-            os: windows-latest,
-            config: Release,
-            args: -G "Visual Studio 17 2022" -A Win32 -DBUILD_SHARED_LIBS=ON
-          }
-        - {
             name: "Windows/Dll/X64/Release",
             os: windows-latest,
             config: Release,
-            args: -G "Visual Studio 17 2022" -A Win32 -DBUILD_SHARED_LIBS=ON
+            args: -G "Visual Studio 18 2026" -A x64 -DBUILD_SHARED_LIBS=ON
           }
         - {
             name: "Windows/Dll/ARMv8/Release",
             os: windows-latest,
             config: Release,
-            args: -G "Visual Studio 17 2022" -A ARM64 -DBUILD_SHARED_LIBS=ON
+            args: -G "Visual Studio 18 2026" -A ARM64 -DBUILD_SHARED_LIBS=ON
           }
         - {
             name: "Linux/So/X64/Release",
@@ -141,22 +135,16 @@ jobs:
             args: -G "Unix Makefiles" -DBUILD_FRAMEWORK=ON -DCMAKE_INSTALL_PREFIX=install -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64
           }
         - {
-            name: "Windows/Lib/X86/Release",
-            os: windows-latest,
-            config: Release,
-            args: -G "Visual Studio 17 2022" -A Win32
-          }
-        - {
             name: "Windows/Lib/X64/Release",
             os: windows-latest,
             config: Release,
-            args: -G "Visual Studio 17 2022" -A Win32
+            args: -G "Visual Studio 18 2026" -A x64
           }
         - {
             name: "Windows/Lib/armv8/Release",
             os: windows-latest,
             config: Release,
-            args: -G "Visual Studio 17 2022" -A ARM64
+            args: -G "Visual Studio 18 2026" -A ARM64
           }
         - {
             name: "Linux/Lib/X64/Release",
@@ -212,7 +200,7 @@ jobs:
             name: "AssertionsFuzz/Windows/Lib/X64/Release",
             os: windows-latest,
             config: Release,
-            args: -G "Visual Studio 17 2022" -A Win32 -DOAC_ASSERTIONS=ON -DOAC_FUZZING=ON
+            args: -G "Visual Studio 18 2026" -A x64 -DOAC_ASSERTIONS=ON -DOAC_FUZZING=ON
           }
         - {
             name: "AssertionsFuzz/Linux/Lib/X64/Release",

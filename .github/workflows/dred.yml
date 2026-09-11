@@ -18,13 +18,13 @@ jobs:
             name: "Windows/Lib/X64/Release",
             os: windows-latest,
             config: Release,
-            args: -G "Visual Studio 17 2022" -DOAC_X86_PRESUME_AVX2=ON
+            args: -G "Visual Studio 18 2026" -A x64 -DOAC_X86_PRESUME_AVX2=ON
           }
         - {
            name: "Windows/Lib/armv8/Release",
            os: windows-latest,
            config: Release,
-           args: -G "Visual Studio 17 2022" -A ARM64
+           args: -G "Visual Studio 18 2026" -A ARM64
           }
         - {
             name: "Linux/Lib/X64/Release",
