@@ -255,4 +255,3 @@ float olac_burg_analysis(              /* O    returns residual energy          
     /*return nrg_f;*/
     return invGain;
 }
-
