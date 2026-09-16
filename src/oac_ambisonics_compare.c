@@ -42,6 +42,8 @@
 #include "oac.h"
 #include "oac_multistream.h"
 #include "oac_projection.h"
+/* Internal header: OAC_SET_FORCE_MODE / MODE_CELT_ONLY are not part of the public API. */
+#include "oac_private.h"
 
 #ifndef ENABLE_SEMAC
 /* OAC_SEMAC_DOMAIN_* are gated on ENABLE_SEMAC in oac_defines.h; define them here so this
@@ -234,6 +236,21 @@ static int encode_decode_mapping3(int sampling_rate, int channels, int bitrate,
     oac_projection_encoder_ctl(enc, OAC_SET_BITRATE(bitrate));
     oac_projection_encoder_ctl(enc, OAC_SET_VBR(g_vbr));
     oac_projection_encoder_ctl(enc, OAC_SET_COMPLEXITY(10));
+    /* Force CELT on every stream so this arm is a transform-coding baseline, matching SEMAC.
+       Without it each stream picks its own mode from its own (small) share of the rate: at 320 kb/s
+       over 36 channels that is 17.8 kb/s per stereo stream, which Opus routes to SILK at 8 kHz for
+       ~86% of frames. That is a speech coder on spatial components -- it changes the artifact
+       character and band-limits most streams, so the comparison would measure CELT vs SILK rather
+       than the spatial strategy. The library does force CELT for MAPPING_TYPE_AMBISONICS, but the
+       projection encoder inits as MAPPING_TYPE_NONE, so mapping family 3 never gets it. */
+    oac_projection_encoder_ctl(enc, OAC_SET_FORCE_MODE(MODE_CELT_ONLY));
+    /* Also pin fullband. Forcing CELT alone is not enough: each stream still picks its bandwidth
+       from its own small share of the rate and collapses to 4 kHz (CELT_ONLY remaps MEDIUMBAND to
+       NARROWBAND), while SEMAC's single encoder sees the whole rate and stays fullband. The
+       ambisonics branch in the library sets the mode but never the bandwidth -- unlike the surround
+       branch, which scales it by channel count. Pinning both makes this a matched 0-20 kHz
+       transform-coding baseline. */
+    oac_projection_encoder_ctl(enc, OAC_SET_BANDWIDTH(OAC_BANDWIDTH_FULLBAND));
 
     oac_projection_encoder_ctl(enc, OAC_PROJECTION_GET_DEMIXING_MATRIX_SIZE_REQUEST, &matrix_size);
     if (matrix_size <= 0) {

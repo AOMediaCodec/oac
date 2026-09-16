@@ -43,7 +43,7 @@ SIGNALS = os.environ.get(
 ).split()
 NORMS = ["norm", "nonorm"]
 DOMAINS = ["shd", "beam"]
-BRATES = ["256kb", "512kb", "768kb"]
+BRATES = ["256kb", "320kb", "512kb", "768kb"]
 ALLOCS = ["equal", "1"]
 
 PAT = re.compile(

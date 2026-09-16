@@ -36,9 +36,17 @@ EXP = os.environ.get(
 NJOBS = 16
 # =============================================================================================
 
-BRATES = ["256kb", "512kb", "768kb"]
+BRATES = ["256kb", "320kb", "512kb", "768kb"]
 ARMS = ["semaccmf3", "opuscmf3"]
 ARM_ORDER = {arm: i for i, arm in enumerate(ARMS)}
+# Authoritative: the render glob is filtered on this list, so a stale render of a dropped signal
+# cannot leak into the scores. Must match SEMAC_SIGNALS in full_experiment_eval.py and the runners --
+# without it this arm would be averaged over a different signal set than the SEMAC arm, silently
+# breaking every paired comparison.
+SIGNALS = os.environ.get(
+    "SEMAC_SIGNALS",
+    "BandDry BandWet Clapping MachineAer MovingPink Orchestra Scene",
+).split()
 # The arm alternation is explicit so a mis-tagged file fails the match instead of being absorbed
 # into the non-greedy sig group.
 PAT = re.compile(
@@ -64,9 +72,18 @@ def score(path):
     )
 
 
+def wanted(path):
+    """True if this render belongs to the configured signal set."""
+    m = PAT.match(Path(path).stem)
+    return m is not None and m.group("sig") in SIGNALS
+
+
 def main():
     jobs = sorted(
-        p for arm in ARMS for p in glob.glob(f"{EXP}/binaural/{arm}/*kbits/*_bin.wav")
+        p
+        for arm in ARMS
+        for p in glob.glob(f"{EXP}/binaural/{arm}/*kbits/*_bin.wav")
+        if wanted(p)
     )
     if not jobs:
         raise SystemExit(

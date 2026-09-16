@@ -84,14 +84,31 @@ typedef enum {
    (6/2³ = 0.75 dB), meeting the sub-1 dB target for ambisonics spatial coding. */
 #define SPATIAL_FINE_BITS 3
 
-/* Rate-adaptive spatial fine bits, keyed on bits per TRANSPORT CHANNEL per frame — the real
-   driver of transport-shape bit-starvation (at a fixed total rate, a 4-channel transport has 4x
-   the per-channel budget of a 16-channel one). Below 64 kb/s per channel the shapes are starved,
-   so spend one fewer fine bit on the envelope (fb=2, 1.5 dB) and give the freed budget to the
-   shapes; at/above 64 kb/ch keep full precision (fb=3, 0.75 dB). The chosen value is signalled
-   (2 bits/frame) so the decoder needs no per-frame rate inference.
-     bpc = nbCompressedBytes*8 / coding_channels;  1280 bits/ch/frame = 64 kb/ch @ 20 ms. */
-#define SEMAC_SPATIAL_FINE_BITS(bpc) ((bpc) < 1280 ? 2 : SPATIAL_FINE_BITS)
+/* Rate-adaptive spatial fine bits, keyed on the bits per transport channel left for the SHAPES once
+   the envelope is paid for (see oaci_semac_net_bits_per_ch). Fewer fine bits means a coarser
+   envelope (6 dB / 2^fb) and more budget for the shapes. The chosen value is signalled (2 bits/frame)
+   so the decoder needs no per-frame rate inference.
+     960 bits/ch/frame = 48 kb/ch at 20 ms. */
+#define SEMAC_FINE_BITS_2_BPC 960    /* under 48 kb/ch net -> fb=2 (1.5 dB) */
+#define SEMAC_SPATIAL_FINE_BITS(bpc) \
+   ((bpc) < SEMAC_FINE_BITS_2_BPC ? 2 : SPATIAL_FINE_BITS)
+
+/* Projected in-band envelope cost, bits per frame. Coarse runs ~1.65 bits per beam-band and each
+   fine bit exactly one; matches the measured cost to within 0.5% at order 5. This lets the encoder
+   subtract the envelope BEFORE deciding how starved the shape coder is. */
+#define SEMAC_ENVELOPE_BITS_EST(beams, bands, fb) \
+   ((beams) * (165 * (bands) + 100 * (fb) * (bands)) / 100)
+
+/** Bits per transport channel left for the SHAPES once the envelope is paid for. Starvation depends
+    on this, not on the gross per-channel rate: the envelope codes all beams however small the
+    transport is, so gross overstates what the shape coder gets by up to 3x at low rate. */
+static OAC_INLINE int oaci_semac_net_bits_per_ch(int frame_bits, int coding_channels,
+   int num_beams, int nbEBands, int fb)
+{
+   int left = frame_bits - SEMAC_ENVELOPE_BITS_EST(num_beams, nbEBands, fb);
+   if (left < 0) left = 0;
+   return left / IMAX(coding_channels, 1);
+}
 
 /** Maximum number of beams supported (5th order = 36 beams). */
 #define SEMAC_MAX_BEAMS 36

@@ -6,9 +6,9 @@
 #   transport domain  shd / beam           (spherical-harmonic or beam-projection)
 #   spatial norm      norm / nonorm        (SEMAC_SPATIAL_NORMALIZATION on/off)
 #   allocation        alloc_1 / alloc_equal   (SEMAC_ALLOC_LAMBDA 1.0 / 0.0)
-#   total bitrate     256k / 512k / 768k
+#   total bitrate     256k / 320k / 512k / 768k
 #
-# 7 signals x 2 domains x 5 transport orders x 3 bitrates x 2 norms x 2 allocations = 840 items at
+# 7 signals x 2 domains x 5 transport orders x 4 bitrates x 2 norms x 2 allocations = 1120 items at
 # the default REFERENCE_ORDER=5. Norm and allocation are COMPILE-TIME (semac.h is edited and the codec
 # rebuilt for each of the 4 combinations); transport order and domain are runtime flags.
 #
@@ -19,9 +19,9 @@
 # Encoding is VBR.
 #
 # Run order:  this script -> full_experiment_eval.py -> render_cmf3.sh -> score_cmf3.py
-# Layout:     $WORK/{ambix,binaural}/alloc_{1,equal}/{256,512,768}kbits/
+# Layout:     $WORK/{ambix,binaural}/alloc_{1,equal}/{256,320,512,768}kbits/
 #             $WORK/{ambix,binaural}/ref/
-# Filename:   {sig}_Ambix{N}_semac_{shd|beam}_{norm|nonorm}_{tc}_alloc{tag}_{256kb|512kb|768kb}[_bin]
+# Filename:   {sig}_Ambix{N}_semac_{shd|beam}_{norm|nonorm}_{tc}_alloc{tag}_{256kb|320kb|512kb|768kb}[_bin]
 set -e
 
 # ============================= SITE CONFIGURATION ============================================
@@ -58,7 +58,7 @@ NORMS=${SEMAC_NORMS:-"norm nonorm"}
 ALLOCS=${SEMAC_ALLOCS:-"1 equal"}   # folder alloc_<tag>, lambda from LAMBDA below
 # "<bits per second>:<tag>". The tag goes in the FILENAME as-is; the folder is the tag + "its"
 # (so tag 256kb -> folder 256kbits). Do not change the tags -- the scorer matches on them.
-BRATES="256000:256kb 512000:512kb 768000:768kb"
+BRATES=${SEMAC_BRATES:-"256000:256kb 320000:320kb 512000:512kb 768000:768kb"}
 NJOBS=${SEMAC_NJOBS:-8}          # parallel per-item workers; raise to the core count if idle
 
 declare -A TC=( [1]=tc4 [2]=tc9 [3]=tc16 [4]=tc25 [5]=tc36 )

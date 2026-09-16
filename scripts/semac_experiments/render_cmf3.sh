@@ -20,8 +20,8 @@
 # semaccmf3 depends on how the fork is currently built: oac_ambisonics_compare is a libtool wrapper
 # resolving .libs/liboac.so at run time. Rebuild after changing the mapping matrices.
 #
-# Layout:     $WORK/{ambix,binaural}/{semaccmf3,opuscmf3}/{256,512,768}kbits/
-# Filename:   {sig}_Ambix{N}_{arm}_{tc4|tc9|tc16|tc25|tc36}_{256kb|512kb|768kb}[_bin]
+# Layout:     $WORK/{ambix,binaural}/{semaccmf3,opuscmf3}/{256,320,512,768}kbits/
+# Filename:   {sig}_Ambix{N}_{arm}_{tc4|tc9|tc16|tc25|tc36}_{256kb|320kb|512kb|768kb}[_bin]
 set -e
 
 # ============================= SITE CONFIGURATION ============================================
@@ -54,7 +54,7 @@ for _n in $(seq 1 "$REFERENCE_ORDER"); do
 done
 # "<bits per second>:<tag>". The tag goes in the FILENAME as-is; the folder is the tag + "its"
 # (so tag 256kb -> folder 256kbits). Must match the SEMAC arm for the comparison to be fair.
-BRATES="256000:256kb 512000:512kb 768000:768kb"
+BRATES=${SEMAC_BRATES:-"256000:256kb 320000:320kb 512000:512kb 768000:768kb"}
 NJOBS=${SEMAC_NJOBS:-8}          # parallel per-item workers; raise to the core count if idle
 
 TMP=/tmp/sem_cmf3

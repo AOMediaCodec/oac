@@ -2337,7 +2337,8 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
           per-transport-channel budget and signalled (2 bits) so the decoder can mirror it. */
        {
            int spatial_fine_quant[21]; /* nbEBands is 21 max */
-           int sfb = SEMAC_SPATIAL_FINE_BITS(nbCompressedBytes*8 / coding_channels);
+           int sfb = SEMAC_SPATIAL_FINE_BITS(oaci_semac_net_bits_per_ch(nbCompressedBytes*8,
+                        coding_channels, num_beams, nbEBands, 2));
            oaci_ec_enc_bits(enc, sfb, 2);
            for (i = 0; i < nbEBands; i++) {
               spatial_fine_quant[i] = (i >= start && i < end) ? sfb : 0;
