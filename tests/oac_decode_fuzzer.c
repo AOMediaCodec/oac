@@ -68,7 +68,10 @@
 #include "oac_types.h"
 
 #define MAX_FRAME_SAMP 5760
-#define MAX_PACKET 1500
+/* Resource bound on how much of the fuzz input we will turn into a single
+   packet, not a protocol limit. It is well above the two-byte frame length
+   tier so the fuzzer can reach three-byte length codes. */
+#define MAX_PACKET 65536
 
 /* 4 bytes: packet length, 4 bytes: encoder final range */
 #define SETUP_BYTE_COUNT 8

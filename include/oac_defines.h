@@ -263,6 +263,23 @@ extern "C" {
 #define OAC_FORMAT_STANDARD    0
 /** Ambisonics format supporting orders 0 to OAC_MAX_AMBISONICS_ORDER @hideinitializer */
 #define OAC_FORMAT_AMBISONICS  1
+
+/** Maximum number of frames that can be packed in a single OAC packet
+ * (48 x 2.5 ms = 120 ms). @hideinitializer */
+#define OAC_MAX_FRAMES_PER_PACKET 48
+
+/** Largest frame size (in bytes) that the frame length signalling can represent.
+ *
+ * Frame lengths are coded on 1 to 3 bytes:
+ *  - @c p[0] in [0,191]:   1 byte,  size = @c p[0]                          (0 - 191)
+ *  - @c p[0] in [192,223]: 2 bytes, size = @c 32*p[1]+p[0]                  (192 - 8383)
+ *  - @c p[0] in [224,255]: 3 bytes, size = @c 32*(256*p[2]+p[1])+p[0]+8160  (8384 - 2105535)
+ *
+ * The mapping is bijective: every size has exactly one representation, so there
+ * are no non-canonical encodings for a parser to reject.
+ * @hideinitializer */
+#define OAC_SIZE_MAX 2105535
+
 #define OAC_SIGNAL_VOICE                    3001 /**< Signal being encoded is voice */
 #define OAC_SIGNAL_MUSIC                    3002 /**< Signal being encoded is music */
 #define OAC_BANDWIDTH_NARROWBAND            1101 /**< 4 kHz bandpass @hideinitializer*/
@@ -324,7 +341,7 @@ extern "C" {
 #define OAC_GET_COMPLEXITY(x) OAC_GET_COMPLEXITY_REQUEST, oac_check_int_ptr(x)
 
 /** Configures the bitrate in the encoder.
- * Rates from 500 to 512000 bits per second are meaningful, as well as the
+ * Rates from 500 to 750000 bits per second per channel for lossy coding (and higher for lossless) are meaningful, as well as the
  * special values #OAC_AUTO and #OAC_BITRATE_MAX.
  * The value #OAC_BITRATE_MAX can be used to cause the codec to use as much
  * rate as it can, which is useful for controlling the rate by adjusting the

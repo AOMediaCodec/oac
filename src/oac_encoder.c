@@ -756,9 +756,13 @@ static oac_int32 oaci_user_bitrate_to_bitrate(OacEncoder *st, int frame_size, in
     max_bitrate = oaci_bits_to_bitrate(max_data_bytes*8, st->Fs, frame_size);
     if (st->user_bitrate_bps == OAC_AUTO)
         user_bitrate = 60*st->Fs/frame_size + st->Fs*st->channels;
-    else if (st->user_bitrate_bps == OAC_BITRATE_MAX)
-        user_bitrate = 1500000;
-    else
+    else if (st->user_bitrate_bps == OAC_BITRATE_MAX) {
+        /* As much rate as this configuration could ever need, i.e. the lossless
+           bound. This scales with sampling rate, frame size and channel count,
+           and only reaches OAC_SIZE_MAX for a 20 ms, 256-channel, 96 kHz frame. */
+        user_bitrate = oaci_bits_to_bitrate(
+            oaci_max_frame_bytes(frame_size, st->Fs, st->channels)*8, st->Fs, frame_size);
+    } else
         user_bitrate = st->user_bitrate_bps;
     return IMIN(user_bitrate, max_bitrate);
 }
@@ -1139,9 +1143,13 @@ static int oaci_compute_redundancy_bytes(oac_int32 max_data_bytes, oac_int32 bit
     redundancy_rate = 3*redundancy_rate/2;
     redundancy_bytes = redundancy_rate/1600;
 
-    /* Compute the max rate we can use given CBR or VBR with cap. */
+    /* Compute the max rate we can use given CBR or VBR with cap.
+       available_bits can now be as large as 8*(OAC_SIZE_MAX+1), so the *240
+       needs a 64-bit intermediate. The result is a byte count that is then
+       clamped to 257, so the truncation to int is safe. */
     available_bits = max_data_bytes*8 - 2*base_bits;
-    redundancy_bytes_cap = (available_bits*240/(240 + 48000/frame_rate) + base_bits)/8;
+    redundancy_bytes_cap = (int)IMIN((oac_int64)257,
+        ((oac_int64)available_bits*240/(240 + 48000/frame_rate) + base_bits)/8);
     redundancy_bytes = IMIN(redundancy_bytes, redundancy_bytes_cap);
     /* It we can't get enough bits for redundancy to be worth it, rely on the decoder PLC. */
     if (redundancy_bytes > 4 + 8*channels)
@@ -1184,7 +1192,6 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     oac_int32 cbr_bytes = -1;
     oac_val16 stereo_width;
     const CELTMode *celt_mode = NULL;
-    int packet_size_cap = (st->format == OAC_FORMAT_STANDARD) ? 1276 : 1276*OAC_MAX_CHANNELS;
 #ifndef DISABLE_FLOAT_API
     AnalysisInfo analysis_info;
     int analysis_read_pos_bak = -1;
@@ -1197,7 +1204,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     ALLOC_STACK;
 
     /* Just avoid insane packet sizes here, but the real bounds are applied later on. */
-    max_data_bytes = IMIN(packet_size_cap*6, out_data_bytes);
+    max_data_bytes = IMIN(OAC_SIZE_MAX*6, out_data_bytes);
 
     st->rangeFinal = 0;
     if (frame_size <= 0 || max_data_bytes <= 0) {
@@ -1657,8 +1664,10 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         VARDECL(unsigned char, tmp_data);
         VARDECL(OacRepacketizer, rp);
         int max_header_bytes;
+        int size_bytes;
         oac_int32 repacketize_len;
         oac_int32 max_len_sum;
+        oac_int32 tmp_data_size;
         oac_int32 tot_size = 0;
         unsigned char *curr_data;
         int tmp_len;
@@ -1686,20 +1695,36 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         }
 #endif
 
-        /* Worst cases:
-         * 2 frames: Code 2 with different compressed sizes
-         * >2 frames: Code 3 VBR */
-        max_header_bytes = nb_frames == 2 ? 3 : (2 + (nb_frames - 1)*2);
-
         if (st->use_vbr || st->user_bitrate_bps == OAC_BITRATE_MAX)
             repacketize_len = out_data_bytes;
         else {
             celt_assert(cbr_bytes >= 0);
             repacketize_len = IMIN(cbr_bytes, out_data_bytes);
         }
+        {
+            oac_int32 max_frame_bytes = oaci_max_frame_bytes(enc_frame_size, st->Fs, st->channels);
+            repacketize_len = IMIN(repacketize_len, nb_frames * max_frame_bytes + 2 + (nb_frames - 1)*3);
+
+            /* Worst cases:
+             * 2 frames: Code 2 with different compressed sizes
+             * >2 frames: Code 3 VBR */
+            size_bytes = oaci_size_bytes(IMIN(repacketize_len, max_frame_bytes));
+            max_header_bytes = nb_frames == 2 ? (1 + size_bytes) : (2 + (nb_frames - 1)*size_bytes);
+            repacketize_len = IMIN(repacketize_len, nb_frames * max_frame_bytes + max_header_bytes);
+        }
         max_len_sum = nb_frames + repacketize_len - max_header_bytes;
 
-        ALLOC(tmp_data, max_len_sum, unsigned char);
+        /* The scratch buffer only ever holds what we actually ask the frame
+           encoder for, and that is curr_max below, not max_len_sum. Sizing it
+           from max_len_sum would put a multi-megabyte VLA on the stack as soon
+           as the channel count is high. Keep this in sync with curr_max. */
+        tmp_data_size = nb_frames*IMIN(oaci_bitrate_to_bits(st->bitrate_bps, st->Fs, enc_frame_size)/8,
+                                       max_len_sum/nb_frames);
+#ifdef ENABLE_DRED
+        tmp_data_size += oaci_bitrate_to_bits(dred_bitrate_bps, st->Fs, frame_size)/8;
+#endif
+        tmp_data_size = IMAX(nb_frames, IMIN(max_len_sum, tmp_data_size));
+        ALLOC(tmp_data, tmp_data_size, unsigned char);
         curr_data = tmp_data;
         ALLOC(rp, 1, OacRepacketizer);
         oac_repacketizer_init(rp, st->format);
@@ -1829,7 +1854,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     VARDECL(oac_res, tmp_prefill);
     SAVE_STACK;
 
-    max_data_bytes = IMIN(orig_max_data_bytes, (st->format == OAC_FORMAT_STANDARD) ? 1276 : 1276*OAC_MAX_CHANNELS);
+    max_data_bytes = IMIN(orig_max_data_bytes, OAC_SIZE_MAX + 1);
     st->rangeFinal = 0;
     if (st->application != OAC_APPLICATION_RESTRICTED_CELT)
         silk_enc = (char*)st + st->silk_enc_offset;
@@ -1898,7 +1923,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
 
     data += 1;
 
-    oaci_ec_enc_init(&enc, data, orig_max_data_bytes - 1);
+    oaci_ec_enc_init(&enc, data, max_data_bytes - 1);
 
     ALLOC(pcm_buf, (total_buffer + frame_size)*st->channels, oac_res);
     OAC_COPY(pcm_buf, &st->delay_buffer[(st->encoder_buffer - total_buffer)*st->channels], total_buffer*st->channels);
@@ -2072,7 +2097,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
         /* Call SILK encoder for the low band */
 
         /* Max bits for SILK, counting ToC, redundancy bytes, and optionally redundancy. */
-        st->silk_mode.maxBits = (max_data_bytes - 1)*8;
+        st->silk_mode.maxBits = IMIN(max_data_bytes - 1, SILK_MAX_BYTES)*8;
         if (redundancy && redundancy_bytes >= 2) {
             /* Counting 1 bit for redundancy position and 20 bits for flag+size (only for hybrid). */
             st->silk_mode.maxBits -= redundancy_bytes*8 + 1;
@@ -2090,7 +2115,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
 #endif
             {
                 /* Allow SILK to steal up to 25% of the remaining bits */
-                oac_int16 other_bits = IMAX(0, st->silk_mode.maxBits - st->silk_mode.bitRate*frame_size/st->Fs);
+                oac_int32 other_bits = IMAX(0, st->silk_mode.maxBits - st->silk_mode.bitRate*frame_size/st->Fs);
                 st->silk_mode.maxBits = IMAX(0, st->silk_mode.maxBits - other_bits*3/4);
                 st->silk_mode.useCBR = 0;
             }
@@ -2098,7 +2123,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
             /* Constrained VBR. */
             if (st->mode == MODE_HYBRID) {
                 /* Compute SILK bitrate corresponding to the max total bits available */
-                oac_int32 maxBitRate = oaci_compute_silk_rate_for_hybrid(st->silk_mode.maxBits*st->Fs/frame_size,
+                oac_int32 maxBitRate = oaci_compute_silk_rate_for_hybrid(oaci_bits_to_bitrate(st->silk_mode.maxBits, st->Fs, frame_size),
                     curr_bandwidth, st->Fs == 50*frame_size, st->use_vbr, st->silk_mode.LBRR_coded,
                     st->stream_channels);
                 st->silk_mode.maxBits = oaci_bitrate_to_bits(maxBitRate, st->Fs, frame_size);
@@ -2671,8 +2696,8 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
                     goto bad_arg;
                 else if (value <= 500)
                     value = 500;
-                else if (value > (oac_int32)750000*st->channels)
-                    value = (oac_int32)750000*st->channels;
+                else if (value > (oac_int32)CELT_MAX_BITRATE_PER_CHANNEL*st->channels)
+                    value = (oac_int32)CELT_MAX_BITRATE_PER_CHANNEL*st->channels;
             }
             st->user_bitrate_bps = value;
         }
@@ -2683,7 +2708,7 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
             if (!value) {
                 goto bad_arg;
             }
-            *value = oaci_user_bitrate_to_bitrate(st, st->prev_framesize, 1276);
+            *value = oaci_user_bitrate_to_bitrate(st, st->prev_framesize, OAC_SIZE_MAX + 1);
         }
         break;
         case OAC_SET_FORCE_CHANNELS_REQUEST:

@@ -698,7 +698,7 @@ static void oaci_surround_rate_allocation(
     if (st->bitrate_bps == OAC_AUTO) {
         bitrate = nb_normal*(channel_offset + Fs + 10000) + 8000*nb_lfe;
     } else if (st->bitrate_bps == OAC_BITRATE_MAX) {
-        bitrate = nb_normal*750000 + nb_lfe*128000;
+        bitrate = nb_normal*CELT_MAX_BITRATE_PER_CHANNEL + nb_lfe*128000;
     } else {
         bitrate = st->bitrate_bps;
     }
@@ -749,7 +749,7 @@ static void oaci_ambisonics_rate_allocation(
         total_rate = (st->layout.nb_coupled_streams + st->layout.nb_streams)
                      *(Fs + 60*Fs/frame_size) + st->layout.nb_streams*(oac_int32)15000;
     } else if (st->bitrate_bps == OAC_BITRATE_MAX) {
-        total_rate = nb_channels*750000;
+        total_rate = nb_channels*CELT_MAX_BITRATE_PER_CHANNEL;
     } else {
         total_rate = st->bitrate_bps;
     }
@@ -787,9 +787,6 @@ static oac_int32 oaci_rate_allocation(
     return rate_sum;
 }
 
-/* Max size in case the encoder decides to return six frames (6 x 20 ms = 120 ms) */
-#define MS_FRAME_TMP (6*1275 + 12)
-
 int oac_multistream_encode_native
 (
     OacMSEncoder *st,
@@ -810,7 +807,7 @@ int oac_multistream_encode_native
     int tot_size;
     VARDECL(oac_res, buf);
     VARDECL(celt_glog, bandSMR);
-    unsigned char tmp_data[MS_FRAME_TMP];
+    VARDECL(unsigned char, tmp_data);
     OacRepacketizer rp;
     oac_int32 vbr;
     const CELTMode *celt_mode = NULL;
@@ -850,6 +847,7 @@ int oac_multistream_encode_native
         return OAC_BUFFER_TOO_SMALL;
     }
     ALLOC(buf, 2*frame_size, oac_res);
+    ALLOC(tmp_data, oaci_max_frame_bytes(frame_size, Fs, st->layout.nb_coupled_streams > 0 ? 2 : 1) + 20, unsigned char);
     coupled_size = oac_encoder_init(NULL, st->Fs, 2, OAC_FORMAT_STANDARD, st->application);
     mono_size = oac_encoder_init(NULL, st->Fs, 1, OAC_FORMAT_STANDARD, st->application);
 
@@ -954,9 +952,9 @@ int oac_multistream_encode_native
         /* For 100 ms, reserve an extra byte per stream for the ToC */
         if (Fs/frame_size == 10)
             curr_max -= st->layout.nb_streams - s - 1;
-        curr_max = IMIN(curr_max, MS_FRAME_TMP);
-        /* Repacketizer will add one or two bytes for self-delimited frames */
-        if (s != st->layout.nb_streams - 1) curr_max -= curr_max > 253 ? 2 : 1;
+        curr_max = IMIN(curr_max, oaci_max_frame_bytes(frame_size, Fs, (s < st->layout.nb_coupled_streams) ? 2 : 1) + 20);
+        /* Repacketizer will add one to three bytes for self-delimited frames */
+        if (s != st->layout.nb_streams - 1) curr_max -= oaci_size_bytes(curr_max);
         if (!vbr && s == st->layout.nb_streams - 1)
             oac_encoder_ctl(enc, OAC_SET_BITRATE(oaci_bits_to_bitrate(curr_max*8, Fs, frame_size)));
         len = oac_encode_native(enc, buf, frame_size, tmp_data, curr_max, lsb_depth,
@@ -1084,7 +1082,7 @@ int oac_multistream_encoder_ctl_va_list(OacMSEncoder *st, int request,
             if (value != OAC_AUTO && value != OAC_BITRATE_MAX) {
                 if (value <= 0)
                     goto bad_arg;
-                value = IMIN(750000*st->layout.nb_channels, IMAX(500*st->layout.nb_channels, value));
+                value = IMIN(CELT_MAX_BITRATE_PER_CHANNEL*st->layout.nb_channels, IMAX(500*st->layout.nb_channels, value));
             }
             st->bitrate_bps = value;
         }

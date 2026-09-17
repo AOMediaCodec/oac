@@ -76,7 +76,7 @@
 # include "lossgen.h"
 #endif
 
-#define MAX_PACKET (1276*OAC_MAX_AMBISONICS_CHANNELS)
+#define MAX_PACKET ((OAC_SIZE_MAX + 3)*6)
 
 #ifdef ENABLE_QEXT
 # define MAX_SAMPLING_RATE 96000
@@ -582,7 +582,7 @@ int main(int argc, char *argv[]) {
 
     /* defaults: */
     use_vbr = 1;
-    max_payload_bytes = MAX_PACKET;
+    max_payload_bytes = -1;
     complexity = 10;
     dec_complexity = 0;
     use_inbandfec = 0;
@@ -816,6 +816,12 @@ int main(int argc, char *argv[]) {
     if (sweep_max)
         sweep_min = bitrate_bps;
 
+    if (max_payload_bytes < 0) {
+        if (decode_only)
+            max_payload_bytes = MAX_PACKET;
+        else
+            max_payload_bytes = IMIN(MAX_PACKET, oaci_max_frame_bytes(sampling_rate/50, sampling_rate, channels) * 6 + 20);
+    }
     if (max_payload_bytes < 0 || max_payload_bytes > MAX_PACKET) {
         fprintf (stderr, "max_payload_bytes must be between 0 and %d\n",
                           MAX_PACKET);
@@ -1083,7 +1089,7 @@ int main(int argc, char *argv[]) {
         }
 
 #if 0 /* This is for testing the padding code, do not enable by default */
-        if (len < 1275) {
+        if (len < max_payload_bytes) {
             int new_len = len + rand()%(max_payload_bytes - len);
             if ((err = oac_packet_pad(data, len, new_len)) != OAC_OK) {
                 fprintf(stderr, "padding failed: %s\n", oac_strerror(err));

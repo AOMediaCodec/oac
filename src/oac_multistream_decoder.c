@@ -173,7 +173,7 @@ static int oac_multistream_packet_validate(const unsigned char *data,
     int s;
     int count;
     unsigned char toc;
-    oac_int16 size[48];
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
     int samples = 0;
     oac_int32 packet_offset;
 

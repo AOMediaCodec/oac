@@ -493,9 +493,9 @@ static int oaci_write_extension(unsigned char *data, oac_int32 len, oac_int32 po
 oac_int32 oac_packet_extensions_generate(unsigned char *data, oac_int32 len,
                                          const oac_extension_data  *extensions, oac_int32 nb_extensions,
                                          int nb_frames, int pad) {
-    oac_int32 frame_min_idx[48];
-    oac_int32 frame_max_idx[48];
-    oac_int32 frame_repeat_idx[48];
+    oac_int32 frame_min_idx[OAC_MAX_FRAMES_PER_PACKET];
+    oac_int32 frame_max_idx[OAC_MAX_FRAMES_PER_PACKET];
+    oac_int32 frame_repeat_idx[OAC_MAX_FRAMES_PER_PACKET];
     oac_int32 i;
     int f;
     int curr_frame = 0;
@@ -503,7 +503,7 @@ oac_int32 oac_packet_extensions_generate(unsigned char *data, oac_int32 len,
     oac_int32 written = 0;
 
     celt_assert(len >= 0);
-    if (nb_frames > 48) return OAC_BAD_ARG;
+    if (nb_frames > OAC_MAX_FRAMES_PER_PACKET) return OAC_BAD_ARG;
 
     /* Do a little work up-front to make this O(nb_extensions) instead of
         O(nb_extensions*nb_frames) so long as the extensions are in frame

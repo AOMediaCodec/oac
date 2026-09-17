@@ -173,13 +173,22 @@ typedef struct {
 #define CELT_SET_SILK_INFO_REQUEST    10028
 #define CELT_SET_SILK_INFO(x) CELT_SET_SILK_INFO_REQUEST, celt_check_silkinfo_ptr(x)
 
+/* Highest bit-rate the frame length signalling can represent: a full
+   OAC_SIZE_MAX payload every 20 ms. Only used to saturate the bits<->bit-rate
+   conversions below, so they cannot overflow oac_int32. */
+#define OAC_MAX_BITRATE ((oac_int32)OAC_SIZE_MAX*8*50)
+
+/* Maximum bitrate per channel the CELT layer will ever emit. Lossless coding is
+   handled in the OAC encoder layer and is deliberately NOT bound by this. */
+#define CELT_MAX_BITRATE_PER_CHANNEL 750000
 
 static OAC_INLINE oac_int32 oaci_bits_to_bitrate(oac_int32 bits, oac_int32 Fs, oac_int32 frame_size) {
-    return bits*(6*Fs/frame_size)/6;
+    oac_int64 rate = (oac_int64)bits * (6 * Fs / frame_size) / 6;
+    return (oac_int32)IMIN(rate, OAC_MAX_BITRATE);
 }
 
 static OAC_INLINE oac_int32 oaci_bitrate_to_bits(oac_int32 bitrate, oac_int32 Fs, oac_int32 frame_size) {
-    return bitrate*6/(6*Fs/frame_size);
+    return (oac_int32)((oac_int64)bitrate * 6 / (6 * Fs / frame_size));
 }
 
 /* Encoder stuff */

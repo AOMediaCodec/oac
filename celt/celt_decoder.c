@@ -1191,7 +1191,10 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     }
     M = 1<<LM;
 
-    if (len < 0 || len > (st->format == OAC_FORMAT_STANDARD ? 1275 : 1275*OAC_MAX_CHANNELS) || pcm == NULL)
+    /* Accept any explicitly representable payload size (up to OAC_SIZE_MAX).
+       If a stricter per-channel or mode-specific upper bound is desired in
+       the future, enforce it here using st->channels and frame_size. */
+    if (len < 0 || len > OAC_SIZE_MAX || pcm == NULL)
         return OAC_BAD_ARG;
 
     N = M*mode->shortMdctSize;

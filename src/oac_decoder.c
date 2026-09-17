@@ -720,7 +720,7 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     unsigned char toc;
     int packet_frame_size, packet_bandwidth, packet_mode, packet_stream_channels;
     /* 48 x 2.5 ms = 120 ms */
-    oac_int16 size[48];
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
     const unsigned char *padding;
     oac_int32 padding_len;
     OacExtensionIterator iter;
@@ -1248,8 +1248,8 @@ int oac_packet_get_nb_samples(const unsigned char packet[], oac_int32 len,
 
 int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len) {
     int ret;
-    const unsigned char *frames[48];
-    oac_int16 size[48];
+    const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET];
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
     int packet_mode, packet_frame_size, packet_stream_channels;
     int nb_frames = 1;
     int lbrr;
@@ -1400,8 +1400,8 @@ static int oaci_dred_find_payload(const unsigned char *data, oac_int32 len, cons
     const unsigned char *padding;
     oac_int32 padding_len;
     int nb_frames;
-    const unsigned char *frames[48];
-    oac_int16 size[48];
+    const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET];
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
     int frame_size;
     int ret;
 

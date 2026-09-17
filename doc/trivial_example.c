@@ -76,7 +76,8 @@
 #define BITRATE 64000
 
 #define MAX_FRAME_SIZE 6*960
-#define MAX_PACKET_SIZE (3*1276)
+/* Enough for a 20 ms stereo frame at any bitrate the encoder will produce. */
+#define MAX_PACKET_SIZE 4000
 
 int main(int argc, char **argv) {
     char *inFile;

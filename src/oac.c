@@ -189,30 +189,49 @@ OAC_EXPORT void oac_pcm_soft_clip(float *_x, int N, int C, float *declip_mem) {
 
 #endif
 
-int oaci_encode_size(int size, unsigned char *data) {
-    if (size < 252) {
+/* Frame length signalling. See OAC_SIZE_MAX in oac_defines.h for the format.
+   The mapping is bijective, so there is no non-canonical encoding to reject. */
+int oaci_encode_size(oac_int32 size, unsigned char *data) {
+    celt_assert(size >= 0 && size <= OAC_SIZE_MAX);
+    if (size < 192) {
         data[0] = size;
         return 1;
-    } else {
-        data[0] = 252 + (size&0x3);
-        data[1] = (size - (int)data[0])>>2;
+    } else if (size < 8384) {
+        oac_int32 v = size - 192;           /* 13 bits */
+        data[0] = 192 + (v&0x1F);
+        data[1] = v>>5;
         return 2;
+    } else {
+        oac_int32 v = size - 8384;          /* 21 bits */
+        data[0] = 224 + (v&0x1F);
+        v >>= 5;
+        data[1] = v&0xFF;
+        data[2] = v>>8;
+        return 3;
     }
 }
 
-static int oaci_parse_size(const unsigned char *data, oac_int32 len, oac_int16 *size) {
+static int oaci_parse_size(const unsigned char *data, oac_int32 len, oac_int32 *size) {
     if (len < 1) {
         *size = -1;
         return -1;
-    } else if (data[0] < 252) {
+    } else if (data[0] < 192) {
         *size = data[0];
         return 1;
-    } else if (len < 2) {
-        *size = -1;
-        return -1;
-    } else {
-        *size = 4*data[1] + data[0];
+    } else if (data[0] < 224) {
+        if (len < 2) {
+            *size = -1;
+            return -1;
+        }
+        *size = 32*(oac_int32)data[1] + data[0];
         return 2;
+    } else {
+        if (len < 3) {
+            *size = -1;
+            return -1;
+        }
+        *size = 32*(256*(oac_int32)data[2] + data[1]) + data[0] + 8160;
+        return 3;
     }
 }
 
@@ -236,7 +255,7 @@ int oac_packet_get_samples_per_frame(const unsigned char *data,
 
 int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
                           int self_delimited, unsigned char *out_toc,
-                          const unsigned char *frames[48], oac_int16 size[48],
+                          const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET], oac_int32 size[OAC_MAX_FRAMES_PER_PACKET],
                           int *payload_offset, oac_int32 *packet_offset,
                           const unsigned char **padding, oac_int32 *padding_len,
                           int format) {
@@ -248,6 +267,10 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     oac_int32 last_size;
     oac_int32 pad = 0;
     const unsigned char *data0 = data;
+
+    /* The frame length codec no longer depends on the format: any length the
+       codec can represent is accepted. */
+    (void)format;
 
     /* Make sure we return NULL/0 on error. */
     if (padding != NULL) {
@@ -279,8 +302,7 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
                 if (len&0x1)
                     return OAC_INVALID_PACKET;
                 last_size = len/2;
-                /* If last_size doesn't fit in size[0], we'll catch it later */
-                size[0] = (oac_int16)last_size;
+                size[0] = last_size;
             }
             break;
         /* Two VBR frames */
@@ -340,7 +362,7 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
                 if (last_size*count != len)
                     return OAC_INVALID_PACKET;
                 for (i = 0; i < count - 1; i++)
-                    size[i] = (oac_int16)last_size;
+                    size[i] = last_size;
             }
             break;
     }
@@ -361,11 +383,12 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
             return OAC_INVALID_PACKET;
     } else {
         /* Because it's not encoded explicitly, it's possible the size of the
-           last packet (or all the packets, for the CBR case) is larger than
-           1275. Reject them here.*/
-        if (last_size > (format == OAC_FORMAT_AMBISONICS ? 1275*OAC_MAX_CHANNELS : 1275))
+           last frame (or all the frames, for the CBR case) is not representable
+           by the frame length codec. Reject them here, so that an implicit
+           length is always explicitly representable. */
+        if (last_size > OAC_SIZE_MAX)
             return OAC_INVALID_PACKET;
-        size[count - 1] = (oac_int16)last_size;
+        size[count - 1] = last_size;
     }
 
     if (payload_offset)
@@ -391,8 +414,8 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
 }
 
 int oac_packet_parse(const unsigned char *data, oac_int32 len,
-                     unsigned char *out_toc, const unsigned char *frames[48],
-                     oac_int16 size[48], int *payload_offset, int format) {
+                     unsigned char *out_toc, const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET],
+                     oac_int32 size[OAC_MAX_FRAMES_PER_PACKET], int *payload_offset, int format) {
     return oac_packet_parse_impl(data, len, 0, out_toc,
                                  frames, size, payload_offset, NULL, NULL, NULL,
                                  format);

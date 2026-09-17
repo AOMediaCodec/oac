@@ -1475,7 +1475,9 @@ static void quant_all_bands_twoch(int encode, const CELTMode *m, int start, int 
     ctx.disable_inv = disable_inv;
     ctx.resynth = resynth;
     ctx.theta_round = 0;
-    ALLOC(bytes_save, theta_rdo ? 1275 : ALLOC_NONE, unsigned char);
+    /* The theta RDO path saves everything between ec->offs and ec->storage.
+       ec->offs only grows from here, so this is an upper bound. */
+    ALLOC(bytes_save, theta_rdo ? (int)(ec->storage - ec->offs) : ALLOC_NONE, unsigned char);
 
     /* Avoid injecting noise in the first band on transients. */
     ctx.avoid_split_noise = B > 1;
