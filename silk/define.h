@@ -75,6 +75,10 @@
 /* Limits on bitrate */
 #define MIN_TARGET_RATE_BPS                     5000
 #define MAX_TARGET_RATE_BPS                     80000
+/* Largest payload SILK will ever be asked to produce for one frame. SILK cannot
+   make use of a higher rate, so its bit budget is clamped to this even when the
+   packet itself may be much larger. */
+#define SILK_MAX_BYTES                          1275
 
 /* LBRR thresholds */
 #define LBRR_NB_MIN_RATE_BPS                    12000

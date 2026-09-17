@@ -68,6 +68,8 @@
 #include <string.h>
 
 #define MAX_PACKETOUT 32000
+/* Largest input packet this demo will read. */
+#define MAX_PACKETIN 1500
 
 void usage(char *argv0) {
     fprintf(stderr, "usage: %s [options] input_file output_file\n", argv0);
@@ -88,9 +90,9 @@ static oac_uint32 char_to_int(unsigned char ch[4]) {
 int main(int argc, char *argv[]) {
     int i, eof = 0;
     FILE *fin, *fout;
-    unsigned char packets[48][1500];
-    int len[48];
-    int rng[48];
+    unsigned char packets[OAC_MAX_FRAMES_PER_PACKET][MAX_PACKETIN];
+    int len[OAC_MAX_FRAMES_PER_PACKET];
+    int rng[OAC_MAX_FRAMES_PER_PACKET];
     OacRepacketizer *rp;
     unsigned char output_packet[MAX_PACKETOUT];
     int merge = 1, split = 0;
@@ -106,8 +108,8 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "-merge parameter must be at least 1.\n");
                 return EXIT_FAILURE;
             }
-            if (merge > 48) {
-                fprintf(stderr, "-merge parameter must be less than 48.\n");
+            if (merge > OAC_MAX_FRAMES_PER_PACKET) {
+                fprintf(stderr, "-merge parameter must be at most %d.\n", OAC_MAX_FRAMES_PER_PACKET);
                 return EXIT_FAILURE;
             }
             i++;
@@ -151,7 +153,7 @@ int main(int argc, char *argv[]) {
             }
             len[i] = char_to_int(ch);
             /*fprintf(stderr, "in len = %d\n", len[i]);*/
-            if (len[i] > 1500 || len[i] < 0) {
+            if (len[i] > MAX_PACKETIN || len[i] < 0) {
                 if (feof(fin)) {
                     eof = 1;
                 } else {

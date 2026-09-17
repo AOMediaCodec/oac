@@ -514,7 +514,7 @@ void test_extensions_repeating(void) {
     oac_int32 nb_ext;
     for (nb_ext = 0; nb_ext <= NB_EXT; nb_ext++) {
         oac_extension_data ext_out[NB_EXT];
-        oac_int32 nb_frame_exts[48];
+        oac_int32 nb_frame_exts[OAC_MAX_FRAMES_PER_PACKET];
         oac_int32 nb_ext_out;
         int len, result;
         unsigned char packet[64];
@@ -628,7 +628,7 @@ void test_random_extensions_parse(void) {
         if (result == OAC_OK) {
             oac_extension_data ext_out2[MAX_NB_EXTENSIONS];
             unsigned char payload2[MAX_EXTENSION_SIZE + 1];
-            oac_int32 nb_frame_exts[48];
+            oac_int32 nb_frame_exts[OAC_MAX_FRAMES_PER_PACKET];
             oac_int32 nb_ext_out;
             len = oac_packet_extensions_generate(payload2, sizeof(payload2),
           ext_out, nb_ext, nb_frames, 0);
@@ -652,7 +652,7 @@ void test_oac_repacketizer_out_range_impl(void) {
     OacRepacketizer rp;
     unsigned char packet[1024];
     unsigned char packet_out[1024];
-    oac_int16 size[48];
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
     const unsigned char *padding;
     oac_int32 padding_len;
     oac_extension_data ext_out[10];

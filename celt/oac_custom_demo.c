@@ -71,7 +71,9 @@
 #include <math.h>
 #include <string.h>
 
-#define MAX_PACKET 1275
+/* Largest payload the frame length signalling can represent. The buffer is
+   malloc'd rather than on the stack because of its size. */
+#define MAX_PACKET OAC_SIZE_MAX
 
 static OAC_INLINE void _oac_ctl_failed(const char *file, int line) {
     fprintf(stderr, "\n ***************************************************\n");
@@ -145,7 +147,7 @@ int main(int argc, char *argv[]) {
     oac_int32 frame_size, channels, rate;
     int format = FORMAT_S16_LE;
     int bytes_per_packet = 0;
-    unsigned char data[MAX_PACKET];
+    unsigned char *data = NULL;
     int complexity = -1;
     float percent_loss = -1;
     int i;
@@ -292,6 +294,7 @@ int main(int argc, char *argv[]) {
     in = (oac_int32*)malloc(frame_size*channels*sizeof(oac_int32));
     out = (oac_int32*)malloc(frame_size*channels*sizeof(oac_int32));
     fbytes = (unsigned char*)malloc(frame_size*channels*4);
+    data = (unsigned char*)malloc(MAX_PACKET);
 
     while (!feof(fin)) {
         int lost = 0;
@@ -488,5 +491,6 @@ failure:
     if (in) free(in);
     if (out) free(out);
     if (fbytes) free(fbytes);
+    if (data) free(data);
     return ret;
 }

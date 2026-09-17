@@ -142,7 +142,7 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
                                           const oac_extension_data *extensions, int nb_extensions) {
     int i, count;
     oac_int32 tot_size;
-    oac_int16 *len;
+    oac_int32 *len;
     const unsigned char **frames;
     unsigned char * ptr;
     int ones_begin = 0, ones_end = 0;
@@ -161,7 +161,7 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
     len = rp->len + begin;
     frames = rp->frames + begin;
     if (self_delimited)
-        tot_size = 1 + (len[count - 1] >= 252);
+        tot_size = oaci_size_bytes(len[count - 1]);
     else
         tot_size = 0;
 
@@ -216,7 +216,7 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
             *ptr++ = (rp->toc&0xFC)|0x1;
         } else {
             /* Code 2 */
-            tot_size += len[0] + len[1] + 2 + (len[0] >= 252);
+            tot_size += len[0] + len[1] + 1 + oaci_size_bytes(len[0]);
             if (tot_size > maxlen) {
                 RESTORE_STACK;
                 return OAC_BUFFER_TOO_SMALL;
@@ -233,7 +233,7 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
         /* Restart the process for the padding case */
         ptr = data;
         if (self_delimited)
-            tot_size = 1 + (len[count - 1] >= 252);
+            tot_size = oaci_size_bytes(len[count - 1]);
         else
             tot_size = 0;
         vbr = 0;
@@ -246,7 +246,7 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
         if (vbr) {
             tot_size += 2;
             for (i = 0; i < count - 1; i++)
-                tot_size += 1 + (len[i] >= 252) + len[i];
+                tot_size += oaci_size_bytes(len[i]) + len[i];
             tot_size += len[count - 1];
 
             if (tot_size > maxlen) {
@@ -391,7 +391,7 @@ int oac_multistream_packet_pad(unsigned char *data, oac_int32 len, oac_int32 new
     int s;
     int count;
     unsigned char toc;
-    oac_int16 size[48];
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
     oac_int32 packet_offset;
     oac_int32 amount;
 
@@ -420,7 +420,7 @@ int oac_multistream_packet_pad(unsigned char *data, oac_int32 len, oac_int32 new
 oac_int32 oac_multistream_packet_unpad(unsigned char *data, oac_int32 len, int nb_streams) {
     int s;
     unsigned char toc;
-    oac_int16 size[48];
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
     oac_int32 packet_offset;
     OacRepacketizer rp;
     unsigned char *dst;

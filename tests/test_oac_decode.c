@@ -321,7 +321,7 @@ int test_decoder_code0(int no_fuzz) {
         int j, expected[5*2];
         packet[0] = i<<2;
         for (t = 0; t < 5*2; t++) expected[t] = oac_decoder_get_nb_samples(dec[t], packet, 1);
-        for (j = 2 + skip; j < 1275; j += 4) {
+        for (j = 2 + skip; j < MAX_PACKET; j += 4) {
             int jj;
             for (jj = 0; jj < j; jj++) packet[jj + 1] = fast_rand()&255;
             for (t = 0; t < 5*2; t++) {

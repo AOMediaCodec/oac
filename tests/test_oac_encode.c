@@ -80,7 +80,7 @@
 #include "../src/oac_private.h"
 #include "test_oac_common.h"
 
-#define MAX_PACKET (1500)
+#define MAX_PACKET (30000)
 #define SAMPLES (48000*30)
 #define SSAMPLES (SAMPLES/3)
 #define MAX_FRAME_SAMP (5760)
@@ -244,7 +244,7 @@ void fuzz_encoder_settings(const int num_encoders, const int num_setting_changes
     int sampling_rates[5] = {8000, 12000, 16000, 24000, 48000};
     int channels[2] = {1, 2};
     int applications[3] = {OAC_APPLICATION_AUDIO, OAC_APPLICATION_VOIP, OAC_APPLICATION_RESTRICTED_LOWDELAY};
-    int bitrates[11] = {6000, 12000, 16000, 24000, 32000, 48000, 64000, 96000, 510000, OAC_AUTO, OAC_BITRATE_MAX};
+    int bitrates[11] = {6000, 12000, 16000, 24000, 32000, 48000, 64000, 96000, 750000, OAC_AUTO, OAC_BITRATE_MAX};
     int force_channels[4] = {OAC_AUTO, OAC_AUTO, 1, 2};
     int use_vbr[3] = {0, 1, 1};
     int vbr_constraints[3] = {0, 1, 1};
@@ -453,7 +453,7 @@ int run_test1(int no_fuzz) {
         for (j = 0; j < 13; j++) {
             int rate;
             int modes[13] = {0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2};
-            int rates[13] = {6000, 12000, 48000, 16000, 32000, 48000, 64000, 512000, 13000, 24000, 48000, 64000, 96000};
+            int rates[13] = {6000, 12000, 48000, 16000, 32000, 48000, 64000, 1500000, 13000, 24000, 48000, 64000, 96000};
             int frame[13] = {960*2, 960, 480, 960, 960, 960, 480, 960*3, 960*3, 960, 480, 240, 120};
             rate = rates[j] + fast_rand()%rates[j];
             count = i = 0;
@@ -598,7 +598,7 @@ int run_test1(int no_fuzz) {
         }
     }
 
-    bitrate_bps = 512000;
+    bitrate_bps = 1500000;
     fsize = fast_rand()%31;
     fswitch = 100;
 
@@ -606,8 +606,8 @@ int run_test1(int no_fuzz) {
     count = i = 0;
     do {
         unsigned char toc;
-        const unsigned char *frames[48];
-        short size[48];
+        const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET];
+        oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
         int payload_offset;
         oac_uint32 dec_final_range2;
         int jj, dec2;

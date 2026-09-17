@@ -1763,7 +1763,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     oac_val16 tone_freq = -1;
     oac_val32 toneishness = 0;
     VARDECL(celt_glog, surround_dynalloc);
-    int packet_size_cap = (st->format == OAC_FORMAT_STANDARD) ? 1275 : 1275*OAC_MAX_AMBISONICS_CHANNELS;
+    oac_int32 packet_size_cap;
     int qext_scale = 1;
     ALLOC_STACK;
 
@@ -1836,8 +1836,17 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     celt_assert(st->signalling == 0);
 #endif
 
-    /* Can't produce more than 1275 output bytes for the main payload. */
+    /* The CELT layer never emits more than CELT_MAX_BITRATE_PER_CHANNEL per
+       channel. This has to be a byte-level clamp rather than just the ctl
+       bit-rate clamp, because the OAC_BITRATE_MAX sentinel bypasses the latter
+       by design. frame_size is already in mode->Fs units here. */
+    packet_size_cap = oaci_bitrate_to_bits(CELT_MAX_BITRATE_PER_CHANNEL*(oac_int32)CC,
+        mode->Fs, frame_size)/8;
     nbCompressedBytes = IMIN(nbCompressedBytes, packet_size_cap);
+    /* Keep the range coder's idea of the buffer in sync, otherwise the raw bits
+       written from the end would land outside the returned packet. */
+    if (enc != NULL && enc->storage > (oac_uint32)nbCompressedBytes)
+        oaci_ec_enc_shrink(enc, nbCompressedBytes);
 
     if (st->vbr && st->bitrate != OAC_BITRATE_MAX) {
         vbr_rate = oaci_bitrate_to_bits(st->bitrate, mode->Fs, frame_size)<<BITRES;
@@ -2349,9 +2358,6 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
         oac_int32 target, base_target;
         int lm_diff = mode->maxLM - LM;
 
-        /* Don't attempt to use more than 510 kb/s, even for frames smaller than 20 ms.
-           The CELT allocator will just not be able to use more than that anyway. */
-        nbCompressedBytes = IMIN(nbCompressedBytes, packet_size_cap>>(3 - LM));
         if (!hybrid) {
             base_target = vbr_rate - ((40*C + 20)<<BITRES);
         } else {
@@ -2782,7 +2788,7 @@ int oac_custom_encoder_ctl(CELTEncoder * OAC_RESTRICT st, int request, ...) {
             oac_int32 value = va_arg(ap, oac_int32);
             if (value <= 500 && value != OAC_BITRATE_MAX)
                 goto bad_arg;
-            value = IMIN(value, 750000*st->channels);
+            value = IMIN(value, CELT_MAX_BITRATE_PER_CHANNEL*st->channels);
             st->bitrate = value;
         }
         break;
