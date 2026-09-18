@@ -86,7 +86,7 @@ extern "C" {
  * stereo music. Its main features are:
 
  * @li Sampling rates from 8 to 48 kHz
- * @li Bit-rates from 6 kb/s to 510 kb/s
+ * @li Bit-rates from 6 kb/s to 750 kb/s per channel (and higher for lossless)
  * @li Support for both constant bit-rate (CBR) and variable bit-rate (VBR)
  * @li Audio bandwidth from narrowband to full-band
  * @li Support for speech and music
@@ -752,8 +752,8 @@ OAC_EXPORT int oac_decoder_dred_decode_float(OacDecoder *st, const OacDRED *dred
  * @param [in] data <tt>char*</tt>: Oac packet to be parsed
  * @param [in] len <tt>oac_int32</tt>: size of data
  * @param [out] out_toc <tt>char*</tt>: TOC pointer
- * @param [out] frames <tt>char*[48]</tt> encapsulated frames
- * @param [out] size <tt>oac_int16[48]</tt> sizes of the encapsulated frames
+ * @param [out] frames <tt>char*[OAC_MAX_FRAMES_PER_PACKET]</tt> encapsulated frames
+ * @param [out] size <tt>oac_int32[OAC_MAX_FRAMES_PER_PACKET]</tt> sizes of the encapsulated frames
  * @param [out] payload_offset <tt>int*</tt>: returns the position of the payload within the packet (in bytes)
  * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @returns number of frames
@@ -762,8 +762,8 @@ OAC_EXPORT int oac_packet_parse(
     const unsigned char *data,
     oac_int32 len,
     unsigned char *out_toc,
-    const unsigned char *frames[48],
-    oac_int16 size[48],
+    const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET],
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET],
     int *payload_offset,
     int format) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(5);
 
@@ -891,7 +891,7 @@ OAC_EXPORT void oac_pcm_soft_clip(float *pcm, int frame_size, int channels, floa
  * int len;
  * while (get_next_packet(&data, &len))
  * {
- *   unsigned char out[1276];
+ *   unsigned char out[OAC_SIZE_MAX + 1];
  *   oac_int32 out_len;
  *   int nb_frames;
  *   int err;
@@ -927,7 +927,10 @@ OAC_EXPORT void oac_pcm_soft_clip(float *pcm, int frame_size, int channels, floa
  * unsigned char *data[(TARGET_DURATION_MS*2/5)+1];
  * oac_int32 len[(TARGET_DURATION_MS*2/5)+1];
  * int nb_packets;
- * unsigned char out[1277*(TARGET_DURATION_MS*2/2)];
+ * // Worst case output size: every frame may need a three-byte length field,
+ * // plus the TOC and frame count bytes. MAX_FRAME_BYTES is the largest frame
+ * // the producer emits; frames may be up to OAC_SIZE_MAX bytes long.
+ * unsigned char out[(MAX_FRAME_BYTES+3)*(TARGET_DURATION_MS*2/5)+2];
  * oac_int32 out_len;
  * int prev_toc;
  * nb_packets = 0;
@@ -1101,10 +1104,10 @@ OAC_EXPORT int oac_repacketizer_cat(OacRepacketizer *rp, const unsigned char *da
  * @param maxlen <tt>oac_int32</tt>: The maximum number of bytes to store in
  *                                    the output buffer. In order to guarantee
  *                                    success, this should be at least
- *                                    <code>1276</code> for a single frame,
- *                                    or for multiple frames,
- *                                    <code>1277*(end-begin)</code>.
- *                                    However, <code>1*(end-begin)</code> plus
+ *                                    <code>OAC_SIZE_MAX+1</code> for a single
+ *                                    frame, or for multiple frames,
+ *                                    <code>(OAC_SIZE_MAX+4)*(end-begin)</code>.
+ *                                    However, <code>3*(end-begin)</code> plus
  *                                    the size of all packet data submitted to
  *                                    the repacketizer since the last call to
  *                                    oac_repacketizer_init() or
@@ -1149,9 +1152,9 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_repacketizer_get_nb_frames(OacRepacket
  * @param maxlen <tt>oac_int32</tt>: The maximum number of bytes to store in
  *                                    the output buffer. In order to guarantee
  *                                    success, this should be at least
- *                                    <code>1277*oac_repacketizer_get_nb_frames(rp)</code>.
+ *                                    <code>(OAC_SIZE_MAX+4)*oac_repacketizer_get_nb_frames(rp)</code>.
  *                                    However,
- *                                    <code>1*oac_repacketizer_get_nb_frames(rp)</code>
+ *                                    <code>3*oac_repacketizer_get_nb_frames(rp)</code>
  *                                    plus the size of all packet data
  *                                    submitted to the repacketizer since the
  *                                    last call to oac_repacketizer_init() or

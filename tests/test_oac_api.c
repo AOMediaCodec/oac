@@ -115,12 +115,60 @@ oac_uint32 *null_uint_ptr = (oac_uint32 *)NULL;
 
 static const oac_int32 oac_rates[5] = {48000, 24000, 16000, 12000, 8000};
 
+/* Scratch buffer for the encoder/decoder API tests. It only ever has to hold
+   a single encoded frame at a sane bitrate. */
+#define TEST_PACKET_MAX 1500
+
+/* Largest size that the frame length code represents in one and in two bytes. */
+#define TEST_SIZE_1B_MAX 191
+#define TEST_SIZE_2B_MAX 8383
+/* Sweep bound for the parser tests: crosses both tier boundaries. */
+#define TEST_SIZE_SWEEP 8500
+/* Packet buffer for the parser tests. The parser never reads the payload, so
+   this only has to be large enough for the headers the tests write. */
+#define TEST_PACKET_BUF 4096
+/* Arbitrary packet length used where the tests only need "some plausible,
+   non-degenerate packet length". */
+#define TEST_PKT_LEN 1024
+/* Frame size for the jumbo-packet test. Above 32767 so that it also catches a
+   regression to the old oac_int16 size[] truncation. */
+#define TEST_JUMBO_FRAME 100000
+
+/* Test-local reference implementation of the frame length code, written from
+   the specification rather than reusing the library's. test_oac_api only links
+   against the public API, so oaci_encode_size() is not available here. Returns
+   the number of bytes written. */
+static int ref_put_size(unsigned char *p, oac_int32 size) {
+    if (size <= TEST_SIZE_1B_MAX) {
+        p[0] = (unsigned char)size;
+        return 1;
+    } else if (size <= TEST_SIZE_2B_MAX) {
+        oac_int32 v = size - 192;
+        p[0] = (unsigned char)(192 + (v&0x1F));
+        p[1] = (unsigned char)(v>>5);
+        return 2;
+    } else {
+        oac_int32 v = size - 8384;
+        p[0] = (unsigned char)(224 + (v&0x1F));
+        p[1] = (unsigned char)((v>>5)&0xFF);
+        p[2] = (unsigned char)(v>>13);
+        return 3;
+    }
+}
+
+/* Number of bytes the reference encoder above uses for a given size. */
+static int ref_size_bytes(oac_int32 size) {
+    if (size <= TEST_SIZE_1B_MAX) return 1;
+    if (size <= TEST_SIZE_2B_MAX) return 2;
+    return 3;
+}
+
 oac_int32 test_dec_api(void) {
     oac_uint32 dec_final_range;
     OacDecoder *dec;
     OacDecoder *dec2;
     oac_int32 i, j, cfgs;
-    unsigned char packet[1276];
+    unsigned char packet[TEST_PACKET_MAX];
 #ifndef DISABLE_FLOAT_API
     float fbuf[960*2];
 #endif
@@ -377,7 +425,7 @@ oac_int32 test_msdec_api(void) {
     OacMSDecoder *dec;
     OacDecoder *streamdec;
     oac_int32 i, j, cfgs;
-    unsigned char packet[1276];
+    unsigned char packet[TEST_PACKET_MAX];
     unsigned char mapping[256];
 #ifndef DISABLE_FLOAT_API
     float fbuf[960*2];
@@ -764,15 +812,15 @@ oac_int32 test_msdec_api(void) {
    other implementations. */
 oac_int32 test_parse(void) {
     oac_int32 i, j, jj, sz;
-    unsigned char packet[1276];
+    unsigned char packet[TEST_PACKET_BUF];
     oac_int32 cfgs, cfgs_total;
     unsigned char toc;
-    const unsigned char *frames[48];
-    short size[48];
-    int payload_offset, ret;
+    const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET];
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
+    int payload_offset, ret, nb;
     fprintf(stdout, "\n  Packet header parsing tests\n");
     fprintf(stdout, "  ---------------------------------------------------\n");
-    memset(packet, 0, sizeof(char)*1276);
+    memset(packet, 0, sizeof(packet));
     packet[0] = 63<<2;
     if (oac_packet_parse(packet, 1, &toc, frames, 0, &payload_offset, OAC_FORMAT_STANDARD) != OAC_BAD_ARG) test_failed();
     cfgs_total = cfgs = 1;
@@ -789,16 +837,33 @@ oac_int32 test_parse(void) {
     fprintf(stdout, "    code 0 (%2d cases) ............................ OK.\n", cfgs);
     cfgs_total += cfgs; cfgs = 0;
 
+    /*code 0, the largest representable implicit length and one past it*/
+    for (i = 0; i < 64; i++) {
+        packet[0] = i<<2;
+        UNDEFINE_FOR_PARSE
+            ret = oac_packet_parse(packet, OAC_SIZE_MAX + 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+        cfgs++;
+        if (ret != 1) test_failed();
+        if (size[0] != OAC_SIZE_MAX) test_failed();
+        UNDEFINE_FOR_PARSE
+            ret = oac_packet_parse(packet, OAC_SIZE_MAX + 2, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+        cfgs++;
+        if (ret != OAC_INVALID_PACKET) test_failed();
+    }
+    fprintf(stdout, "    code 0 size limit (%2d cases) ................ OK.\n", cfgs);
+    cfgs_total += cfgs; cfgs = 0;
+
     /*code 1, two frames of the same size*/
     for (i = 0; i < 64; i++) {
         packet[0] = (i<<2) + 1;
-        for (jj = 0; jj <= 1275*2 + 3; jj++) {
+        for (jj = 0; jj <= 2*TEST_PKT_LEN + 3; jj++) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, jj, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
-            if ((jj&1) == 1 && jj <= 2551) {
-                /* Must pass if payload length even (packet length odd) and
-                   size<=2551, must fail otherwise. */
+            if ((jj&1) == 1) {
+                /* Must pass if the payload length is even (packet length odd).
+                   Unlike the old fixed frame-length limit, every such split
+                   up to OAC_SIZE_MAX per frame is representable. */
                 if (ret != 2) test_failed();
                 if (size[0] != size[1] || size[0] != ((jj - 1)>>1)) test_failed();
                 if (frames[0] != packet + 1) test_failed();
@@ -806,6 +871,17 @@ oac_int32 test_parse(void) {
                 if ((toc>>2) != i) test_failed();
             } else if (ret != OAC_INVALID_PACKET) test_failed();
         }
+        /*The largest representable pair of implicit lengths must be accepted.*/
+        UNDEFINE_FOR_PARSE
+            ret = oac_packet_parse(packet, 2*(oac_int32)OAC_SIZE_MAX + 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+        cfgs++;
+        if (ret != 2) test_failed();
+        if (size[0] != OAC_SIZE_MAX || size[1] != OAC_SIZE_MAX) test_failed();
+        /*One byte per frame more must not be.*/
+        UNDEFINE_FOR_PARSE
+            ret = oac_packet_parse(packet, 2*((oac_int32)OAC_SIZE_MAX + 1) + 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+        cfgs++;
+        if (ret != OAC_INVALID_PACKET) test_failed();
     }
     fprintf(stdout, "    code 1 (%6d cases) ........................ OK.\n", cfgs);
     cfgs_total += cfgs; cfgs = 0;
@@ -817,29 +893,34 @@ oac_int32 test_parse(void) {
             ret = oac_packet_parse(packet, 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
         cfgs++;
         if (ret != OAC_INVALID_PACKET) test_failed();
-        packet[1] = 252;
+        /*code 2, a two-byte length code truncated by the end of the packet*/
+        packet[1] = 192;
         UNDEFINE_FOR_PARSE
             ret = oac_packet_parse(packet, 2, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
         cfgs++;
         if (ret != OAC_INVALID_PACKET) test_failed();
-        for (j = 0; j < 1275; j++) {
-            if (j < 252) packet[1] = j;
-            else {
-                packet[1] = 252 + (j&3); packet[2] = (j - 252)>>2;
-            }
+        /*code 2, a three-byte length code truncated by the end of the packet*/
+        packet[1] = 224;
+        packet[2] = 0;
+        UNDEFINE_FOR_PARSE
+            ret = oac_packet_parse(packet, 3, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+        cfgs++;
+        if (ret != OAC_INVALID_PACKET) test_failed();
+        for (j = 0; j < TEST_SIZE_SWEEP; j++) {
+            nb = ref_put_size(&packet[1], j);
             /*Code 2, one too short*/
             UNDEFINE_FOR_PARSE
-                ret = oac_packet_parse(packet, j + (j < 252?2:3) - 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+                ret = oac_packet_parse(packet, 1 + nb + j - 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != OAC_INVALID_PACKET) test_failed();
-            /*Code 2, one too long*/
+            /*Code 2, the second frame one byte past what can be represented*/
             UNDEFINE_FOR_PARSE
-                ret = oac_packet_parse(packet, j + (j < 252?2:3) + 1276, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+                ret = oac_packet_parse(packet, 1 + nb + j + (oac_int32)OAC_SIZE_MAX + 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != OAC_INVALID_PACKET) test_failed();
             /*Code 2, second zero*/
             UNDEFINE_FOR_PARSE
-                ret = oac_packet_parse(packet, j + (j < 252?2:3), &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+                ret = oac_packet_parse(packet, 1 + nb + j, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != 2) test_failed();
             if (size[0] != j || size[1] != 0) test_failed();
@@ -847,10 +928,10 @@ oac_int32 test_parse(void) {
             if ((toc>>2) != i) test_failed();
             /*Code 2, normal*/
             UNDEFINE_FOR_PARSE
-                ret = oac_packet_parse(packet, (j<<1) + 4, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+                ret = oac_packet_parse(packet, (j<<1) + nb + 2, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != 2) test_failed();
-            if (size[0] != j || size[1] != (j<<1) + 3 - j - (j < 252?1:2)) test_failed();
+            if (size[0] != j || size[1] != j + 1) test_failed();
             if (frames[1] != frames[0] + size[0]) test_failed();
             if ((toc>>2) != i) test_failed();
         }
@@ -875,22 +956,22 @@ oac_int32 test_parse(void) {
         for (jj = 49; jj <= 64; jj++) {
             packet[1] = 0 + (jj&63); /*CBR, no padding*/
             UNDEFINE_FOR_PARSE
-                ret = oac_packet_parse(packet, 1275, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+                ret = oac_packet_parse(packet, TEST_PKT_LEN, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != OAC_INVALID_PACKET) test_failed();
             packet[1] = 128 + (jj&63); /*VBR, no padding*/
             UNDEFINE_FOR_PARSE
-                ret = oac_packet_parse(packet, 1275, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+                ret = oac_packet_parse(packet, TEST_PKT_LEN, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != OAC_INVALID_PACKET) test_failed();
             packet[1] = 64 + (jj&63); /*CBR, padding*/
             UNDEFINE_FOR_PARSE
-                ret = oac_packet_parse(packet, 1275, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+                ret = oac_packet_parse(packet, TEST_PKT_LEN, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != OAC_INVALID_PACKET) test_failed();
             packet[1] = 128 + 64 + (jj&63); /*VBR, padding*/
             UNDEFINE_FOR_PARSE
-                ret = oac_packet_parse(packet, 1275, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+                ret = oac_packet_parse(packet, TEST_PKT_LEN, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != OAC_INVALID_PACKET) test_failed();
         }
@@ -902,7 +983,7 @@ oac_int32 test_parse(void) {
         packet[0] = (i<<2) + 3;
         /*code 3, m is one, cbr*/
         packet[1] = 1;
-        for (j = 0; j < 1276; j++) {
+        for (j = 0; j < TEST_SIZE_SWEEP; j++) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, j + 2, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
@@ -910,12 +991,19 @@ oac_int32 test_parse(void) {
             if (size[0] != j) test_failed();
             if ((toc>>2) != i) test_failed();
         }
+        /*The largest representable implicit length must be accepted...*/
         UNDEFINE_FOR_PARSE
-            ret = oac_packet_parse(packet, 1276 + 2, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+            ret = oac_packet_parse(packet, (oac_int32)OAC_SIZE_MAX + 2, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+        cfgs++;
+        if (ret != 1) test_failed();
+        if (size[0] != OAC_SIZE_MAX) test_failed();
+        /*...and one byte more must not.*/
+        UNDEFINE_FOR_PARSE
+            ret = oac_packet_parse(packet, (oac_int32)OAC_SIZE_MAX + 3, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
         cfgs++;
         if (ret != OAC_INVALID_PACKET) test_failed();
     }
-    fprintf(stdout, "    code 3 m=1 CBR (%2d cases) ................. OK.\n", cfgs);
+    fprintf(stdout, "    code 3 m=1 CBR (%6d cases) ............... OK.\n", cfgs);
     cfgs_total += cfgs; cfgs = 0;
 
     for (i = 0; i < 64; i++) {
@@ -925,25 +1013,27 @@ oac_int32 test_parse(void) {
         frame_samp = oac_packet_get_samples_per_frame(packet, 48000);
         for (j = 2; j < 49; j++) {
             packet[1] = j;
-            for (sz = 2; sz < ((j + 2)*1275); sz++) {
+            for (sz = 2; sz < ((j + 2)*TEST_PKT_LEN); sz++) {
                 UNDEFINE_FOR_PARSE
                     ret = oac_packet_parse(packet, sz, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
                 cfgs++;
-                /*Must be <=120ms, must be evenly divisible, can't have frames>1275 bytes*/
-                if (frame_samp*j <= 5760 && (sz - 2)%j == 0 && (sz - 2)/j < 1276) {
+                /*Must be <=120ms and must be evenly divisible. There is no
+                  longer a per-frame byte limit below OAC_SIZE_MAX.*/
+                if (frame_samp*j <= 5760 && (sz - 2)%j == 0) {
                     if (ret != j) test_failed();
                     for (jj = 1; jj < ret; jj++) if (frames[jj] != frames[jj - 1] + size[jj - 1]) test_failed();
                     if ((toc>>2) != i) test_failed();
                 } else if (ret != OAC_INVALID_PACKET) test_failed();
             }
         }
-        /*Super jumbo packets*/
+        /*Super jumbo packets. The frame size here is deliberately above 32767,
+          which the old oac_int16 size[] silently truncated.*/
         packet[1] = 5760/frame_samp;
         UNDEFINE_FOR_PARSE
-            ret = oac_packet_parse(packet, 1275*packet[1] + 2, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+            ret = oac_packet_parse(packet, TEST_JUMBO_FRAME*packet[1] + 2, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
         cfgs++;
         if (ret != packet[1]) test_failed();
-        for (jj = 0; jj < ret; jj++) if (size[jj] != 1275) test_failed();
+        for (jj = 0; jj < ret; jj++) if (size[jj] != TEST_JUMBO_FRAME) test_failed();
     }
     fprintf(stdout, "    code 3 m=1-48 CBR (%2d cases) .......... OK.\n", cfgs);
     cfgs_total += cfgs; cfgs = 0;
@@ -954,7 +1044,7 @@ oac_int32 test_parse(void) {
         packet[0] = (i<<2) + 3;
         packet[1] = 128 + 1;
         frame_samp = oac_packet_get_samples_per_frame(packet, 48000);
-        for (jj = 0; jj < 1276; jj++) {
+        for (jj = 0; jj < TEST_SIZE_SWEEP; jj++) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, 2 + jj, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
@@ -963,7 +1053,12 @@ oac_int32 test_parse(void) {
             if ((toc>>2) != i) test_failed();
         }
         UNDEFINE_FOR_PARSE
-            ret = oac_packet_parse(packet, 2 + 1276, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+            ret = oac_packet_parse(packet, 2 + (oac_int32)OAC_SIZE_MAX, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+        cfgs++;
+        if (ret != 1) test_failed();
+        if (size[0] != OAC_SIZE_MAX) test_failed();
+        UNDEFINE_FOR_PARSE
+            ret = oac_packet_parse(packet, 2 + (oac_int32)OAC_SIZE_MAX + 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
         cfgs++;
         if (ret != OAC_INVALID_PACKET) test_failed();
         for (j = 2; j < 49; j++) {
@@ -973,9 +1068,9 @@ oac_int32 test_parse(void) {
                 ret = oac_packet_parse(packet, 2 + j - 2, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != OAC_INVALID_PACKET) test_failed();
-            packet[2] = 252;
-            packet[3] = 0;
-            for (jj = 4; jj < 2 + j; jj++) packet[jj] = 0;
+            /*A three-byte length code that does not fit in the packet*/
+            nb = ref_put_size(&packet[2], TEST_SIZE_2B_MAX + 1);
+            for (jj = 2 + nb; jj < 2 + j; jj++) packet[jj] = 0;
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, 2 + j, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
@@ -987,13 +1082,22 @@ oac_int32 test_parse(void) {
             cfgs++;
             if (ret != OAC_INVALID_PACKET) test_failed();
             /*One byte too short thanks to length coding*/
-            packet[2] = 252;
-            packet[3] = 0;
-            for (jj = 4; jj < 2 + j; jj++) packet[jj] = 0;
+            nb = ref_put_size(&packet[2], TEST_SIZE_2B_MAX + 1);
+            for (jj = 2 + nb; jj < 2 + nb + j - 2; jj++) packet[jj] = 0;
             UNDEFINE_FOR_PARSE
-                ret = oac_packet_parse(packet, 2 + j + 252 - 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+                ret = oac_packet_parse(packet, 2 + nb + (j - 2) + TEST_SIZE_2B_MAX + 1 - 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
             cfgs++;
             if (ret != OAC_INVALID_PACKET) test_failed();
+            /*...and exactly long enough parses, with a three-byte length code*/
+            UNDEFINE_FOR_PARSE
+                ret = oac_packet_parse(packet, 2 + nb + (j - 2) + TEST_SIZE_2B_MAX + 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+            cfgs++;
+            if (frame_samp*j <= 5760) {
+                if (ret != j) test_failed();
+                if (size[0] != TEST_SIZE_2B_MAX + 1) test_failed();
+                for (jj = 1; jj < j; jj++) if (size[jj] != 0) test_failed();
+                if ((toc>>2) != i) test_failed();
+            } else if (ret != OAC_INVALID_PACKET) test_failed();
             /*Most expensive way of coding zeros*/
             for (jj = 2; jj < 2 + j; jj++) packet[jj] = 0;
             UNDEFINE_FOR_PARSE
@@ -1004,22 +1108,17 @@ oac_int32 test_parse(void) {
                 for (jj = 0; jj < j; jj++) if (size[jj] != 0) test_failed();
                 if ((toc>>2) != i) test_failed();
             } else if (ret != OAC_INVALID_PACKET) test_failed();
-            /*Quasi-CBR use of mode 3*/
+            /*Quasi-CBR use of mode 3. The larger entries of tsz[] put the
+              per-frame length in the two- and three-byte tiers.*/
             for (sz = 0; sz < 8; sz++) {
                 const int tsz[8] = {50, 201, 403, 700, 1472, 5110, 20400, 61298};
                 int pos = 0;
                 int as = (tsz[sz] + i - j - 2)/j;
-                for (jj = 0; jj < j - 1; jj++) {
-                    if (as < 252) {
-                        packet[2 + pos] = as; pos++;
-                    } else {
-                        packet[2 + pos] = 252 + (as&3); packet[3 + pos] = (as - 252)>>2; pos += 2;
-                    }
-                }
+                for (jj = 0; jj < j - 1; jj++) pos += ref_put_size(&packet[2 + pos], as);
                 UNDEFINE_FOR_PARSE
                     ret = oac_packet_parse(packet, tsz[sz] + i, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
                 cfgs++;
-                if (frame_samp*j <= 5760 && as < 1276 && (tsz[sz] + i - 2 - pos - as*(j - 1)) < 1276) {
+                if (frame_samp*j <= 5760) {
                     if (ret != j) test_failed();
                     for (jj = 0; jj < j - 1; jj++) if (size[jj] != as) test_failed();
                     if (size[j - 1] != (tsz[sz] + i - 2 - pos - as*(j - 1))) test_failed();
@@ -1043,7 +1142,7 @@ oac_int32 test_parse(void) {
         if (ret != OAC_INVALID_PACKET) test_failed();
 
         for (sz = 0; sz < 4; sz++) {
-            const int tsz[4] = {0, 72, 512, 1275};
+            const int tsz[4] = {0, 72, 512, TEST_PKT_LEN};
             for (jj = sz; jj < 65025; jj += 11) {
                 int pos;
                 for (pos = 0; pos < jj/254; pos++) packet[2 + pos] = 255;
@@ -1059,11 +1158,10 @@ oac_int32 test_parse(void) {
                 UNDEFINE_FOR_PARSE
                     ret = oac_packet_parse(packet, 2 + jj + tsz[sz] + i + pos, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
                 cfgs++;
-                if (tsz[sz] + i < 1276) {
-                    if (ret != 1) test_failed();
-                    if (size[0] != tsz[sz] + i) test_failed();
-                    if ((toc>>2) != i) test_failed();
-                } else if (ret != OAC_INVALID_PACKET) test_failed();
+                /*Every size used here is representable, so this always parses.*/
+                if (ret != 1) test_failed();
+                if (size[0] != tsz[sz] + i) test_failed();
+                if ((toc>>2) != i) test_failed();
             }
         }
     }
@@ -1103,7 +1201,7 @@ oac_int32 test_enc_api(void) {
     oac_uint32 enc_final_range;
     OacEncoder *enc;
     oac_int32 i, j;
-    unsigned char packet[1276];
+    unsigned char packet[TEST_PACKET_MAX];
 #ifndef DISABLE_FLOAT_API
     float fbuf[960*2];
 #endif
@@ -1483,7 +1581,11 @@ oac_int32 test_enc_api(void) {
     return cfgs;
 }
 
-#define max_out (1276*48 + 48*2 + 2)
+/* Largest input payload the repacketizer test feeds in. */
+#define TEST_REPACK_MAX 1350
+/* Worst case output: OAC_MAX_FRAMES_PER_PACKET frames, each of which may need
+   a three-byte length code, plus the TOC and frame count bytes. */
+#define max_out ((TEST_REPACK_MAX + 3)*OAC_MAX_FRAMES_PER_PACKET + 2)
 int test_repacketizer_api(void) {
     int ret, cfgs, i, j, k;
     OacRepacketizer *rp;
@@ -1569,17 +1671,19 @@ int test_repacketizer_api(void) {
             if (i > 1) packet[0] += i == 2?1:3;
             packet[1] = i > 2?i:0;
             maxp = 960/(i*oac_packet_get_samples_per_frame(packet, 8000));
-            for (k = 0; k <= (1275 + 75); k += 3) {
+            for (k = 0; k <= TEST_REPACK_MAX; k += 3) {
                 /*Payload size*/
                 oac_int32 cnt, rcnt;
                 if (k%i != 0) continue; /* Only testing CBR here, payload must be a multiple of the count */
                 for (cnt = 0; cnt < maxp + 2; cnt++) {
                     if (cnt > 0) {
                         ret = oac_repacketizer_cat(rp, packet, k + (i > 2?2:1));
-                        if ((cnt <= maxp && k <= (1275*i))?ret != OAC_OK:ret != OAC_INVALID_PACKET) test_failed();
+                        /* Only the 120 ms limit can reject now: there is no
+                           longer a per-frame byte limit at this scale. */
+                        if ((cnt <= maxp)?ret != OAC_OK:ret != OAC_INVALID_PACKET) test_failed();
                         cfgs++;
                     }
-                    rcnt = k <= (1275*i)?(cnt < maxp?cnt:maxp):0;
+                    rcnt = cnt < maxp?cnt:maxp;
                     if (oac_repacketizer_get_nb_frames(rp) != rcnt*i) test_failed();
                     cfgs++;
                     ret = oac_repacketizer_out_range(rp, 0, rcnt*i, po, max_out);
@@ -1891,6 +1995,331 @@ return cfgs;
 # endif
 #endif
 
+/* Exhaustively checks the frame length code. The reference encoder above is
+   written from the specification, so this validates the library's parser
+   against an independent implementation rather than against itself. */
+oac_int32 test_frame_length_code(void) {
+    oac_int32 s, cfgs;
+    unsigned char *pkt;
+    unsigned char toc;
+    const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET];
+    oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
+    int payload_offset, nb, ret;
+
+    cfgs = 0;
+    fprintf(stdout, "\n  Frame length code tests\n");
+    fprintf(stdout, "  ---------------------------------------------------\n");
+
+    /* The parser never reads the payload, so a single buffer large enough for
+       the longest packet we claim to have is enough for every size. */
+    pkt = (unsigned char *)calloc((size_t)OAC_SIZE_MAX + 8, 1);
+    if (pkt == NULL) test_failed();
+
+    /* Every size in [0, OAC_SIZE_MAX] must survive a reference-encode followed
+       by a library parse, and must be rejected when the packet is one byte
+       short of what the length claims. */
+    pkt[0] = (31<<2) + 2;
+    for (s = 0; s <= OAC_SIZE_MAX; s++) {
+        nb = ref_put_size(&pkt[1], s);
+        if (nb != (s < 192 ? 1 : (s < 8384 ? 2 : 3))) test_failed();
+        UNDEFINE_FOR_PARSE
+            ret = oac_packet_parse(pkt, 1 + nb + s, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+        if (ret != 2) test_failed();
+        if (size[0] != s || size[1] != 0) test_failed();
+        if (frames[0] != pkt + 1 + nb) test_failed();
+        if (frames[1] != frames[0] + s) test_failed();
+        UNDEFINE_FOR_PARSE
+            ret = oac_packet_parse(pkt, 1 + nb + s - 1, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+        if (ret != OAC_INVALID_PACKET) test_failed();
+        cfgs += 2;
+    }
+    fprintf(stdout, "    exhaustive parse 0..%d ................. OK.\n", OAC_SIZE_MAX);
+
+    /* Now the other direction: the length bytes the library writes must match
+       the reference at every tier boundary. The repacketizer is the only public
+       way to make it emit an explicit length. */
+    {
+        const oac_int32 boundaries[9] = {0, 191, 192, 223, 224, 8383, 8384, 100000, OAC_SIZE_MAX};
+        unsigned char *out;
+        unsigned char ref[3];
+        OacRepacketizer *rp;
+        oac_int32 out_len;
+        int i;
+
+        out = (unsigned char *)calloc((size_t)OAC_SIZE_MAX + 16, 1);
+        if (out == NULL) test_failed();
+        rp = oac_repacketizer_create(OAC_FORMAT_STANDARD);
+        if (rp == NULL) test_failed();
+
+        for (i = 0; i < 9; i++) {
+            s = boundaries[i];
+            /* Two code 0 frames of different sizes, so the output uses code 2
+               and has to signal the length of the first one explicitly. The
+               same buffer backs both frames; the repacketizer only keeps
+               pointers into it. */
+            pkt[0] = (31<<2) + 0;
+            oac_repacketizer_init(rp, OAC_FORMAT_STANDARD);
+            if (oac_repacketizer_cat(rp, pkt, 1 + s) != OAC_OK) test_failed();
+            if (oac_repacketizer_cat(rp, pkt, 1 + 1) != OAC_OK) test_failed();
+            out_len = oac_repacketizer_out(rp, out, OAC_SIZE_MAX + 16);
+            nb = ref_put_size(ref, s);
+            if (out_len != 1 + nb + s + 1) test_failed();
+            if (memcmp(out + 1, ref, nb) != 0) test_failed();
+            UNDEFINE_FOR_PARSE
+                ret = oac_packet_parse(out, out_len, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD);
+            if (ret != 2) test_failed();
+            if (size[0] != s || size[1] != 1) test_failed();
+            cfgs += 4;
+        }
+        oac_repacketizer_destroy(rp);
+        free(out);
+    }
+    fprintf(stdout, "    length bytes written at tier boundaries ..... OK.\n");
+
+    /* Round trip real payloads of assorted sizes through the repacketizer, in
+       both directions and across all three length tiers. Two equal frames are
+       re-coded as code 1, which drops the explicit length; anything else keeps
+       code 2. Getting that accounting wrong is what would overrun a caller's
+       buffer. */
+    {
+        const oac_int32 sizes[8] = {1, 50, 191, 192, 300, 8383, 8384, 20000};
+        const oac_int32 cap = 2*20000 + 16;
+        unsigned char *in;
+        unsigned char *out;
+        OacRepacketizer *rp;
+        int i, j;
+
+        in = (unsigned char *)malloc(cap);
+        out = (unsigned char *)malloc(cap);
+        if (in == NULL || out == NULL) test_failed();
+        rp = oac_repacketizer_create(OAC_FORMAT_STANDARD);
+        if (rp == NULL) test_failed();
+
+        for (i = 0; i < 8; i++) {
+            for (j = 0; j < 8; j++) {
+                oac_int32 s0 = sizes[i];
+                oac_int32 s1 = sizes[j];
+                oac_int32 k, len, expect;
+
+                /* Build a code 2 packet by hand: 20 ms CELT-only stereo ToC. */
+                in[0] = (15<<3)|(1<<2)|2;
+                len = 1;
+                len += ref_put_size(in + len, s0);
+                for (k = 0; k < s0; k++) in[len + k] = (unsigned char)(k + i);
+                len += s0;
+                for (k = 0; k < s1; k++) in[len + k] = (unsigned char)(k + j + 7);
+                len += s1;
+
+                if (oac_repacketizer_init(rp, OAC_FORMAT_STANDARD) == NULL) test_failed();
+                if (oac_repacketizer_cat(rp, in, len) != OAC_OK) test_failed();
+                if (oac_repacketizer_get_nb_frames(rp) != 2) test_failed();
+                ret = oac_repacketizer_out(rp, out, cap);
+                expect = (s0 == s1) ? 1 + s0 + s1 : 1 + ref_size_bytes(s0) + s0 + s1;
+                if (ret != expect) test_failed();
+
+                UNDEFINE_FOR_PARSE
+                    if (oac_packet_parse(out, ret, &toc, frames, size, &payload_offset,
+                            OAC_FORMAT_STANDARD) != 2) test_failed();
+                if (size[0] != s0 || size[1] != s1) test_failed();
+                if (memcmp(frames[0], in + 1 + ref_size_bytes(s0), s0) != 0) test_failed();
+                if (memcmp(frames[1], in + len - s1, s1) != 0) test_failed();
+
+                /* Splitting back into single frames must also work. */
+                if (oac_repacketizer_out_range(rp, 0, 1, out, cap) != 1 + s0) test_failed();
+                if (oac_repacketizer_out_range(rp, 1, 2, out, cap) != 1 + s1) test_failed();
+                cfgs += 6;
+            }
+        }
+        oac_repacketizer_destroy(rp);
+        free(in);
+        free(out);
+    }
+    fprintf(stdout, "    repacketizer round trip across tiers ........ OK.\n");
+
+
+    free(pkt);
+    fprintf(stdout, "                    All frame length code tests passed\n");
+    fprintf(stdout, "                          (%d API invocations)\n", cfgs);
+    return cfgs;
+}
+
+
+
+/* Room kept aside for the reference bitstream of one configuration. */
+#define TEST_REF_FRAMES 6
+#define TEST_REF_FRAME_BYTES 65536
+
+/* Encoding the same audio at the same bitrate must give the exact same
+   bitstream no matter how much spare room the caller left in the output
+   buffer. Before the length signalling change, max_data_bytes could never
+   exceed 1276, so a number of derived rate computations silently assumed a
+   small value; with big buffers they overflow and quietly change the coding
+   decisions (bandwidth collapse, redundancy turning itself off, ...).
+   Comparing whole packets rather than just the length catches all of those. */
+oac_int32 test_encoder_buffer_independence(void) {
+    const int fsz[4] = {120, 480, 960, 2880};
+    const oac_int32 rates[3] = {24000, 64000, 256000};
+    const oac_int32 bufs[3] = {8000, 100000, 4000000};
+    const int apps[2] = {OAC_APPLICATION_AUDIO, OAC_APPLICATION_VOIP};
+    /* Sweeping the bitrate walks the encoder through SILK/hybrid/CELT and the
+       mode-switching redundancy, which a steady-state encode never reaches. */
+    const oac_int32 sweep[TEST_REF_FRAMES] = {12000, 40000, 128000, 12000, 96000, 16000};
+    oac_int32 cfgs;
+    int fi, ri, ai, ch, bi, f, i, pass;
+    unsigned int seed;
+    short *pcm;
+    short *out;
+    unsigned char *ref;
+    int ref_len[TEST_REF_FRAMES];
+
+    cfgs = 0;
+    fprintf(stdout, "\n  Encoder output buffer independence tests\n");
+    fprintf(stdout, "  ---------------------------------------------------\n");
+
+    pcm = (short *)malloc(sizeof(short)*2880*2);
+    out = (short *)malloc(sizeof(short)*5760*2);
+    ref = (unsigned char *)malloc((size_t)TEST_REF_FRAMES*TEST_REF_FRAME_BYTES);
+    if (pcm == NULL || out == NULL || ref == NULL) test_failed();
+
+    /* pass 0: steady state at a fixed bitrate. pass 1: bitrate sweep, which
+       walks through SILK/hybrid/CELT and the mode-switch redundancy. pass 2:
+       same sweep with FEC on. FEC has to be a separate pass rather than part of
+       pass 1, because it biases the encoder towards SILK hard enough that the
+       mode transitions never happen. */
+    for (pass = 0; pass < 3; pass++)
+    for (fi = 0; fi < 4; fi++)
+    for (ri = 0; ri < 3; ri++)
+    for (ai = 0; ai < 2; ai++)
+    for (ch = 1; ch <= 2; ch++) {
+        if (pass > 0 && (fi != 2 || ri != 0)) continue; /* sweep only needs 20 ms */
+        for (bi = 0; bi < 3; bi++) {
+            OacEncoder *enc;
+            OacDecoder *dec;
+            unsigned char *data;
+            int err;
+
+            /* --enable-fuzzing makes the encoder take random coding decisions,
+               and oac_select_arch() randomly downgrades the SIMD path on every
+               create, so the three runs would diverge for reasons that have
+               nothing to do with the output buffer. Restarting the generator
+               from the same seed before each run gives all three the same
+               sequence of random decisions, so any remaining difference really
+               is caused by the buffer size. Builds that never call rand() are
+               unaffected. */
+            srand((unsigned)((((pass*4 + fi)*3 + ri)*2 + ai)*2 + ch));
+
+            enc = oac_encoder_create(48000, ch, OAC_FORMAT_STANDARD, apps[ai], &err);
+            if (err != OAC_OK || enc == NULL) test_failed();
+            dec = oac_decoder_create(48000, ch, OAC_FORMAT_STANDARD, &err);
+            if (err != OAC_OK || dec == NULL) test_failed();
+            if (oac_encoder_ctl(enc, OAC_SET_BITRATE(rates[ri])) != OAC_OK) test_failed();
+            if (oac_encoder_ctl(enc, OAC_SET_VBR(1)) != OAC_OK) test_failed();
+            if (oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(3)) != OAC_OK) test_failed();
+            if (pass == 2) {
+                if (oac_encoder_ctl(enc, OAC_SET_INBAND_FEC(1)) != OAC_OK) test_failed();
+                if (oac_encoder_ctl(enc, OAC_SET_PACKET_LOSS_PERC(20)) != OAC_OK) test_failed();
+            }
+            data = (unsigned char *)malloc(bufs[bi]);
+            if (data == NULL) test_failed();
+            seed = 1234u;
+            for (f = 0; f < TEST_REF_FRAMES; f++) {
+                oac_uint32 erange, drange;
+                int dlen, len;
+                for (i = 0; i < fsz[fi]*ch; i++) {
+                    seed = 1664525u*seed + 1013904223u;
+                    pcm[i] = (short)((int)(seed>>20) - 2048);
+                }
+                if (pass > 0 && oac_encoder_ctl(enc, OAC_SET_BITRATE(sweep[f])) != OAC_OK)
+                    test_failed();
+                len = oac_encode(enc, pcm, fsz[fi], data, bufs[bi]);
+                if (len < 0 || len > bufs[bi]) test_failed();
+                if (len > TEST_REF_FRAME_BYTES) test_failed();
+                if (oac_encoder_ctl(enc, OAC_GET_FINAL_RANGE(&erange)) != OAC_OK) test_failed();
+                if (bi == 0) {
+                    ref_len[f] = len;
+                    memcpy(ref + (size_t)f*TEST_REF_FRAME_BYTES, data, len);
+                } else {
+                    /* The only difference between the runs is the buffer size. */
+                    if (len != ref_len[f]) test_failed();
+                    if (memcmp(ref + (size_t)f*TEST_REF_FRAME_BYTES, data, len) != 0) test_failed();
+                }
+                dlen = oac_decode(dec, data, len, out, 5760, 0);
+                if (dlen != fsz[fi]) test_failed();
+                if (oac_decoder_ctl(dec, OAC_GET_FINAL_RANGE(&drange)) != OAC_OK) test_failed();
+                if (erange != drange) test_failed();
+                cfgs += 4;
+            }
+            free(data);
+            oac_encoder_destroy(enc);
+            oac_decoder_destroy(dec);
+        }
+    }
+    free(pcm);
+    free(out);
+    free(ref);
+    fprintf(stdout, "    encoder ignores spare output room ........... OK.\n");
+
+    /* Frame sizes above 20 ms are coded as several 20 ms frames in one packet.
+       That path sizes a scratch buffer on the stack; if it were sized from the
+       caller's output buffer rather than from what the frame encoder can
+       actually be asked for, simply offering a large buffer would crash the
+       encoder. 9 MB is above the usual 8 MB stack limit, which is the point. */
+    {
+        const int big_fsz[4] = {1920, 2880, 4800, 5760};
+        const oac_int32 bufsize = 9000000;
+        unsigned char *data;
+        int vbr;
+
+        pcm = (short *)malloc(sizeof(short)*5760*2);
+        out = (short *)malloc(sizeof(short)*5760*2);
+        data = (unsigned char *)malloc(bufsize);
+        if (pcm == NULL || out == NULL || data == NULL) test_failed();
+        for (fi = 0; fi < 4; fi++)
+        for (ch = 1; ch <= 2; ch++)
+        for (vbr = 0; vbr <= 1; vbr++) {
+            OacEncoder *enc;
+            OacDecoder *dec;
+            int err;
+
+            enc = oac_encoder_create(48000, ch, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
+            if (err != OAC_OK || enc == NULL) test_failed();
+            dec = oac_decoder_create(48000, ch, OAC_FORMAT_STANDARD, &err);
+            if (err != OAC_OK || dec == NULL) test_failed();
+            if (oac_encoder_ctl(enc, OAC_SET_BITRATE(96000)) != OAC_OK) test_failed();
+            if (oac_encoder_ctl(enc, OAC_SET_VBR(vbr)) != OAC_OK) test_failed();
+            if (oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(3)) != OAC_OK) test_failed();
+            seed = 777u;
+            for (f = 0; f < 2; f++) {
+                oac_uint32 erange, drange;
+                oac_int32 len;
+                int dlen;
+                for (i = 0; i < big_fsz[fi]*ch; i++) {
+                    seed = 1664525u*seed + 1013904223u;
+                    pcm[i] = (short)((int)(seed>>20) - 2048);
+                }
+                len = oac_encode(enc, pcm, big_fsz[fi], data, bufsize);
+                if (len < 0 || len > bufsize) test_failed();
+                if (oac_encoder_ctl(enc, OAC_GET_FINAL_RANGE(&erange)) != OAC_OK) test_failed();
+                dlen = oac_decode(dec, data, len, out, 5760, 0);
+                if (dlen != big_fsz[fi]) test_failed();
+                if (oac_decoder_ctl(dec, OAC_GET_FINAL_RANGE(&drange)) != OAC_OK) test_failed();
+                if (erange != drange) test_failed();
+                cfgs += 4;
+            }
+            oac_encoder_destroy(enc);
+            oac_decoder_destroy(dec);
+        }
+        free(pcm);
+        free(out);
+        free(data);
+    }
+    fprintf(stdout, "    large buffers do not blow the stack ......... OK.\n");
+
+    fprintf(stdout, "              All encoder buffer independence tests passed\n");
+    fprintf(stdout, "                          (%d API invocations)\n", cfgs);
+    return cfgs;
+}
+
 int main(int _argc, char **_argv) {
     oac_int32 total;
     const char * oversion;
@@ -1911,7 +2340,9 @@ int main(int _argc, char **_argv) {
     total += test_dec_api();
     total += test_msdec_api();
     total += test_parse();
+    total += test_frame_length_code();
     total += test_enc_api();
+    total += test_encoder_buffer_independence();
     total += test_repacketizer_api();
     total += test_malloc_fail();
 

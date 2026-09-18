@@ -69,16 +69,35 @@
 #include <stdarg.h> /* va_list */
 #include <stddef.h> /* offsetof */
 
+/** Number of bytes needed to signal a frame length of @a size bytes.
+ * Monotonic in @a size, so reserving space from an upper bound never
+ * under-reserves. See OAC_SIZE_MAX for the encoding. */
+static OAC_INLINE int oaci_size_bytes(oac_int32 size) {
+    if (size < 192)  return 1;
+    if (size < 8384) return 2;
+    return 3;
+}
+
+/** Largest payload (in bytes) a frame of this configuration can ever need,
+ * assuming lossless coding at 34 bits per 96-kHz sample per channel. Used to
+ * size internal scratch buffers, which must not scale with whatever buffer the
+ * caller happens to provide. */
+static OAC_INLINE oac_int32 oaci_max_frame_bytes(oac_int32 frame_size, oac_int32 Fs, int channels) {
+    oac_int64 samples_96k = (oac_int64)frame_size * 96000 / Fs;
+    oac_int64 bytes = (samples_96k * channels * 34 + 7) / 8;
+    return (oac_int32)IMIN(bytes, OAC_SIZE_MAX);
+}
+
 struct OacRepacketizer {
     unsigned char toc;
     int nb_frames;
-    const unsigned char *frames[48];
-    oac_int16 len[48];
+    const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET];
+    oac_int32 len[OAC_MAX_FRAMES_PER_PACKET];
     int framesize;
     int format;
-    const unsigned char *paddings[48];
-    oac_int32 padding_len[48];
-    unsigned char padding_nb_frames[48];
+    const unsigned char *paddings[OAC_MAX_FRAMES_PER_PACKET];
+    oac_int32 padding_len[OAC_MAX_FRAMES_PER_PACKET];
+    unsigned char padding_nb_frames[OAC_MAX_FRAMES_PER_PACKET];
 };
 
 typedef struct OacExtensionIterator {
@@ -212,7 +231,7 @@ int oaci_is_digital_silence(const oac_res* pcm, int frame_size, int channels, in
 
 void oac_pcm_soft_clip_impl(float *_x, int N, int C, float *declip_mem, int arch);
 
-int oaci_encode_size(int size, unsigned char *data);
+int oaci_encode_size(oac_int32 size, unsigned char *data);
 
 oac_int32 oaci_frame_size_select(int application, oac_int32 frame_size, int variable_duration, oac_int32 Fs);
 
@@ -238,7 +257,7 @@ static OAC_INLINE int oaci_align(int i) {
 
 int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     int self_delimited, unsigned char *out_toc,
-    const unsigned char *frames[48], oac_int16 size[48],
+    const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET], oac_int32 size[OAC_MAX_FRAMES_PER_PACKET],
     int *payload_offset, oac_int32 *packet_offset,
     const unsigned char **padding, oac_int32 *padding_len,
     int format);
