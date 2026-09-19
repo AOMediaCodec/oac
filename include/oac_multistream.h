@@ -192,7 +192,7 @@ extern "C" {
  * nb_frames = oac_packet_get_nb_frames(data, len);
  * if (nb_frames < 1)
  *   return nb_frames;
- * nb_samples = oac_packet_get_samples_per_frame(data, 48000) * nb_frames;
+ * nb_samples = oac_packet_get_samples_per_frame(data, len, 48000) * nb_frames;
  * @endcode
  *
  * The general encoding and decoding process proceeds exactly the same as in

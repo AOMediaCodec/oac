@@ -106,6 +106,9 @@ int oac_multistream_decoder_init(
     int i, ret;
     char *ptr;
 
+    /* The multistream API is capped at 255 channels rather than
+       OAC_MAX_CHANNELS (256) because the mapping table uses the value 255 to
+       mark a channel as silent, so 255 is not usable as a stream index. */
     if ((channels > 255) || (channels < 1) || (coupled_streams > streams)
         || (streams < 1) || (coupled_streams < 0) || (streams > 255 - coupled_streams))
         return OAC_BAD_ARG;
@@ -182,8 +185,7 @@ static int oac_multistream_packet_validate(const unsigned char *data,
         if (len <= 0)
             return OAC_INVALID_PACKET;
         count = oac_packet_parse_impl(data, len, s != nb_streams - 1, &toc, NULL,
-                                     size, NULL, &packet_offset, NULL, NULL,
-                                     OAC_FORMAT_STANDARD);
+                                     size, NULL, &packet_offset, NULL, NULL);
         if (count < 0)
             return count;
         tmp_samples = oac_packet_get_nb_samples(data, packet_offset, Fs);

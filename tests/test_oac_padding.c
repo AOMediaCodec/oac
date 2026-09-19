@@ -89,8 +89,12 @@ void test_overflow(void) {
         fprintf(stderr, "FAIL (out of memory)\n");
         test_failed();
     }
+    /* CELT fullband 20 ms, S=1, X=1, P=1. The extended byte has to describe a
+       configuration this decoder accepts (V=0, F=0, A=0, C=0, i.e. one frame
+       of two channels); anything else is thrown out by the channel check in
+       oac_decode() and the padding overflow below is never reached. */
     in[0] = 0xff;
-    in[1] = 0x41;
+    in[1] = 0x00;
     memset(in + 2, 0xff, PACKETSIZE - 3);
     in[PACKETSIZE - 1] = 0x0b;
 

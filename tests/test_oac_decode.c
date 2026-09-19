@@ -203,7 +203,7 @@ int test_decoder_code0(int no_fuzz) {
         packet[0] = i<<2;
         packet[1] = 255;
         packet[2] = 255;
-        err = oac_packet_get_nb_channels(packet);
+        err = oac_packet_get_nb_channels(packet, 3);
         if (err != (i&1) + 1) test_failed();
 
         for (t = 0; t < 5*2; t++) {

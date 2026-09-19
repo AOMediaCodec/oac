@@ -158,8 +158,6 @@ int get_frame_size_enum(int frame_size, int sampling_rate) {
         frame_size_enum = OAC_FRAMESIZE_60_MS;
     else if (frame_size == 4*sampling_rate/50)
         frame_size_enum = OAC_FRAMESIZE_80_MS;
-    else if (frame_size == 5*sampling_rate/50)
-        frame_size_enum = OAC_FRAMESIZE_100_MS;
     else if (frame_size == 6*sampling_rate/50)
         frame_size_enum = OAC_FRAMESIZE_120_MS;
     else
@@ -258,7 +256,7 @@ void fuzz_encoder_settings(const int num_encoders, const int num_setting_changes
     int lsb_depths[2] = {8, 24};
     int prediction_disabled[3] = {0, 0, 1};
     int use_dtx[2] = {0, 1};
-    int frame_sizes_ms_x2[9] = {5, 10, 20, 40, 80, 120, 160, 200, 240}; /* x2 to avoid 2.5 ms */
+    int frame_sizes_ms_x2[8] = {5, 10, 20, 40, 80, 120, 160, 240}; /* x2 to avoid 2.5 ms */
 
     for (i = 0; i < num_encoders; i++) {
         int sampling_rate = RAND_SAMPLE(sampling_rates);
@@ -634,7 +632,7 @@ int run_test1(int no_fuzz) {
         /* We fuzz the packet, but take care not to only corrupt the payload
            Corrupted headers are tested elsewhere and we need to actually run
            the decoders in order to compare them. */
-        if (oac_packet_parse(packet, len, &toc, frames, size, &payload_offset, OAC_FORMAT_STANDARD) <= 0) test_failed();
+        if (oac_packet_parse(packet, len, &toc, frames, size, &payload_offset) <= 0) test_failed();
         if ((fast_rand()&1023) == 0) len = 0;
         for (j = (oac_int32)(frames[0] - packet); j < len;
              j++) for (jj = 0; jj < 8; jj++) packet[j] ^= ((!no_fuzz) && ((fast_rand()&1023) == 0))<<jj;
