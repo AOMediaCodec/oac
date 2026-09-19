@@ -104,6 +104,18 @@ static int test_ambisonics_encode_decode(int channels) {
             fprintf(stderr, "  Encoded %d bytes\n", nbBytes);
         }
 
+        if (oac_packet_get_format(packet, nbBytes) != OAC_FORMAT_AMBISONICS) {
+            fprintf(stderr, "  oac_packet_get_format failed for %d channels\n", channels);
+            ret = 0;
+            goto cleanup;
+        }
+        if (oac_packet_get_nb_channels(packet, nbBytes) != channels) {
+            fprintf(stderr, "  oac_packet_get_nb_channels failed: got %d, expected %d\n",
+                    oac_packet_get_nb_channels(packet, nbBytes), channels);
+            ret = 0;
+            goto cleanup;
+        }
+
         ret = oac_decode_float(dec, packet, nbBytes, pcm_out, FRAME_SIZE, 0);
         if (ret != FRAME_SIZE) {
             fprintf(stderr, "  oac_decode_float failed: %d (expected %d)\n", ret, FRAME_SIZE);
@@ -129,6 +141,64 @@ cleanup:
     free(pcm_in);
     free(pcm_out);
     return ret;
+}
+
+static int test_higher_order_ambisonics_decoder(int order) {
+    int channels = (order + 1) * (order + 1);
+    int err;
+    OacEncoder *enc;
+    OacDecoder *dec;
+    unsigned char pkt[4];
+    float *pcm_out;
+    int ret;
+
+    /* Encoder must reject orders > OAC_MAX_ENCODER_AMBISONICS_ORDER (5) */
+    if (oac_encoder_get_size(channels, OAC_FORMAT_AMBISONICS) != 0) {
+        fprintf(stderr, "  oac_encoder_get_size(%d, AMBI) should be 0 for order %d\n", channels, order);
+        return 0;
+    }
+    enc = oac_encoder_create(48000, channels, OAC_FORMAT_AMBISONICS, OAC_APPLICATION_AUDIO, &err);
+    if (enc != NULL || err != OAC_BAD_ARG) {
+        if (enc) oac_encoder_destroy(enc);
+        fprintf(stderr, "  oac_encoder_create(%d, AMBI) should fail for order %d\n", channels, order);
+        return 0;
+    }
+
+    /* Decoder must accept orders 6..15 */
+    if (oac_decoder_get_size(channels, OAC_FORMAT_AMBISONICS) <= 0) {
+        fprintf(stderr, "  oac_decoder_get_size(%d, AMBI) failed for order %d\n", channels, order);
+        return 0;
+    }
+    dec = oac_decoder_create(48000, channels, OAC_FORMAT_AMBISONICS, &err);
+    if (dec == NULL || err != OAC_OK) {
+        fprintf(stderr, "  oac_decoder_create(%d, AMBI) failed for order %d: %d\n", channels, order, err);
+        return 0;
+    }
+
+    /* Construct a 1-frame 20ms CELT FB Ambisonics ToC header for this order */
+    pkt[0] = (unsigned char)((31 << 3) | ((order & 1) << 2) | 2);
+    pkt[1] = (unsigned char)(0x08 | ((order >> 1) & 0x07));
+    pkt[2] = 0;
+    pkt[3] = 0;
+
+    if (oac_packet_get_format(pkt, 4) != OAC_FORMAT_AMBISONICS) {
+        oac_decoder_destroy(dec);
+        return 0;
+    }
+    if (oac_packet_get_nb_channels(pkt, 4) != channels) {
+        oac_decoder_destroy(dec);
+        return 0;
+    }
+
+    pcm_out = (float *)malloc(FRAME_SIZE * channels * sizeof(float));
+    if (pcm_out == NULL) {
+        oac_decoder_destroy(dec);
+        return 0;
+    }
+    ret = oac_decode_float(dec, pkt, 4, pcm_out, FRAME_SIZE, 0);
+    free(pcm_out);
+    oac_decoder_destroy(dec);
+    return (ret == FRAME_SIZE);
 }
 
 static int test_format_ctl(void) {
@@ -199,21 +269,21 @@ static int test_invalid_combinations(void) {
 int main(void) {
     int i;
     int passed = 0, failed = 0;
-    /* Build ambisonics channel counts from OAC_MAX_AMBISONICS_ORDER (skip order 0) */
-    int ambisonics_channels[OAC_MAX_AMBISONICS_ORDER];
-    int num_ambisonics_configs = OAC_MAX_AMBISONICS_ORDER;
+    /* Build ambisonics channel counts from OAC_MAX_ENCODER_AMBISONICS_ORDER (skip order 0) */
+    int ambisonics_channels[OAC_MAX_ENCODER_AMBISONICS_ORDER];
+    int num_ambisonics_configs = OAC_MAX_ENCODER_AMBISONICS_ORDER;
     for (i = 0; i < num_ambisonics_configs; i++)
         ambisonics_channels[i] = (i+2)*(i+2);
 
     printf("Testing ambisonics multi-channel support\n");
     printf("=========================================\n\n");
 
-    /* Test creation for all valid ambisonics channel counts */
-    printf("Testing encoder/decoder creation:\n");
+    /* Test creation for all valid encoder/decoder ambisonics channel counts */
+    printf("Testing encoder/decoder creation (orders 1..%d):\n", OAC_MAX_ENCODER_AMBISONICS_ORDER);
     for (i = 0; i < num_ambisonics_configs; i++) {
         int channels = ambisonics_channels[i];
         printf("  %d channels (order %d)... ", channels, i + 1);
-        if (test_ambisonics_create(channels))
+        if (test_ambisonics_create(channels)) {
             printf("OK\n");
             passed++;
         } else {
@@ -222,12 +292,26 @@ int main(void) {
         }
     }
 
-    /* Test encode/decode for all valid ambisonics channel counts */
-    printf("\nTesting encode/decode round-trip:\n");
+    /* Test encode/decode for all valid encoder/decoder ambisonics channel counts */
+    printf("\nTesting encode/decode round-trip (orders 1..%d):\n", OAC_MAX_ENCODER_AMBISONICS_ORDER);
     for (i = 0; i < num_ambisonics_configs; i++) {
         int channels = ambisonics_channels[i];
         printf("  %d channels (order %d)... ", channels, i + 1);
-        if (test_ambisonics_encode_decode(channels))
+        if (test_ambisonics_encode_decode(channels)) {
+            printf("OK\n");
+            passed++;
+        } else {
+            printf("FAILED\n");
+            failed++;
+        }
+    }
+
+    /* Test higher-order Ambisonics decoder & ToC parsing (orders 6..15) */
+    printf("\nTesting higher-order decoder & ToC parsing (orders %d..%d):\n",
+           OAC_MAX_ENCODER_AMBISONICS_ORDER + 1, OAC_MAX_AMBISONICS_ORDER);
+    for (i = OAC_MAX_ENCODER_AMBISONICS_ORDER + 1; i <= OAC_MAX_AMBISONICS_ORDER; i++) {
+        printf("  %d channels (order %d)... ", (i + 1) * (i + 1), i);
+        if (test_higher_order_ambisonics_decoder(i)) {
             printf("OK\n");
             passed++;
         } else {

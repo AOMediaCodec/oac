@@ -951,8 +951,6 @@ int main(int argc, char *argv[]) {
             variable_duration = OAC_FRAMESIZE_60_MS;
         else if (frame_size == 4*sampling_rate/50)
             variable_duration = OAC_FRAMESIZE_80_MS;
-        else if (frame_size == 5*sampling_rate/50)
-            variable_duration = OAC_FRAMESIZE_100_MS;
         else
             variable_duration = OAC_FRAMESIZE_120_MS;
         oac_encoder_ctl(enc, OAC_SET_EXPERT_FRAME_DURATION(variable_duration));

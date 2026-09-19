@@ -90,7 +90,7 @@ void test_overflow(void) {
         test_failed();
     }
     in[0] = 0xff;
-    in[1] = 0x41;
+    in[1] = 0x00;
     memset(in + 2, 0xff, PACKETSIZE - 3);
     in[PACKETSIZE - 1] = 0x0b;
 

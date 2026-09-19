@@ -280,6 +280,21 @@ extern "C" {
  * @hideinitializer */
 #define OAC_SIZE_MAX 2105535
 
+/* OAC Packet Table of Contents (ToC) byte layout (MSB-first bit numbering):
+ *   Main ToC byte (data[0]):
+ *     bits 0..4 (0xF8): Mode, bandwidth, and base frame size (M)
+ *     bit  5    (0x04): Stereo flag / Ambisonics order LSB / channel LSB (S)
+ *     bit  6    (0x02): Extended ToC present flag (X)
+ *     bit  7    (0x01): Padding / extension present flag (P)
+ *   Extended ToC byte (data[1], present when X == 1):
+ *     bit  0    (0x80): VBR frame sizes flag (V)
+ *     bits 1..3 (0x70): Packet duration index offset (F)
+ *     bit  4    (0x08): Ambisonics format flag (A)
+ *     bits 5..7 (0x07): Channel count / Ambisonics order high bits (C)
+ *   Optional channel escape byte (data[2], present when X == 1, A == 0, C == 7, S == 1):
+ *     bits 0..7       : channels - 1 (1..256 channels)
+ */
+
 #define OAC_SIGNAL_VOICE                    3001 /**< Signal being encoded is voice */
 #define OAC_SIGNAL_MUSIC                    3002 /**< Signal being encoded is music */
 #define OAC_BANDWIDTH_NARROWBAND            1101 /**< 4 kHz bandpass @hideinitializer*/
@@ -296,8 +311,7 @@ extern "C" {
 #define OAC_FRAMESIZE_40_MS                 5005 /**< Use 40 ms frames */
 #define OAC_FRAMESIZE_60_MS                 5006 /**< Use 60 ms frames */
 #define OAC_FRAMESIZE_80_MS                 5007 /**< Use 80 ms frames */
-#define OAC_FRAMESIZE_100_MS                5008 /**< Use 100 ms frames */
-#define OAC_FRAMESIZE_120_MS                5009 /**< Use 120 ms frames */
+#define OAC_FRAMESIZE_120_MS                5008 /**< Use 120 ms frames */
 
 /**@}*/
 
@@ -659,7 +673,6 @@ extern "C" {
  * <dt>OAC_FRAMESIZE_40_MS</dt><dd>Use 40 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_60_MS</dt><dd>Use 60 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_80_MS</dt><dd>Use 80 ms frames.</dd>
- * <dt>OAC_FRAMESIZE_100_MS</dt><dd>Use 100 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_120_MS</dt><dd>Use 120 ms frames.</dd>
  * </dl>
  * @hideinitializer */
@@ -676,7 +689,6 @@ extern "C" {
  * <dt>OAC_FRAMESIZE_40_MS</dt><dd>Use 40 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_60_MS</dt><dd>Use 60 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_80_MS</dt><dd>Use 80 ms frames.</dd>
- * <dt>OAC_FRAMESIZE_100_MS</dt><dd>Use 100 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_120_MS</dt><dd>Use 120 ms frames.</dd>
  * </dl>
  * @hideinitializer */

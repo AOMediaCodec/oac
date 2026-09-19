@@ -84,10 +84,12 @@
 #define CELTDecoder OacCustomDecoder
 #define CELTMode OacCustomMode
 
-/** Maximum supported ambisonics order. */
-#define OAC_MAX_AMBISONICS_ORDER 5
+/** Maximum supported ambisonics order (bitstream / decoder). */
+#define OAC_MAX_AMBISONICS_ORDER 15
+/** Maximum ambisonics order currently supported by the encoder. */
+#define OAC_MAX_ENCODER_AMBISONICS_ORDER 5
 #define OAC_MAX_AMBISONICS_CHANNELS ((OAC_MAX_AMBISONICS_ORDER+1)*(OAC_MAX_AMBISONICS_ORDER+1))
-#define OAC_MAX_CHANNELS 255
+#define OAC_MAX_CHANNELS 256
 /* Check that OAC_MAX_CHANNELS is large enough */
 typedef char oac_assert_max_channels_sufficient[(OAC_MAX_CHANNELS >= OAC_MAX_AMBISONICS_CHANNELS) ? 1 : -1];
 #define LEAK_BANDS 19

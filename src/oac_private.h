@@ -95,6 +95,7 @@ struct OacRepacketizer {
     oac_int32 len[OAC_MAX_FRAMES_PER_PACKET];
     int framesize;
     int format;
+    int channels;
     const unsigned char *paddings[OAC_MAX_FRAMES_PER_PACKET];
     oac_int32 padding_len[OAC_MAX_FRAMES_PER_PACKET];
     unsigned char padding_nb_frames[OAC_MAX_FRAMES_PER_PACKET];
@@ -233,6 +234,18 @@ void oac_pcm_soft_clip_impl(float *_x, int N, int C, float *declip_mem, int arch
 
 int oaci_encode_size(oac_int32 size, unsigned char *data);
 
+static OAC_INLINE int oac_packet_get_mode(const unsigned char *data) {
+    int mode;
+    if (data[0]&0x80) {
+        mode = MODE_CELT_ONLY;
+    } else if ((data[0]&0x60) == 0x60) {
+        mode = MODE_HYBRID;
+    } else {
+        mode = MODE_SILK_ONLY;
+    }
+    return mode;
+}
+
 oac_int32 oaci_frame_size_select(int application, oac_int32 frame_size, int variable_duration, oac_int32 Fs);
 
 oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
@@ -255,12 +268,25 @@ static OAC_INLINE int oaci_align(int i) {
     return ((i + alignment - 1)/alignment)*alignment;
 }
 
+/* Single source of truth for the 8 valid packet/frame durations in 2.5 ms (Fs/400) units. */
+#define OAC_NB_FRAME_DURATIONS 8
+extern const unsigned char oaci_frame_dur[OAC_NB_FRAME_DURATIONS];
+
+int oaci_dur_to_index(int dur_2_5ms);
+int oaci_frames_to_F(int base_dur_idx, int count);
+int oaci_F_to_frames(int base_dur_idx, int F);
+int oaci_toc_bytes(int format, int channels, int count);
+int oaci_write_toc(unsigned char *data, unsigned char config5,
+    int format, int channels,
+    int base_dur_idx, int count, int vbr, int pad);
+int oaci_validate_config(int mode, int format, int channels,
+    int nb_frames, int samples_400);
+
 int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     int self_delimited, unsigned char *out_toc,
     const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET], oac_int32 size[OAC_MAX_FRAMES_PER_PACKET],
     int *payload_offset, oac_int32 *packet_offset,
-    const unsigned char **padding, oac_int32 *padding_len,
-    int format);
+    const unsigned char **padding, oac_int32 *padding_len);
 
 oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int end,
     unsigned char *data, oac_int32 maxlen, int self_delimited, int pad,
@@ -324,6 +350,20 @@ static OAC_INLINE int oaci_validate_format_channels(int format, int channels) {
         /* Valid ambisonics channel counts: (order+1)^2 for orders 0 to OAC_MAX_AMBISONICS_ORDER */
         int order;
         for (order = 0; order <= OAC_MAX_AMBISONICS_ORDER; order++) {
+            if (channels == (order+1)*(order+1))
+                return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+static OAC_INLINE int oaci_validate_encoder_format_channels(int format, int channels) {
+    if (format == OAC_FORMAT_STANDARD) {
+        return (channels == 1 || channels == 2);
+    } else if (format == OAC_FORMAT_AMBISONICS) {
+        int order;
+        for (order = 0; order <= OAC_MAX_ENCODER_AMBISONICS_ORDER; order++) {
             if (channels == (order+1)*(order+1))
                 return 1;
         }

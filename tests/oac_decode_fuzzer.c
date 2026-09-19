@@ -81,14 +81,16 @@
 typedef struct {
     int fs;
     int channels;
+    int format;
 } TocInfo;
 
-static void ParseToc(const uint8_t *toc, TocInfo *const info) {
+static void ParseToc(const uint8_t *toc, oac_int32 len, TocInfo *const info) {
     const int samp_freqs[5] = {8000, 12000, 16000, 24000, 48000};
     const int bandwidth = oac_packet_get_bandwidth(toc);
 
     info->fs = samp_freqs[bandwidth - OAC_BANDWIDTH_NARROWBAND];
-    info->channels = oac_packet_get_nb_channels(toc);
+    info->channels = oac_packet_get_nb_channels(toc, len);
+    info->format = oac_packet_get_format(toc, len);
 }
 
 /* Treats the input data as concatenated packets encoded by oac_demo,
@@ -112,9 +114,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
 
     /* Create decoder based on info from the first ToC available */
-    ParseToc(&data[SETUP_BYTE_COUNT], &toc);
+    ParseToc(&data[SETUP_BYTE_COUNT],
+             (oac_int32)IMIN(size - SETUP_BYTE_COUNT, (size_t)MAX_PACKET), &toc);
+    if (toc.channels <= 0 || toc.format < 0) {
+        return 0;
+    }
 
-    dec = oac_decoder_create(toc.fs, toc.channels, OAC_FORMAT_STANDARD, &err);
+    dec = oac_decoder_create(toc.fs, toc.channels, toc.format, &err);
     if (err != OAC_OK || dec == NULL) {
         return 0;
     }

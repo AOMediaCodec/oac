@@ -755,7 +755,6 @@ OAC_EXPORT int oac_decoder_dred_decode_float(OacDecoder *st, const OacDRED *dred
  * @param [out] frames <tt>char*[OAC_MAX_FRAMES_PER_PACKET]</tt> encapsulated frames
  * @param [out] size <tt>oac_int32[OAC_MAX_FRAMES_PER_PACKET]</tt> sizes of the encapsulated frames
  * @param [out] payload_offset <tt>int*</tt>: returns the position of the payload within the packet (in bytes)
- * @param [in] format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS)
  * @returns number of frames
  */
 OAC_EXPORT int oac_packet_parse(
@@ -764,8 +763,7 @@ OAC_EXPORT int oac_packet_parse(
     unsigned char *out_toc,
     const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET],
     oac_int32 size[OAC_MAX_FRAMES_PER_PACKET],
-    int *payload_offset,
-    int format) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(5);
+    int *payload_offset) OAC_ARG_NONNULL(1) OAC_ARG_NONNULL(5);
 
 /** Gets the bandwidth of an Oac packet.
  * @param [in] data <tt>char*</tt>: Oac packet
@@ -791,11 +789,25 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_get_samples_per_frame(const uns
     oac_int32 Fs) OAC_ARG_NONNULL(1);
 
 /** Gets the number of channels from an Oac packet.
- * @param [in] data <tt>char*</tt>: Oac packet
- * @returns Number of channels
+ * @param [in] packet <tt>char*</tt>: Oac packet
+ * @param [in] len <tt>oac_int32</tt>: Length of packet
+ * @returns Number of channels (1..256)
+ * @retval OAC_BAD_ARG Insufficient data was passed to the function
  * @retval OAC_INVALID_PACKET The compressed data passed is corrupted or of an unsupported type
  */
-OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_get_nb_channels(const unsigned char *data) OAC_ARG_NONNULL(1);
+OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_get_nb_channels(const unsigned char packet[],
+    oac_int32 len) OAC_ARG_NONNULL(1);
+
+/** Gets the audio format of an Oac packet.
+ * @param [in] packet <tt>char*</tt>: Oac packet
+ * @param [in] len <tt>oac_int32</tt>: Length of packet
+ * @retval OAC_FORMAT_STANDARD Standard/surround channel layout
+ * @retval OAC_FORMAT_AMBISONICS Ambisonics layout
+ * @retval OAC_BAD_ARG Insufficient data was passed to the function
+ * @retval OAC_INVALID_PACKET The compressed data passed is corrupted or of an unsupported type
+ */
+OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_get_format(const unsigned char packet[],
+    oac_int32 len) OAC_ARG_NONNULL(1);
 
 /** Gets the number of frames in an Oac packet.
  * @param [in] packet <tt>char*</tt>: Oac packet
@@ -1014,7 +1026,7 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_repacketizer_get_size(void);
  * It must also be called to reset the queue of packets waiting to be
  * repacketized, which is necessary if the maximum packet duration of 120 ms
  * is reached or if you wish to submit packets with a different Oac
- * configuration (coding mode, audio bandwidth, frame size, or channel count).
+ * configuration (coding mode, audio bandwidth, frame size, format, or channel count).
  * Failure to do so will prevent a new packet from being added with
  * oac_repacketizer_cat().
  * @see oac_repacketizer_create
@@ -1022,16 +1034,14 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_repacketizer_get_size(void);
  * @see oac_repacketizer_cat
  * @param rp <tt>OacRepacketizer*</tt>: The repacketizer state to
  *                                       (re)initialize.
- * @param format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
  * @returns A pointer to the same repacketizer state that was passed in.
  */
-OAC_EXPORT OacRepacketizer *oac_repacketizer_init(OacRepacketizer *rp, int format) OAC_ARG_NONNULL(1);
+OAC_EXPORT OacRepacketizer *oac_repacketizer_init(OacRepacketizer *rp) OAC_ARG_NONNULL(1);
 
 /** Allocates memory and initializes the new repacketizer with
  * oac_repacketizer_init().
- * @param format <tt>int</tt>: Audio format (OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS).
  */
-OAC_EXPORT OAC_WARN_UNUSED_RESULT OacRepacketizer *oac_repacketizer_create(int format);
+OAC_EXPORT OAC_WARN_UNUSED_RESULT OacRepacketizer *oac_repacketizer_create(void);
 
 /** Frees an <code>OacRepacketizer</code> allocated by
  * oac_repacketizer_create().
@@ -1043,10 +1053,7 @@ OAC_EXPORT void oac_repacketizer_destroy(OacRepacketizer *rp);
  * This packet must match the configuration of any packets already submitted
  * for repacketization since the last call to oac_repacketizer_init().
  * This means that it must have the same coding mode, audio bandwidth, frame
- * size, and channel count.
- * This can be checked in advance by examining the top 6 bits of the first
- * byte of the packet, and ensuring they match the top 6 bits of the first
- * byte of any previously submitted packet.
+ * size, format, and channel count.
  * The total duration of audio in the repacketizer state also must not exceed
  * 120 ms, the maximum duration of a single packet, after adding this packet.
  *
@@ -1081,7 +1088,7 @@ OAC_EXPORT void oac_repacketizer_destroy(OacRepacketizer *rp);
  *                              the packet's TOC sequence was not compatible
  *                              with previously submitted packets (because
  *                              the coding mode, audio bandwidth, frame size,
- *                              or channel count did not match), or adding
+ *                              format, or channel count did not match), or adding
  *                              this packet would increase the total amount of
  *                              audio stored in the repacketizer state to more
  *                              than 120 ms.
@@ -1092,6 +1099,15 @@ OAC_EXPORT int oac_repacketizer_cat(OacRepacketizer *rp, const unsigned char *da
 
 /** Construct a new packet from data previously submitted to the repacketizer
  * state via oac_repacketizer_cat().
+ * The total duration of the extracted frame range <code>(end-begin)</code>
+ * must be one of the 8 valid OAC packet durations (2.5, 5, 10, 20, 40, 60,
+ * 80, or 120 ms):
+ * - 2.5 ms base frames: 1, 2, 4, 8, 16, 24, 32, or 48 frames
+ * - 5 ms base frames:   1, 2, 4, 8, 12, 16, or 24 frames
+ * - 10 ms base frames:  1, 2, 4, 6, 8, or 12 frames
+ * - 20 ms base frames:  1, 2, 3, 4, or 6 frames
+ * - 40 ms base frames:  1, 2, or 3 frames
+ * - 60 ms base frames:  1 or 2 frames
  * @param rp <tt>OacRepacketizer*</tt>: The repacketizer state from which to
  *                                       construct the new packet.
  * @param begin <tt>int</tt>: The index of the first frame in the current
@@ -1104,7 +1120,7 @@ OAC_EXPORT int oac_repacketizer_cat(OacRepacketizer *rp, const unsigned char *da
  * @param maxlen <tt>oac_int32</tt>: The maximum number of bytes to store in
  *                                    the output buffer. In order to guarantee
  *                                    success, this should be at least
- *                                    <code>OAC_SIZE_MAX+1</code> for a single
+ *                                    <code>OAC_SIZE_MAX+3</code> for a single
  *                                    frame, or for multiple frames,
  *                                    <code>(OAC_SIZE_MAX+4)*(end-begin)</code>.
  *                                    However, <code>3*(end-begin)</code> plus
@@ -1116,8 +1132,9 @@ OAC_EXPORT int oac_repacketizer_cat(OacRepacketizer *rp, const unsigned char *da
  * @returns The total size of the output packet on success, or an error code
  *          on failure.
  * @retval #OAC_BAD_ARG <code>[begin,end)</code> was an invalid range of
- *                       frames (begin < 0, begin >= end, or end >
- *                       oac_repacketizer_get_nb_frames()).
+ *                       frames (begin < 0, begin >= end, end >
+ *                       oac_repacketizer_get_nb_frames(), or (end-begin) is
+ *                       not a valid OAC packet duration for the base frame size).
  * @retval #OAC_BUFFER_TOO_SMALL \a maxlen was insufficient to contain the
  *                                complete output packet.
  */

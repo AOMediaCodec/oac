@@ -253,24 +253,132 @@ int oac_packet_get_samples_per_frame(const unsigned char *data,
     return audiosize;
 }
 
+const unsigned char oaci_frame_dur[OAC_NB_FRAME_DURATIONS] = {
+    1, 2, 4, 8, 16, 24, 32, 48
+};
+
+int oaci_dur_to_index(int dur_2_5ms) {
+    int i;
+    for (i = 0; i < OAC_NB_FRAME_DURATIONS; i++) {
+        if (oaci_frame_dur[i] == dur_2_5ms)
+            return i;
+    }
+    return -1;
+}
+
+int oaci_frames_to_F(int base_dur_idx, int count) {
+    int target_dur;
+    int target_idx;
+    if (base_dur_idx < 0 || base_dur_idx >= OAC_NB_FRAME_DURATIONS || count < 1)
+        return -1;
+    target_dur = (int)oaci_frame_dur[base_dur_idx] * count;
+    target_idx = oaci_dur_to_index(target_dur);
+    if (target_idx < base_dur_idx)
+        return -1;
+    return target_idx - base_dur_idx;
+}
+
+int oaci_F_to_frames(int base_dur_idx, int F) {
+    int base_dur, total_dur;
+    if (base_dur_idx < 0 || base_dur_idx >= OAC_NB_FRAME_DURATIONS || F < 0)
+        return -1;
+    if (base_dur_idx + F >= OAC_NB_FRAME_DURATIONS)
+        return -1;
+    base_dur = oaci_frame_dur[base_dur_idx];
+    total_dur = oaci_frame_dur[base_dur_idx + F];
+    if (total_dur % base_dur != 0)
+        return -1;
+    return total_dur / base_dur;
+}
+
+int oaci_toc_bytes(int format, int channels, int count) {
+    if (format == OAC_FORMAT_STANDARD && channels >= 16)
+        return 3;
+    if (count > 1 || format == OAC_FORMAT_AMBISONICS || channels > 2)
+        return 2;
+    return 1;
+}
+
+int oaci_write_toc(unsigned char *data, unsigned char config5,
+                   int format, int channels,
+                   int base_dur_idx, int count, int vbr, int pad) {
+    int F;
+    int need_x;
+    int S, C;
+
+    F = oaci_frames_to_F(base_dur_idx, count);
+    if (F < 0 || channels < 1 || channels > OAC_MAX_CHANNELS)
+        return OAC_BAD_ARG;
+
+    need_x = (count > 1) || (format == OAC_FORMAT_AMBISONICS) || (channels > 2);
+    if (!need_x) {
+        S = (channels == 2) ? 1 : 0;
+        data[0] = (unsigned char)(((config5 & 0x1F) << 3) | (S << 2) | (pad ? 0x01 : 0x00));
+        return 1;
+    }
+
+    if (format == OAC_FORMAT_AMBISONICS) {
+        int order = -1;
+        int o;
+        for (o = 0; o <= OAC_MAX_AMBISONICS_ORDER; o++) {
+            if ((o + 1) * (o + 1) == channels) {
+                order = o;
+                break;
+            }
+        }
+        if (order < 0)
+            return OAC_BAD_ARG;
+        S = order & 1;
+        C = (order >> 1) & 0x07;
+        data[0] = (unsigned char)(((config5 & 0x1F) << 3) | (S << 2) | 0x02 | (pad ? 0x01 : 0x00));
+        data[1] = (unsigned char)((vbr ? 0x80 : 0x00) | ((F & 0x07) << 4) | 0x08 | C);
+        return 2;
+    }
+
+    if (channels <= 15) {
+        int ch_m1 = channels - 1;
+        S = ch_m1 & 1;
+        C = (ch_m1 >> 1) & 0x07;
+        data[0] = (unsigned char)(((config5 & 0x1F) << 3) | (S << 2) | 0x02 | (pad ? 0x01 : 0x00));
+        data[1] = (unsigned char)((vbr ? 0x80 : 0x00) | ((F & 0x07) << 4) | C);
+        return 2;
+    }
+
+    data[0] = (unsigned char)(((config5 & 0x1F) << 3) | 0x04 | 0x02 | (pad ? 0x01 : 0x00));
+    data[1] = (unsigned char)((vbr ? 0x80 : 0x00) | ((F & 0x07) << 4) | 0x07);
+    data[2] = (unsigned char)(channels - 1);
+    return 3;
+}
+
+int oaci_validate_config(int mode, int format, int channels,
+                         int nb_frames, int samples_400) {
+    if (nb_frames < 1 || samples_400 < 1 || nb_frames * samples_400 > 48)
+        return OAC_INVALID_PACKET;
+    if (channels < 1 || channels > OAC_MAX_CHANNELS)
+        return OAC_INVALID_PACKET;
+    if (format != OAC_FORMAT_STANDARD && format != OAC_FORMAT_AMBISONICS)
+        return OAC_INVALID_PACKET;
+    if ((mode == MODE_SILK_ONLY || mode == MODE_HYBRID) &&
+        (channels > 2 || format != OAC_FORMAT_STANDARD))
+        return OAC_INVALID_PACKET;
+    return OAC_OK;
+}
+
 int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
                           int self_delimited, unsigned char *out_toc,
                           const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET], oac_int32 size[OAC_MAX_FRAMES_PER_PACKET],
                           int *payload_offset, oac_int32 *packet_offset,
-                          const unsigned char **padding, oac_int32 *padding_len,
-                          int format) {
+                          const unsigned char **padding, oac_int32 *padding_len) {
     int i, bytes;
     int count;
     int cbr;
-    unsigned char ch, toc;
-    int framesize;
+    unsigned char toc;
+    int S, X, P;
+    int pkt_format, pkt_channels;
+    int framesize, samples_400, base_dur_idx;
     oac_int32 last_size;
     oac_int32 pad = 0;
     const unsigned char *data0 = data;
-
-    /* The frame length codec no longer depends on the format: any length the
-       codec can represent is accepted. */
-    (void)format;
 
     /* Make sure we return NULL/0 on error. */
     if (padding != NULL) {
@@ -284,88 +392,92 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
         return OAC_INVALID_PACKET;
 
     framesize = oac_packet_get_samples_per_frame(data, 48000);
+    samples_400 = framesize / 120;
+    base_dur_idx = oaci_dur_to_index(samples_400);
 
-    cbr = 0;
     toc = *data++;
     len--;
-    last_size = len;
-    switch (toc&0x3) {
-        /* One frame */
-        case 0:
-            count = 1;
-            break;
-        /* Two CBR frames */
-        case 1:
-            count = 2;
-            cbr = 1;
-            if (!self_delimited) {
-                if (len&0x1)
+    S = (toc >> 2) & 0x1;
+    X = (toc >> 1) & 0x1;
+    P = toc & 0x1;
+
+    if (!X) {
+        cbr = 1;
+        count = 1;
+        pkt_format = OAC_FORMAT_STANDARD;
+        pkt_channels = S + 1;
+    } else {
+        unsigned char ext;
+        int F, C;
+        if (len < 1)
+            return OAC_INVALID_PACKET;
+        ext = *data++;
+        len--;
+        cbr = !(ext & 0x80);
+        F = (ext >> 4) & 0x07;
+        C = ext & 0x07;
+        count = oaci_F_to_frames(base_dur_idx, F);
+        if (ext & 0x08) {
+            int order = (C << 1) | S;
+            pkt_format = OAC_FORMAT_AMBISONICS;
+            pkt_channels = (order + 1) * (order + 1);
+        } else {
+            pkt_format = OAC_FORMAT_STANDARD;
+            if (C == 7 && S == 1) {
+                if (len < 1)
                     return OAC_INVALID_PACKET;
-                last_size = len/2;
-                size[0] = last_size;
+                pkt_channels = (int)(*data++) + 1;
+                len--;
+            } else {
+                pkt_channels = ((C << 1) | S) + 1;
             }
-            break;
-        /* Two VBR frames */
-        case 2:
-            count = 2;
-            bytes = oaci_parse_size(data, len, size);
+        }
+        if (count == 1)
+            cbr = 1;
+    }
+
+    if (oaci_validate_config(oac_packet_get_mode(&toc), pkt_format,
+                             pkt_channels, count, samples_400) != OAC_OK)
+        return OAC_INVALID_PACKET;
+
+    if (P) {
+        int p;
+        do {
+            int tmp;
+            if (len <= 0)
+                return OAC_INVALID_PACKET;
+            p = *data++;
+            len--;
+            tmp = p == 255 ? 254 : p;
+            len -= tmp;
+            pad += tmp;
+        } while (p == 255);
+    }
+    if (len < 0)
+        return OAC_INVALID_PACKET;
+
+    last_size = len;
+    if (!cbr) {
+        /* VBR case */
+        for (i = 0; i < count - 1; i++) {
+            bytes = oaci_parse_size(data, len, size + i);
             len -= bytes;
-            if (size[0] < 0 || size[0] > len)
+            if (size[i] < 0 || size[i] > len)
                 return OAC_INVALID_PACKET;
             data += bytes;
-            last_size = len - size[0];
-            break;
-        /* Multiple CBR/VBR frames (from 0 to 120 ms) */
-        default: /*case 3:*/
-            if (len < 1)
-                return OAC_INVALID_PACKET;
-            /* Number of frames encoded in bits 0 to 5 */
-            ch = *data++;
-            count = ch&0x3F;
-            if (count <= 0 || framesize*(oac_int32)count > 5760)
-                return OAC_INVALID_PACKET;
-            len--;
-            /* Padding flag is bit 6 */
-            if (ch&0x40) {
-                int p;
-                do {
-                    int tmp;
-                    if (len <= 0)
-                        return OAC_INVALID_PACKET;
-                    p = *data++;
-                    len--;
-                    tmp = p == 255 ? 254: p;
-                    len -= tmp;
-                    pad += tmp;
-                } while (p == 255);
-            }
-            if (len < 0)
-                return OAC_INVALID_PACKET;
-            /* VBR flag is bit 7 */
-            cbr = !(ch&0x80);
-            if (!cbr) {
-                /* VBR case */
-                last_size = len;
-                for (i = 0; i < count - 1; i++) {
-                    bytes = oaci_parse_size(data, len, size + i);
-                    len -= bytes;
-                    if (size[i] < 0 || size[i] > len)
-                        return OAC_INVALID_PACKET;
-                    data += bytes;
-                    last_size -= bytes + size[i];
-                }
-                if (last_size < 0)
-                    return OAC_INVALID_PACKET;
-            } else if (!self_delimited) {
-                /* CBR case */
-                last_size = len/count;
-                if (last_size*count != len)
-                    return OAC_INVALID_PACKET;
-                for (i = 0; i < count - 1; i++)
-                    size[i] = last_size;
-            }
-            break;
+            last_size -= bytes + size[i];
+        }
+        if (last_size < 0)
+            return OAC_INVALID_PACKET;
+    } else if (!self_delimited) {
+        /* CBR case */
+        last_size = len / count;
+        if (last_size * count != len)
+            return OAC_INVALID_PACKET;
+        for (i = 0; i < count - 1; i++)
+            size[i] = last_size;
     }
+
     /* Self-delimited framing has an extra size for the last frame. */
     if (self_delimited) {
         bytes = oaci_parse_size(data, len, size + count - 1);
@@ -415,8 +527,7 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
 
 int oac_packet_parse(const unsigned char *data, oac_int32 len,
                      unsigned char *out_toc, const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET],
-                     oac_int32 size[OAC_MAX_FRAMES_PER_PACKET], int *payload_offset, int format) {
+                     oac_int32 size[OAC_MAX_FRAMES_PER_PACKET], int *payload_offset) {
     return oac_packet_parse_impl(data, len, 0, out_toc,
-                                 frames, size, payload_offset, NULL, NULL, NULL,
-                                 format);
+                                 frames, size, payload_offset, NULL, NULL, NULL);
 }

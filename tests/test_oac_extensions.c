@@ -665,13 +665,13 @@ void test_oac_repacketizer_out_range_impl(void) {
         {100, 0, (const unsigned char *)"uvwxyz", 6},
     };
 
-    oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
+    oac_repacketizer_init(&rp);
 
     memset(packet, 0, sizeof(packet));
-    /* Hybrid Packet with 20 msec frames, Code 3 */
+    /* Hybrid Packet with 20 msec frames, Extended ToC (X=1) + Padding (P=1) */
     packet[0] = (15<<3)|3;
-    /* Code 3, padding bit set, 1 frame */
-    packet[1] = 1<<6|1;
+    /* Extended ToC: V=0, F=0 (1 frame), A=0, C=0 */
+    packet[1] = 0;
     packet[2] = 0;
     packet[3] = 0;
 
@@ -683,11 +683,11 @@ void test_oac_repacketizer_out_range_impl(void) {
 
     /* concatenate 3 frames */
     res = oac_repacketizer_cat(&rp, packet, 4 + len);
-    /* for the middle frame, no padding, no extensions */
-    packet[1] = 1;
+    /* for the middle frame, no padding, no extensions (X=1, P=0) */
+    packet[0] = (15<<3)|2;
     res = oac_repacketizer_cat(&rp, packet, 4);
-    /* switch back to extensions for the last frame extensions */
-    packet[1] = 1<<6|1;
+    /* switch back to extensions for the last frame extensions (X=1, P=1) */
+    packet[0] = (15<<3)|3;
     res = oac_repacketizer_cat(&rp, packet, 4 + len);
 
     expect_true(rp.nb_frames == 3, "Expected 3 frames");
@@ -703,7 +703,7 @@ void test_oac_repacketizer_out_range_impl(void) {
 
     /* now verify that we have the expected extensions */
     res = oac_packet_parse_impl(packet_out, res, 0, NULL, NULL, size,
-      NULL, NULL, &padding, &padding_len, OAC_FORMAT_STANDARD);
+      NULL, NULL, &padding, &padding_len);
     nb_ext = 10;
     res = oac_packet_extensions_parse(padding, padding_len, ext_out, &nb_ext,
     3);

@@ -839,8 +839,8 @@ int oac_multistream_encode_native
 
     /* Smallest packet the encoder can produce. */
     smallest_packet = st->layout.nb_streams*2 - 1;
-    /* 100 ms needs an extra byte per stream for the ToC. */
-    if (Fs/frame_size == 10)
+    /* Multi-frame packets (> 20 ms) need an extra byte per stream for the Extended ToC. */
+    if (frame_size*50 > Fs)
         smallest_packet += st->layout.nb_streams;
     if (max_data_bytes < smallest_packet) {
         RESTORE_STACK;
@@ -910,7 +910,7 @@ int oac_multistream_encode_native
         int c1, c2;
         int ret;
 
-        oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
+        oac_repacketizer_init(&rp);
         enc = (OacEncoder*)ptr;
         if (s < st->layout.nb_coupled_streams) {
             int i;
@@ -949,8 +949,8 @@ int oac_multistream_encode_native
         curr_max = max_data_bytes - tot_size;
         /* Reserve one byte for the last stream and two for the others */
         curr_max -= IMAX(0, 2*(st->layout.nb_streams - s - 1) - 1);
-        /* For 100 ms, reserve an extra byte per stream for the ToC */
-        if (Fs/frame_size == 10)
+        /* For > 20 ms, reserve an extra byte per stream for the Extended ToC */
+        if (frame_size*50 > Fs)
             curr_max -= st->layout.nb_streams - s - 1;
         curr_max = IMIN(curr_max, oaci_max_frame_bytes(frame_size, Fs, (s < st->layout.nb_coupled_streams) ? 2 : 1) + 20);
         /* Repacketizer will add one to three bytes for self-delimited frames */
