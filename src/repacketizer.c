@@ -72,17 +72,16 @@ int oac_repacketizer_get_size(void) {
     return sizeof(OacRepacketizer);
 }
 
-OacRepacketizer *oac_repacketizer_init(OacRepacketizer *rp, int format) {
+OacRepacketizer *oac_repacketizer_init(OacRepacketizer *rp) {
     rp->nb_frames = 0;
-    rp->format = format;
     return rp;
 }
 
-OacRepacketizer *oac_repacketizer_create(int format) {
+OacRepacketizer *oac_repacketizer_create(void) {
     OacRepacketizer *rp;
     rp = (OacRepacketizer *)oac_alloc(oac_repacketizer_get_size());
     if (rp == NULL) return NULL;
-    return oac_repacketizer_init(rp, format);
+    return oac_repacketizer_init(rp);
 }
 
 void oac_repacketizer_destroy(OacRepacketizer *rp) {
@@ -93,13 +92,26 @@ static int oac_repacketizer_cat_impl(OacRepacketizer *rp, const unsigned char *d
                                      int self_delimited) {
     unsigned char tmp_toc;
     int curr_nb_frames, ret;
+    int channels, format;
     /* Set of check ToC */
     if (len < 1) return OAC_INVALID_PACKET;
+    channels = oac_packet_get_nb_channels(data, len);
+    if (channels < 0) return channels;
+    format = oac_packet_get_format(data, len);
+    if (format < 0) return format;
     if (rp->nb_frames == 0) {
         rp->toc = data[0];
         rp->framesize = oac_packet_get_samples_per_frame(data, 8000);
+        rp->dur_index = oaci_dur_index(oac_packet_get_samples_per_frame(data, 400));
+        if (rp->dur_index < 0) return OAC_INVALID_PACKET;
+        rp->channels = channels;
+        rp->format = format;
     } else if ((rp->toc&0xFC) != (data[0]&0xFC)) {
         /*fprintf(stderr, "toc mismatch: 0x%x vs 0x%x\n", rp->toc, data[0]);*/
+        return OAC_INVALID_PACKET;
+    } else if (channels != rp->channels || format != rp->format) {
+        /* The M/S check above catches most of this, but the resolved channel
+           count can also live in the extended and escape bytes. */
         return OAC_INVALID_PACKET;
     }
     curr_nb_frames = oac_packet_get_nb_frames(data, len);
@@ -112,8 +124,7 @@ static int oac_repacketizer_cat_impl(OacRepacketizer *rp, const unsigned char *d
 
     ret = oac_packet_parse_impl(data, len, self_delimited, &tmp_toc, &rp->frames[rp->nb_frames],
     &rp->len[rp->nb_frames],
-       NULL, NULL, &rp->paddings[rp->nb_frames], &rp->padding_len[rp->nb_frames],
-       rp->format);
+       NULL, NULL, &rp->paddings[rp->nb_frames], &rp->padding_len[rp->nb_frames]);
     if (ret < 1) return ret;
     rp->padding_nb_frames[rp->nb_frames] = ret;
 
@@ -145,6 +156,9 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
     oac_int32 *len;
     const unsigned char **frames;
     unsigned char * ptr;
+    int vbr;
+    int toc_bytes;
+    int pad_amount = 0;
     int ones_begin = 0, ones_end = 0;
     int ext_begin = 0, ext_len = 0;
     int ext_count, total_ext_count;
@@ -197,103 +211,76 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
     }
 
     ptr = data;
-    if (count == 1) {
-        /* Code 0 */
-        tot_size += len[0] + 1;
-        if (tot_size > maxlen) {
+    /* The frame count has to be representable by the F field for this frame
+       size. The inputs were fine, the requested output is not, so BAD_ARG. */
+    if (oaci_frames_to_F(rp->dur_index, count) < 0) {
+        RESTORE_STACK;
+        return OAC_BAD_ARG;
+    }
+    vbr = 0;
+    for (i = 1; i < count; i++) {
+        if (len[i] != len[0]) {
+            vbr = 1;
+            break;
+        }
+    }
+    toc_bytes = oaci_toc_bytes(count, rp->format, rp->channels);
+    tot_size += toc_bytes;
+    if (vbr) {
+        for (i = 0; i < count - 1; i++)
+            tot_size += oaci_size_bytes(len[i]) + len[i];
+        tot_size += len[count - 1];
+    } else {
+        tot_size += count*len[0];
+    }
+    if (tot_size > maxlen) {
+        RESTORE_STACK;
+        return OAC_BUFFER_TOO_SMALL;
+    }
+
+    pad_amount = pad ? (maxlen - tot_size) : 0;
+    if (ext_count > 0) {
+        /* figure out how much space we need for the extensions */
+        ext_len = oac_packet_extensions_generate(NULL, maxlen - tot_size,
+      all_extensions, ext_count, count, 0);
+        if (ext_len < 0) {
+            RESTORE_STACK;
+            return ext_len;
+        }
+        if (!pad)
+            pad_amount = ext_len + (ext_len ? (ext_len + 253)/254 : 1);
+    }
+    /* Now that we know whether there is padding, we can write the ToC. */
+    {
+        int written = oaci_write_toc(rp->toc, count, vbr, pad_amount != 0,
+                                     rp->format, rp->channels,
+                                     oaci_frame_dur[rp->dur_index], ptr);
+        if (written < 0) {
+            RESTORE_STACK;
+            return written;
+        }
+        celt_assert(written == toc_bytes);
+        ptr += written;
+    }
+    if (pad_amount != 0) {
+        int nb_255s;
+        nb_255s = (pad_amount - 1)/255;
+        if (tot_size + ext_len + nb_255s + 1 > maxlen) {
             RESTORE_STACK;
             return OAC_BUFFER_TOO_SMALL;
         }
-        *ptr++ = rp->toc&0xFC;
-    } else if (count == 2) {
-        if (len[1] == len[0]) {
-            /* Code 1 */
-            tot_size += 2*len[0] + 1;
-            if (tot_size > maxlen) {
-                RESTORE_STACK;
-                return OAC_BUFFER_TOO_SMALL;
-            }
-            *ptr++ = (rp->toc&0xFC)|0x1;
-        } else {
-            /* Code 2 */
-            tot_size += len[0] + len[1] + 1 + oaci_size_bytes(len[0]);
-            if (tot_size > maxlen) {
-                RESTORE_STACK;
-                return OAC_BUFFER_TOO_SMALL;
-            }
-            *ptr++ = (rp->toc&0xFC)|0x2;
-            ptr += oaci_encode_size(len[0], ptr);
-        }
+        ext_begin = tot_size + pad_amount - ext_len;
+        /* Prepend 0x01 padding */
+        ones_begin = tot_size + nb_255s + 1;
+        ones_end = tot_size + pad_amount - ext_len;
+        for (i = 0; i < nb_255s; i++)
+            *ptr++ = 255;
+        *ptr++ = pad_amount - 255*nb_255s - 1;
+        tot_size += pad_amount;
     }
-    if (count > 2 || (pad && tot_size < maxlen) || ext_count > 0) {
-        /* Code 3 */
-        int vbr;
-        int pad_amount = 0;
-
-        /* Restart the process for the padding case */
-        ptr = data;
-        if (self_delimited)
-            tot_size = oaci_size_bytes(len[count - 1]);
-        else
-            tot_size = 0;
-        vbr = 0;
-        for (i = 1; i < count; i++) {
-            if (len[i] != len[0]) {
-                vbr = 1;
-                break;
-            }
-        }
-        if (vbr) {
-            tot_size += 2;
-            for (i = 0; i < count - 1; i++)
-                tot_size += oaci_size_bytes(len[i]) + len[i];
-            tot_size += len[count - 1];
-
-            if (tot_size > maxlen) {
-                RESTORE_STACK;
-                return OAC_BUFFER_TOO_SMALL;
-            }
-            *ptr++ = (rp->toc&0xFC)|0x3;
-            *ptr++ = count|0x80;
-        } else {
-            tot_size += count*len[0] + 2;
-            if (tot_size > maxlen) {
-                RESTORE_STACK;
-                return OAC_BUFFER_TOO_SMALL;
-            }
-            *ptr++ = (rp->toc&0xFC)|0x3;
-            *ptr++ = count;
-        }
-        pad_amount = pad ? (maxlen - tot_size) : 0;
-        if (ext_count > 0) {
-            /* figure out how much space we need for the extensions */
-            ext_len = oac_packet_extensions_generate(NULL, maxlen - tot_size,
-          all_extensions, ext_count, count, 0);
-            if (ext_len < 0) return ext_len;
-            if (!pad)
-                pad_amount = ext_len + (ext_len ? (ext_len + 253)/254 : 1);
-        }
-        if (pad_amount != 0) {
-            int nb_255s;
-            data[1] |= 0x40;
-            nb_255s = (pad_amount - 1)/255;
-            if (tot_size + ext_len + nb_255s + 1 > maxlen) {
-                RESTORE_STACK;
-                return OAC_BUFFER_TOO_SMALL;
-            }
-            ext_begin = tot_size + pad_amount - ext_len;
-            /* Prepend 0x01 padding */
-            ones_begin = tot_size + nb_255s + 1;
-            ones_end = tot_size + pad_amount - ext_len;
-            for (i = 0; i < nb_255s; i++)
-                *ptr++ = 255;
-            *ptr++ = pad_amount - 255*nb_255s - 1;
-            tot_size += pad_amount;
-        }
-        if (vbr) {
-            for (i = 0; i < count - 1; i++)
-                ptr += oaci_encode_size(len[i], ptr);
-        }
+    if (vbr) {
+        for (i = 0; i < count - 1; i++)
+            ptr += oaci_encode_size(len[i], ptr);
     }
     if (self_delimited) {
         int sdlen = oaci_encode_size(len[count - 1], ptr);
@@ -345,7 +332,7 @@ oac_int32 oac_packet_pad_impl(unsigned char *data, oac_int32 len, oac_int32 new_
     else if (len > new_len)
         return OAC_BAD_ARG;
     ALLOC(copy, len, unsigned char);
-    oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
+    oac_repacketizer_init(&rp);
     /* Moving payload to the end of the packet so we can do in-place padding */
     OAC_COPY(copy, data, len);
     ret = oac_repacketizer_cat(&rp, copy, len);
@@ -373,7 +360,7 @@ oac_int32 oac_packet_unpad(unsigned char *data, oac_int32 len) {
     int i;
     if (len < 1)
         return OAC_BAD_ARG;
-    oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
+    oac_repacketizer_init(&rp);
     ret = oac_repacketizer_cat(&rp, data, len);
     if (ret < 0)
         return ret;
@@ -407,8 +394,7 @@ int oac_multistream_packet_pad(unsigned char *data, oac_int32 len, oac_int32 new
         if (len <= 0)
             return OAC_INVALID_PACKET;
         count = oac_packet_parse_impl(data, len, 1, &toc, NULL,
-                                     size, NULL, &packet_offset, NULL, NULL,
-                                     OAC_FORMAT_STANDARD);
+                                     size, NULL, &packet_offset, NULL, NULL);
         if (count < 0)
             return count;
         data += packet_offset;
@@ -437,10 +423,9 @@ oac_int32 oac_multistream_packet_unpad(unsigned char *data, oac_int32 len, int n
         int self_delimited = s != nb_streams - 1;
         if (len <= 0)
             return OAC_INVALID_PACKET;
-        oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
+        oac_repacketizer_init(&rp);
         ret = oac_packet_parse_impl(data, len, self_delimited, &toc, NULL,
-                                     size, NULL, &packet_offset, NULL, NULL,
-                                     OAC_FORMAT_STANDARD);
+                                     size, NULL, &packet_offset, NULL, NULL);
         if (ret < 0)
             return ret;
         ret = oac_repacketizer_cat_impl(&rp, data, packet_offset, self_delimited);

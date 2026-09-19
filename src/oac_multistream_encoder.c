@@ -444,6 +444,9 @@ static int oac_multistream_encoder_init_impl(
     int i, ret;
     char *ptr;
 
+    /* The multistream API is capped at 255 channels rather than
+       OAC_MAX_CHANNELS (256) because the mapping table uses the value 255 to
+       mark a channel as silent, so 255 is not usable as a stream index. */
     if ((channels > 255) || (channels < 1) || (coupled_streams > streams)
         || (streams < 1) || (coupled_streams < 0) || (streams > 255 - coupled_streams)
         || (streams + coupled_streams > channels))
@@ -839,8 +842,11 @@ int oac_multistream_encode_native
 
     /* Smallest packet the encoder can produce. */
     smallest_packet = st->layout.nb_streams*2 - 1;
-    /* 100 ms needs an extra byte per stream for the ToC. */
-    if (Fs/frame_size == 10)
+    /* Any sub-packet holding more than one frame carries the extended ToC
+       byte. We cannot know each stream's mode decision in advance, and only
+       frames longer than 20 ms can ever be split, so reserve the byte for all
+       of those. */
+    if (frame_size > Fs/50)
         smallest_packet += st->layout.nb_streams;
     if (max_data_bytes < smallest_packet) {
         RESTORE_STACK;
@@ -910,7 +916,7 @@ int oac_multistream_encode_native
         int c1, c2;
         int ret;
 
-        oac_repacketizer_init(&rp, OAC_FORMAT_STANDARD);
+        oac_repacketizer_init(&rp);
         enc = (OacEncoder*)ptr;
         if (s < st->layout.nb_coupled_streams) {
             int i;
@@ -949,8 +955,9 @@ int oac_multistream_encode_native
         curr_max = max_data_bytes - tot_size;
         /* Reserve one byte for the last stream and two for the others */
         curr_max -= IMAX(0, 2*(st->layout.nb_streams - s - 1) - 1);
-        /* For 100 ms, reserve an extra byte per stream for the ToC */
-        if (Fs/frame_size == 10)
+        /* Reserve an extra byte per remaining stream for the extended ToC of a
+           multi-frame sub-packet (see smallest_packet above). */
+        if (frame_size > Fs/50)
             curr_max -= st->layout.nb_streams - s - 1;
         curr_max = IMIN(curr_max, oaci_max_frame_bytes(frame_size, Fs, (s < st->layout.nb_coupled_streams) ? 2 : 1) + 20);
         /* Repacketizer will add one to three bytes for self-delimited frames */

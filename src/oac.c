@@ -235,6 +235,138 @@ static int oaci_parse_size(const unsigned char *data, oac_int32 len, oac_int32 *
     }
 }
 
+/* The eight legal frame/packet durations, in units of 2.5 ms. Everything that
+   needs to know the duration list -- the OAC_FRAMESIZE_* enum, the ToC F field
+   and oaci_frame_size_select() -- goes through this table. */
+const unsigned char oaci_frame_dur[OAC_NB_FRAME_DURATIONS] = {1, 2, 4, 8, 16, 24, 32, 48};
+
+int oaci_dur_index(int samples_400) {
+    int i;
+    for (i = 0; i < OAC_NB_FRAME_DURATIONS; i++) {
+        if (oaci_frame_dur[i] == samples_400)
+            return i;
+    }
+    return -1;
+}
+
+int oaci_F_to_frames(int dur_index, int F) {
+    int base, total;
+    if (dur_index < 0 || F < 0 || dur_index + F > OAC_NB_FRAME_DURATIONS - 1)
+        return -1;
+    base = oaci_frame_dur[dur_index];
+    total = oaci_frame_dur[dur_index + F];
+    /* The packet duration has to be an integer number of frames. It is not for
+       e.g. a 40 ms frame in a 60 ms packet, and those combinations are simply
+       invalid: the encoder never produces them and the decoder rejects them. */
+    if (total%base != 0)
+        return -1;
+    return total/base;
+}
+
+int oaci_frames_to_F(int dur_index, int nb_frames) {
+    int F;
+    if (dur_index < 0)
+        return -1;
+    for (F = 0; dur_index + F < OAC_NB_FRAME_DURATIONS; F++) {
+        if (oaci_F_to_frames(dur_index, F) == nb_frames)
+            return F;
+    }
+    return -1;
+}
+
+/* Resolve the ambisonics order for a channel count, or -1 if the count is not
+   of the form (order+1)^2. */
+static int oaci_ambisonics_order(int channels) {
+    int order = 0;
+    while ((order + 1)*(order + 1) < channels)
+        order++;
+    if ((order + 1)*(order + 1) != channels)
+        return -1;
+    return order;
+}
+
+int oaci_toc_bytes(int nb_frames, int format, int channels) {
+    /* A=1 always needs the extended byte, and the ambisonics order reaches 15
+       within the C/S fields so it never needs the escape byte. */
+    if (format == OAC_FORMAT_AMBISONICS)
+        return 2;
+    /* C=7,S=1 escapes to one more byte holding (channels-1). */
+    if (channels > 15)
+        return 3;
+    /* Otherwise the extended byte is only needed for a non-zero C or F. */
+    if (nb_frames > 1 || channels > 2)
+        return 2;
+    return 1;
+}
+
+int oaci_write_toc(unsigned char base_toc, int nb_frames, int vbr, int padding,
+                   int format, int channels, int samples_400, unsigned char *data) {
+    int S, A, C, F;
+    int escape = 0;
+    int nb_bytes;
+
+    F = oaci_frames_to_F(oaci_dur_index(samples_400), nb_frames);
+    if (F < 0)
+        return OAC_BAD_ARG;
+    if (format == OAC_FORMAT_AMBISONICS) {
+        int order = oaci_ambisonics_order(channels);
+        if (order < 0 || order > 15)
+            return OAC_BAD_ARG;
+        A = 1;
+        S = order&0x01;
+        C = order>>1;
+    } else {
+        if (channels < 1 || channels > OAC_MAX_CHANNELS)
+            return OAC_BAD_ARG;
+        A = 0;
+        if (channels > 15) {
+            S = 1;
+            C = 7;
+            escape = channels - 1;
+        } else {
+            S = (channels - 1)&0x01;
+            C = (channels - 1)>>1;
+        }
+    }
+    nb_bytes = oaci_toc_bytes(nb_frames, format, channels);
+    /* Bits 0-4 of base_toc are the mode/bandwidth/duration; S, X and P are ours. */
+    data[0] = (unsigned char)((base_toc&0xF8) | (S<<2) | (nb_bytes > 1 ? 0x02 : 0)
+                              | (padding ? 0x01 : 0));
+    if (nb_bytes > 1)
+        data[1] = (unsigned char)((vbr ? 0x80 : 0) | (F<<4) | (A<<3) | C);
+    if (nb_bytes > 2)
+        data[2] = (unsigned char)escape;
+    return nb_bytes;
+}
+
+int oaci_validate_config(int mode, int format, int channels, int nb_frames) {
+    if (channels < 1 || channels > OAC_MAX_CHANNELS)
+        return OAC_INVALID_PACKET;
+    if (format == OAC_FORMAT_AMBISONICS && oaci_ambisonics_order(channels) < 0)
+        return OAC_INVALID_PACKET;
+    if (nb_frames < 1 || nb_frames > OAC_MAX_FRAMES_PER_PACKET)
+        return OAC_INVALID_PACKET;
+    /* SILK and hybrid only ever code one or two channels. The two modes are
+       listed explicitly rather than as "anything but CELT" so that the modes
+       still to come (lossless, other speech modes) have to state their own
+       policy here instead of silently inheriting this one. */
+    if ((mode == MODE_SILK_ONLY || mode == MODE_HYBRID) && channels > 2)
+        return OAC_INVALID_PACKET;
+    return OAC_OK;
+}
+
+int oaci_packet_get_mode(const unsigned char *data) {
+    int mode;
+    if (data[0]&0x80) {
+        mode = MODE_CELT_ONLY;
+    } else if ((data[0]&0x60) == 0x60) {
+        mode = MODE_HYBRID;
+    } else {
+        mode = MODE_SILK_ONLY;
+    }
+    return mode;
+}
+
 int oac_packet_get_samples_per_frame(const unsigned char *data,
                                      oac_int32 Fs) {
     int audiosize;
@@ -257,20 +389,16 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
                           int self_delimited, unsigned char *out_toc,
                           const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET], oac_int32 size[OAC_MAX_FRAMES_PER_PACKET],
                           int *payload_offset, oac_int32 *packet_offset,
-                          const unsigned char **padding, oac_int32 *padding_len,
-                          int format) {
+                          const unsigned char **padding, oac_int32 *padding_len) {
     int i, bytes;
     int count;
     int cbr;
-    unsigned char ch, toc;
-    int framesize;
+    unsigned char toc;
+    int dur_index;
+    int format, channels;
     oac_int32 last_size;
     oac_int32 pad = 0;
     const unsigned char *data0 = data;
-
-    /* The frame length codec no longer depends on the format: any length the
-       codec can represent is accepted. */
-    (void)format;
 
     /* Make sure we return NULL/0 on error. */
     if (padding != NULL) {
@@ -283,89 +411,100 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     if (len == 0)
         return OAC_INVALID_PACKET;
 
-    framesize = oac_packet_get_samples_per_frame(data, 48000);
+    /* Asking for the frame size at 400 Hz gives us the duration directly in
+       units of 2.5 ms, which is what the F field increments over. */
+    dur_index = oaci_dur_index(oac_packet_get_samples_per_frame(data, 400));
+    if (dur_index < 0)
+        return OAC_INVALID_PACKET;
 
-    cbr = 0;
     toc = *data++;
     len--;
-    last_size = len;
-    switch (toc&0x3) {
-        /* One frame */
-        case 0:
-            count = 1;
-            break;
-        /* Two CBR frames */
-        case 1:
-            count = 2;
-            cbr = 1;
-            if (!self_delimited) {
-                if (len&0x1)
+    /* X (0x02) says an extended ToC byte follows. Without it the packet holds
+       exactly one frame of S+1 channels in the standard format. */
+    if (toc&0x02) {
+        int S, F, A, C;
+        unsigned char ext;
+        if (len < 1)
+            return OAC_INVALID_PACKET;
+        ext = *data++;
+        len--;
+        S = (toc>>2)&0x01;
+        cbr = !(ext&0x80);
+        F = (ext>>4)&0x07;
+        A = ext&0x08;
+        C = ext&0x07;
+        count = oaci_F_to_frames(dur_index, F);
+        if (count < 0)
+            return OAC_INVALID_PACKET;
+        if (A) {
+            int order = 2*C + S;
+            format = OAC_FORMAT_AMBISONICS;
+            channels = (order + 1)*(order + 1);
+        } else {
+            format = OAC_FORMAT_STANDARD;
+            if (C == 7 && S == 1) {
+                /* Escape to an explicit channel count in a third ToC byte. */
+                if (len < 1)
                     return OAC_INVALID_PACKET;
-                last_size = len/2;
-                size[0] = last_size;
+                channels = *data++ + 1;
+                len--;
+            } else {
+                channels = 2*C + S + 1;
             }
-            break;
-        /* Two VBR frames */
-        case 2:
-            count = 2;
-            bytes = oaci_parse_size(data, len, size);
+        }
+    } else {
+        count = 1;
+        cbr = 1;
+        format = OAC_FORMAT_STANDARD;
+        channels = (toc&0x04) ? 2 : 1;
+    }
+    /* Everything above is pure bit unpacking; this is the one place that
+       decides whether the resulting configuration is one we accept. */
+    if (oaci_validate_config(oaci_packet_get_mode(data0), format, channels, count) != OAC_OK)
+        return OAC_INVALID_PACKET;
+    /* Guaranteed by the duration table: dur_index+F never runs past 120 ms. */
+    celt_assert(count*oaci_frame_dur[dur_index] <= 48);
+
+    /* P (0x01) says the packet is padded. As in Opus, the padding length comes
+       before the frame length fields and the padding itself goes at the end. */
+    if (toc&0x01) {
+        int p;
+        do {
+            int tmp;
+            if (len <= 0)
+                return OAC_INVALID_PACKET;
+            p = *data++;
+            len--;
+            tmp = p == 255 ? 254: p;
+            len -= tmp;
+            pad += tmp;
+        } while (p == 255);
+    }
+    if (len < 0)
+        return OAC_INVALID_PACKET;
+
+    last_size = len;
+    if (!cbr) {
+        /* VBR case: an explicit length for every frame but the last. */
+        for (i = 0; i < count - 1; i++) {
+            bytes = oaci_parse_size(data, len, size + i);
             len -= bytes;
-            if (size[0] < 0 || size[0] > len)
+            if (size[i] < 0 || size[i] > len)
                 return OAC_INVALID_PACKET;
             data += bytes;
-            last_size = len - size[0];
-            break;
-        /* Multiple CBR/VBR frames (from 0 to 120 ms) */
-        default: /*case 3:*/
-            if (len < 1)
-                return OAC_INVALID_PACKET;
-            /* Number of frames encoded in bits 0 to 5 */
-            ch = *data++;
-            count = ch&0x3F;
-            if (count <= 0 || framesize*(oac_int32)count > 5760)
-                return OAC_INVALID_PACKET;
-            len--;
-            /* Padding flag is bit 6 */
-            if (ch&0x40) {
-                int p;
-                do {
-                    int tmp;
-                    if (len <= 0)
-                        return OAC_INVALID_PACKET;
-                    p = *data++;
-                    len--;
-                    tmp = p == 255 ? 254: p;
-                    len -= tmp;
-                    pad += tmp;
-                } while (p == 255);
-            }
-            if (len < 0)
-                return OAC_INVALID_PACKET;
-            /* VBR flag is bit 7 */
-            cbr = !(ch&0x80);
-            if (!cbr) {
-                /* VBR case */
-                last_size = len;
-                for (i = 0; i < count - 1; i++) {
-                    bytes = oaci_parse_size(data, len, size + i);
-                    len -= bytes;
-                    if (size[i] < 0 || size[i] > len)
-                        return OAC_INVALID_PACKET;
-                    data += bytes;
-                    last_size -= bytes + size[i];
-                }
-                if (last_size < 0)
-                    return OAC_INVALID_PACKET;
-            } else if (!self_delimited) {
-                /* CBR case */
-                last_size = len/count;
-                if (last_size*count != len)
-                    return OAC_INVALID_PACKET;
-                for (i = 0; i < count - 1; i++)
-                    size[i] = last_size;
-            }
-            break;
+            last_size -= bytes + size[i];
+        }
+        if (last_size < 0)
+            return OAC_INVALID_PACKET;
+    } else if (!self_delimited) {
+        /* CBR case */
+        last_size = len/count;
+        if (last_size*count != len)
+            return OAC_INVALID_PACKET;
+        for (i = 0; i < count - 1; i++)
+            size[i] = last_size;
     }
+
     /* Self-delimited framing has an extra size for the last frame. */
     if (self_delimited) {
         bytes = oaci_parse_size(data, len, size + count - 1);
@@ -415,8 +554,7 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
 
 int oac_packet_parse(const unsigned char *data, oac_int32 len,
                      unsigned char *out_toc, const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET],
-                     oac_int32 size[OAC_MAX_FRAMES_PER_PACKET], int *payload_offset, int format) {
+                     oac_int32 size[OAC_MAX_FRAMES_PER_PACKET], int *payload_offset) {
     return oac_packet_parse_impl(data, len, 0, out_toc,
-                                 frames, size, payload_offset, NULL, NULL, NULL,
-                                 format);
+                                 frames, size, payload_offset, NULL, NULL, NULL);
 }

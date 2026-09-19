@@ -83,12 +83,16 @@ typedef struct {
     int channels;
 } TocInfo;
 
-static void ParseToc(const uint8_t *toc, TocInfo *const info) {
+static void ParseToc(const uint8_t *toc, size_t len, TocInfo *const info) {
     const int samp_freqs[5] = {8000, 12000, 16000, 24000, 48000};
     const int bandwidth = oac_packet_get_bandwidth(toc);
 
     info->fs = samp_freqs[bandwidth - OAC_BANDWIDTH_NARROWBAND];
-    info->channels = oac_packet_get_nb_channels(toc);
+    info->channels = oac_packet_get_nb_channels(toc, (oac_int32)len);
+    /* The ToC can describe up to 256 channels, but we only ever create a
+       standard-format decoder here, so fall back to mono. */
+    if (info->channels != 1 && info->channels != 2)
+        info->channels = 1;
 }
 
 /* Treats the input data as concatenated packets encoded by oac_demo,
@@ -112,7 +116,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     }
 
     /* Create decoder based on info from the first ToC available */
-    ParseToc(&data[SETUP_BYTE_COUNT], &toc);
+    ParseToc(&data[SETUP_BYTE_COUNT], size - SETUP_BYTE_COUNT, &toc);
 
     dec = oac_decoder_create(toc.fs, toc.channels, OAC_FORMAT_STANDARD, &err);
     if (err != OAC_OK || dec == NULL) {
