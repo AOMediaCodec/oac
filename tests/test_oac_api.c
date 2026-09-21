@@ -196,14 +196,15 @@ static int ref_nb_frames(int toc, int ext) {
    assumed to be exactly two bytes long, which makes the escape form of the
    channel count (S=1, C=7) truncated and therefore invalid. */
 static int ref_toc2_valid(int toc, int ext) {
-    int config, S, channels, ambisonics;
+    int config, S, channels, format;
     config = toc>>3;
     S = (toc>>2)&0x01;
-    ambisonics = (toc&0x02) && (ext&0x08);
+    format = OAC_FORMAT_STANDARD;
     if (!(toc&0x02)) {
         channels = S + 1;
-    } else if (ambisonics) {
+    } else if (ext&0x08) {
         int order = 2*(ext&0x07) + S;
+        format = OAC_FORMAT_AMBISONICS;
         channels = (order + 1)*(order + 1);
     } else if ((ext&0x07) == 7 && S == 1) {
         return 0;
@@ -211,8 +212,9 @@ static int ref_toc2_valid(int toc, int ext) {
         channels = 2*(ext&0x07) + S + 1;
     }
     /* SILK (configs 0-11) and hybrid (configs 12-15) only ever code one or two
-       standard channels (never ambisonics); CELT (16-31) codes any number. */
-    return !(config < 16 && (channels > 2 || ambisonics));
+       channels of the standard format; CELT (16-31) codes any number. Order-0
+       ambisonics is a single channel but is still ruled out by the format. */
+    return !(config < 16 && (channels > 2 || format != OAC_FORMAT_STANDARD));
 }
 
 /* Inverse of the above: the F value that packs exactly nb_frames frames of the
@@ -498,13 +500,16 @@ oac_int32 test_dec_api(void) {
     packet[0] = (31<<3)|0x02;   /* config 31: CELT FB 20 ms, X=1 */
     if (oac_packet_get_nb_channels(packet, 8) != 3) test_failed();
     if (oac_packet_get_bandwidth(packet, 8) != OAC_BANDWIDTH_FULLBAND) test_failed();
-    cfgs += 2;
+    if (oac_packet_has_lbrr(packet, 8) != 0) test_failed();
+    cfgs += 3;
     /* Truncated headers are rejected, and no data at all is OAC_BAD_ARG. */
     if (oac_packet_get_bandwidth(packet, 1) != OAC_INVALID_PACKET) test_failed();
     if (oac_packet_get_samples_per_frame(packet, 1, 48000) != OAC_INVALID_PACKET) test_failed();
+    if (oac_packet_has_lbrr(packet, 1) != OAC_INVALID_PACKET) test_failed();
     if (oac_packet_get_bandwidth(packet, 0) != OAC_BAD_ARG) test_failed();
     if (oac_packet_get_samples_per_frame(packet, 0, 48000) != OAC_BAD_ARG) test_failed();
-    cfgs += 4;
+    if (oac_packet_has_lbrr(packet, 0) != OAC_BAD_ARG) test_failed();
+    cfgs += 6;
     fprintf(stdout, "    ToC accessor validation ..................... OK.\n");
 
     /* Config 2 is a 40 ms frame; F=1 would step it to 60 ms, i.e. 1.5 frames,
@@ -1234,8 +1239,9 @@ oac_int32 test_parse(void) {
     cfgs_total += cfgs; cfgs = 0;
 
     /*Ambisonics: 2*C+S is the order, so orders 0..15 are all representable and
-      the escape byte is never needed. Ambisonics is CELT-only, so SILK and
-      hybrid configs (0..15) are rejected even at order 0.*/
+      the escape byte is never needed. None of them fit in a SILK or hybrid
+      packet: the encoder codes ambisonics with CELT at every order, including
+      order 0, which is a single channel but still not the standard format.*/
     for (config = 0; config < 32; config++) {
         for (j = 0; j <= 15; j++) {
             hdr = ref_put_toc(packet, config, 0, 0, 0, 1, (j + 1)*(j + 1), 0);
@@ -2465,27 +2471,20 @@ oac_int32 test_encoder_buffer_independence(void) {
        stereo packet spends one, and the frame encoder has to reserve exactly
        that much up front. Under-reserving shows up only as a write one byte
        past the limit the encoder was given, so encode into a buffer with a
-       guard byte immediately after that limit. Also verify max_data_bytes =
-       1..4 (buffer-too-small and low-bitrate PLC paths) in CBR and VBR, and
-       verify that OAC_APPLICATION_RESTRICTED_SILK is rejected for all
-       ambisonics orders (including order 0). */
+       guard byte immediately after that limit. */
     {
         int order;
 
         pcm = (short *)malloc(sizeof(short)*960*36);
         out = (short *)malloc(sizeof(short)*960*36);
         if (pcm == NULL || out == NULL) test_failed();
-        for (order = 0; order <= 5; order++) {
+        for (order = 1; order <= 5; order++) {
             OacEncoder *enc;
             OacDecoder *dec;
             unsigned char *data;
             int err, channels, budget, cap;
 
             channels = (order + 1)*(order + 1);
-            enc = oac_encoder_create(48000, channels, OAC_FORMAT_AMBISONICS,
-                                     OAC_APPLICATION_RESTRICTED_SILK, &err);
-            if (err != OAC_BAD_ARG || enc != NULL) test_failed();
-            cfgs++;
             enc = oac_encoder_create(48000, channels, OAC_FORMAT_AMBISONICS,
                                      OAC_APPLICATION_AUDIO, &err);
             if (err != OAC_OK || enc == NULL) test_failed();
@@ -2520,7 +2519,11 @@ oac_int32 test_encoder_buffer_independence(void) {
                 if (erange != drange) test_failed();
                 cfgs += 6;
             }
-            /* Test tiny output buffers (max_data_bytes = 1..4) in both CBR and VBR */
+            /* The smallest useful buffers. An ambisonics ToC is two bytes, so
+               one byte has to be refused outright and everything from two up
+               has to come back as a parseable packet that still decodes. Both
+               rate control modes go through here because they reach the
+               low-bitrate path by different routes. */
             for (f = 0; f <= 1; f++) {
                 if (oac_encoder_ctl(enc, OAC_SET_VBR(f)) != OAC_OK) test_failed();
                 for (cap = 1; cap <= 4; cap++) {

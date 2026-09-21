@@ -1258,11 +1258,13 @@ int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len) {
     int nb_frames = 1;
     int lbrr;
 
-    /* Guard the ToC byte before anything reads it. */
     if (len < 1)
         return OAC_BAD_ARG;
+    ret = oac_packet_parse(packet, len, NULL, frames, size, NULL);
+    if (ret <= 0)
+        return ret;
     packet_mode = oaci_toc_mode(packet[0]);
-    if (packet_mode == MODE_CELT_ONLY)
+    if (packet_mode == MODE_CELT_ONLY || size[0] == 0)
         return 0;
     packet_frame_size = oaci_toc_samples_per_frame(packet[0], 48000);
     if (packet_frame_size > 960)
@@ -1270,11 +1272,6 @@ int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len) {
     packet_stream_channels = oac_packet_get_nb_channels(packet, len);
     if (packet_stream_channels < 0)
         return packet_stream_channels;
-    ret = oac_packet_parse(packet, len, NULL, frames, size, NULL);
-    if (ret <= 0)
-        return ret;
-    if (size[0] == 0)
-        return 0;
     lbrr = (frames[0][0]>>(7 - nb_frames))&0x1;
     if (packet_stream_channels == 2)
         lbrr = lbrr || ((frames[0][0]>>(6 - 2*nb_frames))&0x1);

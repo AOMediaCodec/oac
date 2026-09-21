@@ -84,17 +84,19 @@ typedef struct {
     int format;
 } TocInfo;
 
-static void ParseToc(const uint8_t *toc, size_t len, TocInfo *const info) {
+static void ParseToc(const uint8_t *toc, oac_int32 len, TocInfo *const info) {
     const int samp_freqs[5] = {8000, 12000, 16000, 24000, 48000};
-    const oac_int32 pkt_len = len > MAX_PACKET ? MAX_PACKET : (oac_int32)len;
-    const int bandwidth = oac_packet_get_bandwidth(toc, pkt_len);
+    const int bandwidth = oac_packet_get_bandwidth(toc, len);
 
+    /* Fuzz input is arbitrary, so the ToC may not describe a usable packet at
+       all and the accessors may return an error. Fall back to 48 kHz for the
+       sampling rate; the caller checks the channel count and the format. */
     if (bandwidth < OAC_BANDWIDTH_NARROWBAND || bandwidth > OAC_BANDWIDTH_FULLBAND)
         info->fs = 48000;
     else
         info->fs = samp_freqs[bandwidth - OAC_BANDWIDTH_NARROWBAND];
-    info->channels = oac_packet_get_nb_channels(toc, pkt_len);
-    info->format = oac_packet_get_format(toc, pkt_len);
+    info->channels = oac_packet_get_nb_channels(toc, len);
+    info->format = oac_packet_get_format(toc, len);
 }
 
 /* Treats the input data as concatenated packets encoded by oac_demo,
@@ -117,9 +119,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         return 0;
     }
 
-    /* Create decoder based on info from the first ToC available */
-    ParseToc(&data[SETUP_BYTE_COUNT], size - SETUP_BYTE_COUNT, &toc);
-    if (toc.channels <= 0 || toc.format < 0) {
+    /* Create the decoder from the first ToC available. Using the packet's own
+       channel count and format is what lets the fuzzer reach the surround and
+       ambisonics decoders; a ToC that describes neither stops us here. The
+       length is clamped because ParseToc() only needs the header. */
+    ParseToc(&data[SETUP_BYTE_COUNT],
+             (oac_int32)(size - SETUP_BYTE_COUNT < (size_t)MAX_PACKET
+                         ? size - SETUP_BYTE_COUNT : (size_t)MAX_PACKET), &toc);
+    if (toc.channels < 0 || toc.format < 0) {
         return 0;
     }
 

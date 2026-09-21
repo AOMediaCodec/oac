@@ -1156,7 +1156,7 @@ int main(int argc, char *argv[]) {
             /* FIXME: Figure out how to trigger the decoder when the last packet of the file is lost. */
             for (fr = 0; fr < run_decoder; fr++) {
                 oac_int32 output_samples = 0;
-                if (fr == lost_count - 1 && oac_packet_has_lbrr(data, len)) {
+                if (fr == lost_count - 1 && oac_packet_has_lbrr(data, len) > 0) {
                     oac_decoder_ctl(dec, OAC_GET_LAST_PACKET_DURATION(&output_samples));
                     output_samples = oac_decode24(dec, data, len, out, output_samples, 1);
                 } else if (fr < lost_count) {

@@ -983,6 +983,10 @@ int oac_multistream_encode_native
         len = oac_repacketizer_out_range_impl(&rp, 0, oac_repacketizer_get_nb_frames(&rp),
             data, max_data_bytes - tot_size, s != st->layout.nb_streams - 1, !vbr && s == st->layout.nb_streams - 1,
         NULL, 0);
+        if (len < 0) {
+            RESTORE_STACK;
+            return OAC_INTERNAL_ERROR;
+        }
         data += len;
         tot_size += len;
     }
