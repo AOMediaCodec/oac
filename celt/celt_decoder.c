@@ -685,7 +685,7 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
         out_syn[c] = decode_mem[c] + decode_buffer_size - N;
     } while (++c < C);
     {
-        int max_channels = (st->format == OAC_FORMAT_AMBISONICS) ? C : 2;
+        int max_channels = IMAX(2, C);
         oldBandE = (celt_glog*)(st->_decode_mem + (decode_buffer_size + overlap)*C);
         oldLogE = oldBandE + max_channels*nbEBands;
         oldLogE2 = oldLogE + max_channels*nbEBands;
@@ -1125,7 +1125,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
 
     /* For band energy arrays, standard format always uses stride 2 (even for mono),
        ambisonics uses the actual channel count. */
-    max_channels = (st->format == OAC_FORMAT_AMBISONICS) ? C : 2;
+    max_channels = IMAX(2, CC);
     oldBandE = (celt_glog*)(st->_decode_mem + (decode_buffer_size + overlap)*CC);
     oldLogE = oldBandE + max_channels*nbEBands;
     oldLogE2 = oldLogE + max_channels*nbEBands;
@@ -1645,7 +1645,7 @@ int oac_custom_decoder_ctl(CELTDecoder * OAC_RESTRICT st, int request, ...) {
             int i;
             celt_glog *oldBandE, *oldLogE, *oldLogE2;
             int decode_buffer_size;
-            int max_channels = (st->format == OAC_FORMAT_AMBISONICS) ? st->channels : 2;
+            int max_channels = IMAX(2, st->channels);
 #ifdef ENABLE_QEXT
             int qext_scale = st->qext_scale;
 #endif

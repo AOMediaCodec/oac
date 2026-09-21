@@ -280,6 +280,30 @@ extern "C" {
  * @hideinitializer */
 #define OAC_SIZE_MAX 2105535
 
+/** @cond OAC_INTERNAL_DOC
+ * Table of Contents (ToC) layout, bits numbered MSB-first as in RFC 6716.
+ *
+ * Main ToC byte, always present:
+ *   bits 0-5 (mask 0xFC)  M/S  mode / bandwidth / frame duration, plus the
+ *                              stereo-or-channel-LSB flag S (mask 0x04)
+ *   bit  6   (mask 0x02)  X    an extended ToC byte follows
+ *   bit  7   (mask 0x01)  P    padding is present
+ *
+ * Extended ToC byte, present iff X=1:
+ *   bit  0   (mask 0x80)  V    0 = all frames the same size, 1 = explicit sizes
+ *   bits 1-3 (mask 0x70)  F    increment along 2.5/5/10/20/40/60/80/120 ms
+ *   bit  4   (mask 0x08)  A    0 = regular/surround, 1 = ambisonics
+ *   bits 5-7 (mask 0x07)  C    channel count / ambisonics order field
+ *
+ * With X=0 the packet holds exactly one frame of 1 or 2 (=S+1) channels.
+ * With X=1, A=1 the ambisonics order is 2*C+S, giving (order+1)^2 channels.
+ * With X=1, A=0 the channel count is 2*C+S+1, except that C=7,S=1 escapes to
+ * one more byte holding (channels-1).
+ *
+ * Byte order: main ToC, extended ToC, channel escape byte, padding length
+ * bytes, frame length fields, frame data, padding.
+ * @endcond */
+
 #define OAC_SIGNAL_VOICE                    3001 /**< Signal being encoded is voice */
 #define OAC_SIGNAL_MUSIC                    3002 /**< Signal being encoded is music */
 #define OAC_BANDWIDTH_NARROWBAND            1101 /**< 4 kHz bandpass @hideinitializer*/
@@ -288,6 +312,10 @@ extern "C" {
 #define OAC_BANDWIDTH_SUPERWIDEBAND         1104 /**<12 kHz bandpass @hideinitializer*/
 #define OAC_BANDWIDTH_FULLBAND              1105 /**<20 kHz bandpass @hideinitializer*/
 
+/* NOTE: OAC_FRAMESIZE_2_5_MS .. OAC_FRAMESIZE_120_MS must stay contiguous and in
+   increasing order: oaci_frame_size_select() indexes oaci_frame_dur[] with
+   (value - OAC_FRAMESIZE_2_5_MS). There is deliberately no 100 ms: the packet
+   duration list is 2.5/5/10/20/40/60/80/120 ms and 100 ms is not representable. */
 #define OAC_FRAMESIZE_ARG                   5000 /**< Select frame size from the argument (default) */
 #define OAC_FRAMESIZE_2_5_MS                5001 /**< Use 2.5 ms frames */
 #define OAC_FRAMESIZE_5_MS                  5002 /**< Use 5 ms frames */
@@ -296,8 +324,7 @@ extern "C" {
 #define OAC_FRAMESIZE_40_MS                 5005 /**< Use 40 ms frames */
 #define OAC_FRAMESIZE_60_MS                 5006 /**< Use 60 ms frames */
 #define OAC_FRAMESIZE_80_MS                 5007 /**< Use 80 ms frames */
-#define OAC_FRAMESIZE_100_MS                5008 /**< Use 100 ms frames */
-#define OAC_FRAMESIZE_120_MS                5009 /**< Use 120 ms frames */
+#define OAC_FRAMESIZE_120_MS                5008 /**< Use 120 ms frames */
 
 /**@}*/
 
@@ -659,7 +686,6 @@ extern "C" {
  * <dt>OAC_FRAMESIZE_40_MS</dt><dd>Use 40 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_60_MS</dt><dd>Use 60 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_80_MS</dt><dd>Use 80 ms frames.</dd>
- * <dt>OAC_FRAMESIZE_100_MS</dt><dd>Use 100 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_120_MS</dt><dd>Use 120 ms frames.</dd>
  * </dl>
  * @hideinitializer */
@@ -676,7 +702,6 @@ extern "C" {
  * <dt>OAC_FRAMESIZE_40_MS</dt><dd>Use 40 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_60_MS</dt><dd>Use 60 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_80_MS</dt><dd>Use 80 ms frames.</dd>
- * <dt>OAC_FRAMESIZE_100_MS</dt><dd>Use 100 ms frames.</dd>
  * <dt>OAC_FRAMESIZE_120_MS</dt><dd>Use 120 ms frames.</dd>
  * </dl>
  * @hideinitializer */

@@ -163,8 +163,9 @@ int oac_decoder_get_size(int channels, int format) {
     int skip_silk;
     if (!oaci_validate_format_channels(format, channels))
         return 0;
-    /* For multi-channel ambisonics (>2 channels), skip SILK (only supports 1-2 channels) */
-    skip_silk = (format == OAC_FORMAT_AMBISONICS && channels > 2);
+    /* SILK only ever codes one or two channels, so anything wider is CELT-only
+       (enforced at parse time by oaci_validate_config()). */
+    skip_silk = (channels > 2);
     if (!skip_silk) {
         ret = oaci_silk_Get_Decoder_Size( &silkDecSizeBytes );
         if (ret)
@@ -191,8 +192,9 @@ int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
         || !oaci_validate_format_channels(format, channels))
         return OAC_BAD_ARG;
 
-    /* For multi-channel ambisonics (>2 channels), skip SILK (only supports 1-2 channels) */
-    skip_silk = (format == OAC_FORMAT_AMBISONICS && channels > 2);
+    /* SILK only ever codes one or two channels, so anything wider is CELT-only
+       (enforced at parse time by oaci_validate_config()). */
+    skip_silk = (channels > 2);
 
     OAC_CLEAR((char*)st, oac_decoder_get_size(channels, format));
     if (!skip_silk) {
@@ -235,8 +237,11 @@ int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
     st->prev_mode = 0;
     st->frame_size = Fs/400;
 #ifdef ENABLE_DEEP_PLC
-    if (!skip_silk)
-        oaci_lpcnet_plc_init( &st->lpcnet);
+    /* Not tied to SILK: oaci_celt_decode_lost() runs the neural PLC on
+       CELT-only streams as well, and oaci_update_plc_state() takes the omni
+       channel when there are more than two, so ambisonics and surround want it
+       just as much. */
+    oaci_lpcnet_plc_init( &st->lpcnet);
 #endif
     st->arch = oac_select_arch();
     return OAC_OK;
@@ -283,18 +288,6 @@ static void oaci_smooth_fade(const oac_res *in1, const oac_res *in2,
                                    MULT_COEF_32(COEF_ONE - w, in1[i*channels + c]));
         }
     }
-}
-
-static int oac_packet_get_mode(const unsigned char *data) {
-    int mode;
-    if (data[0]&0x80) {
-        mode = MODE_CELT_ONLY;
-    } else if ((data[0]&0x60) == 0x60) {
-        mode = MODE_HYBRID;
-    } else {
-        mode = MODE_SILK_ONLY;
-    }
-    return mode;
 }
 
 static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
@@ -719,6 +712,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     int count, offset;
     unsigned char toc;
     int packet_frame_size, packet_bandwidth, packet_mode, packet_stream_channels;
+    int packet_format;
+    int toc_ret;
     /* 48 x 2.5 ms = 120 ms */
     oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
     const unsigned char *padding;
@@ -775,14 +770,29 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     } else if (len < 0)
         return OAC_BAD_ARG;
 
-    packet_mode = oac_packet_get_mode(data);
-    packet_bandwidth = oac_packet_get_bandwidth(data);
-    packet_frame_size = oac_packet_get_samples_per_frame(data, st->Fs);
-    packet_stream_channels = oac_packet_get_nb_channels(data);
+    /* One validated pass over the ToC header; the rest come from the main ToC
+       byte alone, which that pass has already vetted. */
+    toc_ret = oaci_packet_parse_toc(data, len, &packet_format,
+                                    &packet_stream_channels, NULL, NULL);
+    if (toc_ret != OAC_OK)
+        return toc_ret;
+    packet_mode = oaci_toc_mode(data[0]);
+    packet_bandwidth = oaci_toc_bandwidth(data[0]);
+    packet_frame_size = oaci_toc_samples_per_frame(data[0], st->Fs);
+    /* The ToC describes what the packet contains; st->channels is what we
+       output. Mono/stereo up/downmixing is allowed, as in Opus. Beyond stereo
+       there is no defined conversion, neither between surround layouts nor
+       between ambisonics orders, so require an exact match. */
+    if (packet_format != st->format)
+        return OAC_INVALID_PACKET;
+    if (st->format == OAC_FORMAT_STANDARD && packet_stream_channels <= 2
+        && st->channels <= 2) {
+        /* Mono/stereo, either way around. */
+    } else if (packet_stream_channels != st->channels)
+        return OAC_INVALID_PACKET;
 
     count = oac_packet_parse_impl(data, len, self_delimited, &toc, NULL,
-                                  size, &offset, packet_offset, &padding, &padding_len,
-                                  st->format);
+                                  size, &offset, packet_offset, &padding, &padding_len);
     if (st->ignore_extensions) {
         padding = NULL;
         padding_len = 0;
@@ -835,8 +845,9 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     st->mode = packet_mode;
     st->bandwidth = packet_bandwidth;
     st->frame_size = packet_frame_size;
-    /* For ambisonics, ignore TOC channel bit and use initialized channel count */
-    st->stream_channels = (st->format == OAC_FORMAT_AMBISONICS) ? st->channels : packet_stream_channels;
+    /* The ToC channel count was checked against the decoder's above, so for
+       ambisonics this is st->channels and for standard it is 1 or 2. */
+    st->stream_channels = packet_stream_channels;
 
     nb_samples = 0;
     for (i = 0; i < count; i++) {
@@ -1064,12 +1075,19 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
                 - ((char*)&st->OAC_DECODER_RESET_START - (char*)st));
 
             celt_decoder_ctl(celt_dec, OAC_RESET_STATE);
-            oaci_silk_ResetDecoder( silk_dec );
-            st->stream_channels = st->channels;
-            st->frame_size = st->Fs/400;
+            /* silk_dec_offset is zero whenever oac_decoder_init() skipped the
+               SILK decoder, and silk_dec then aliases the OacDecoder header
+               itself, so resetting it here would write SILK state over our own
+               fields. Testing the offset keeps working whatever the skip
+               condition in oac_decoder_init() grows into. The deep PLC below
+               is not part of this: CELT uses it too, so it is always live. */
+            if (st->silk_dec_offset != 0)
+                oaci_silk_ResetDecoder( silk_dec );
 #ifdef ENABLE_DEEP_PLC
             oaci_lpcnet_plc_reset( &st->lpcnet );
 #endif
+            st->stream_channels = st->channels;
+            st->frame_size = st->Fs/400;
         }
         break;
         case OAC_GET_SAMPLE_RATE_REQUEST:
@@ -1196,38 +1214,35 @@ void oac_decoder_destroy(OacDecoder *st) {
 }
 
 
-int oac_packet_get_bandwidth(const unsigned char *data) {
-    int bandwidth;
-    if (data[0]&0x80) {
-        bandwidth = OAC_BANDWIDTH_MEDIUMBAND + ((data[0]>>5)&0x3);
-        if (bandwidth == OAC_BANDWIDTH_MEDIUMBAND)
-            bandwidth = OAC_BANDWIDTH_NARROWBAND;
-    } else if ((data[0]&0x60) == 0x60) {
-        bandwidth = (data[0]&0x10) ? OAC_BANDWIDTH_FULLBAND :
-                    OAC_BANDWIDTH_SUPERWIDEBAND;
-    } else {
-        bandwidth = OAC_BANDWIDTH_NARROWBAND + ((data[0]>>5)&0x3);
-    }
-    return bandwidth;
+int oac_packet_get_bandwidth(const unsigned char *data, oac_int32 len) {
+    int ret = oaci_packet_parse_toc(data, len, NULL, NULL, NULL, NULL);
+    if (ret != OAC_OK)
+        return ret;
+    return oaci_toc_bandwidth(data[0]);
 }
 
-int oac_packet_get_nb_channels(const unsigned char *data) {
-    return (data[0]&0x4) ? 2 : 1;
+int oac_packet_get_nb_channels(const unsigned char packet[], oac_int32 len) {
+    int channels;
+    int ret = oaci_packet_parse_toc(packet, len, NULL, &channels, NULL, NULL);
+    if (ret != OAC_OK)
+        return ret;
+    return channels;
+}
+
+int oac_packet_get_format(const unsigned char packet[], oac_int32 len) {
+    int format;
+    int ret = oaci_packet_parse_toc(packet, len, &format, NULL, NULL, NULL);
+    if (ret != OAC_OK)
+        return ret;
+    return format;
 }
 
 int oac_packet_get_nb_frames(const unsigned char packet[], oac_int32 len) {
-    int count;
-    if (len < 1)
-        return OAC_BAD_ARG;
-    count = packet[0]&0x3;
-    if (count == 0)
-        return 1;
-    else if (count != 3)
-        return 2;
-    else if (len < 2)
-        return OAC_INVALID_PACKET;
-    else
-        return packet[1]&0x3F;
+    int nb_frames;
+    int ret = oaci_packet_parse_toc(packet, len, NULL, NULL, &nb_frames, NULL);
+    if (ret != OAC_OK)
+        return ret;
+    return nb_frames;
 }
 
 int oac_packet_get_nb_samples(const unsigned char packet[], oac_int32 len,
@@ -1238,7 +1253,8 @@ int oac_packet_get_nb_samples(const unsigned char packet[], oac_int32 len,
     if (count < 0)
         return count;
 
-    samples = count*oac_packet_get_samples_per_frame(packet, Fs);
+    /* oac_packet_get_nb_frames() above already validated the ToC. */
+    samples = count*oaci_toc_samples_per_frame(packet[0], Fs);
     /* Can't have more than 120 ms */
     if (samples*25 > Fs*3)
         return OAC_INVALID_PACKET;
@@ -1254,18 +1270,26 @@ int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len) {
     int nb_frames = 1;
     int lbrr;
 
-    packet_mode = oac_packet_get_mode(packet);
-    if (packet_mode == MODE_CELT_ONLY)
-        return 0;
-    packet_frame_size = oac_packet_get_samples_per_frame(packet, 48000);
-    if (packet_frame_size > 960)
-        nb_frames = packet_frame_size/960;
-    packet_stream_channels = oac_packet_get_nb_channels(packet);
-    ret = oac_packet_parse(packet, len, NULL, frames, size, NULL, OAC_FORMAT_STANDARD);
+    /* Guard the ToC byte before anything reads it. */
+    if (len < 1)
+        return OAC_BAD_ARG;
+    /* Validate the whole packet up front. Returning "no LBRR" for a packet
+       oac_decode() would throw out would make this accessor the one public
+       entry point that accepts a malformed packet, so the CELT early-out below
+       has to come after the parse rather than before it. */
+    ret = oac_packet_parse(packet, len, NULL, frames, size, NULL);
     if (ret <= 0)
         return ret;
-    if (size[0] == 0)
+    packet_mode = oaci_toc_mode(packet[0]);
+    /* CELT has no LBRR, and neither does an empty first frame. */
+    if (packet_mode == MODE_CELT_ONLY || size[0] == 0)
         return 0;
+    packet_frame_size = oaci_toc_samples_per_frame(packet[0], 48000);
+    if (packet_frame_size > 960)
+        nb_frames = packet_frame_size/960;
+    packet_stream_channels = oac_packet_get_nb_channels(packet, len);
+    if (packet_stream_channels < 0)
+        return packet_stream_channels;
     lbrr = (frames[0][0]>>(7 - nb_frames))&0x1;
     if (packet_stream_channels == 2)
         lbrr = lbrr || ((frames[0][0]>>(6 - 2*nb_frames))&0x1);
@@ -1408,11 +1432,12 @@ static int oaci_dred_find_payload(const unsigned char *data, oac_int32 len, cons
     *payload = NULL;
     /* Get the padding section of the packet. */
     ret = oac_packet_parse_impl(data, len, 0, NULL, frames, size, NULL, NULL,
-    &padding, &padding_len, OAC_FORMAT_STANDARD);
+    &padding, &padding_len);
     if (ret < 0)
         return ret;
     nb_frames = ret;
-    frame_size = oac_packet_get_samples_per_frame(data, 48000);
+    /* The parse above already validated the ToC. */
+    frame_size = oaci_toc_samples_per_frame(data[0], 48000);
     oac_extension_iterator_init(&iter, padding, padding_len, nb_frames);
     for (;;) {
         ret = oac_extension_iterator_find(&iter, &ext, DRED_EXTENSION_ID);
