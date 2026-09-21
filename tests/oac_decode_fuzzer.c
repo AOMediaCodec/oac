@@ -85,9 +85,15 @@ typedef struct {
 
 static void ParseToc(const uint8_t *toc, size_t len, TocInfo *const info) {
     const int samp_freqs[5] = {8000, 12000, 16000, 24000, 48000};
-    const int bandwidth = oac_packet_get_bandwidth(toc);
+    const int bandwidth = oac_packet_get_bandwidth(toc, (oac_int32)len);
 
-    info->fs = samp_freqs[bandwidth - OAC_BANDWIDTH_NARROWBAND];
+    /* Fuzz input is arbitrary, so the ToC may not describe a usable packet at
+       all and the accessor may return an error. Fall back to 48 kHz and let
+       oac_decode() do the rejecting. */
+    if (bandwidth < OAC_BANDWIDTH_NARROWBAND || bandwidth > OAC_BANDWIDTH_FULLBAND)
+        info->fs = 48000;
+    else
+        info->fs = samp_freqs[bandwidth - OAC_BANDWIDTH_NARROWBAND];
     info->channels = oac_packet_get_nb_channels(toc, (oac_int32)len);
     /* The ToC can describe up to 256 channels, but we only ever create a
        standard-format decoder here, so fall back to mono. */

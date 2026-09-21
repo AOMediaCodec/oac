@@ -190,6 +190,30 @@ static int ref_nb_frames(int toc, int ext) {
     return dur_list[p]/dur_list[m];
 }
 
+/* Reference for the configuration checks the public accessors now apply: they
+   have to reject anything the decoder would reject, so this sweep needs to know
+   which ToC bytes describe a configuration that can exist at all. The packet is
+   assumed to be exactly two bytes long, which makes the escape form of the
+   channel count (S=1, C=7) truncated and therefore invalid. */
+static int ref_toc2_valid(int toc, int ext) {
+    int config, S, channels;
+    config = toc>>3;
+    S = (toc>>2)&0x01;
+    if (!(toc&0x02)) {
+        channels = S + 1;
+    } else if (ext&0x08) {
+        int order = 2*(ext&0x07) + S;
+        channels = (order + 1)*(order + 1);
+    } else if ((ext&0x07) == 7 && S == 1) {
+        return 0;
+    } else {
+        channels = 2*(ext&0x07) + S + 1;
+    }
+    /* SILK (configs 0-11) and hybrid (configs 12-15) only ever code one or two
+       channels; CELT (16-31) codes any number. */
+    return !(config < 16 && channels > 2);
+}
+
 /* Inverse of the above: the F value that packs exactly nb_frames frames of the
    duration signalled by config, or -1 when that count is not representable. */
 static int ref_F_for_count(int config, int nb_frames) {
@@ -420,34 +444,67 @@ oac_int32 test_dec_api(void) {
         if (((i&0x02) ? OAC_INVALID_PACKET : 1) != oac_packet_get_nb_frames(packet, 1)) test_failed();
         cfgs++;
         for (j = 0; j < 256; j++) {
+            int want;
             packet[1] = j;
-            if (ref_nb_frames(i, j) != oac_packet_get_nb_frames(packet, 2)) test_failed();
+            want = ref_toc2_valid(i, j) ? ref_nb_frames(i, j) : OAC_INVALID_PACKET;
+            if (want != oac_packet_get_nb_frames(packet, 2)) test_failed();
             cfgs++;
         }
     }
     fprintf(stdout, "    oac_packet_get_nb_frames() .................. OK.\n");
 
+    /* These two sweeps cover every possible main ToC byte, including the S, X
+       and P bits. The accessors validate the framing now, so each case has to
+       be a packet that actually parses: an all-zero extended byte (one frame,
+       S+1 channels) and an all-zero padding length keep every config legal. */
     for (i = 0; i < 256; i++) {
         int bw;
+        memset(packet, 0, 8);
         packet[0] = i;
         bw = packet[0]>>4;
         bw = OAC_BANDWIDTH_NARROWBAND + (((((bw&7)*9)&(63 - (bw&8))) + 2 + 12*((bw&8) != 0))>>4);
-        if (bw != oac_packet_get_bandwidth(packet)) test_failed();
+        if (bw != oac_packet_get_bandwidth(packet, 8)) test_failed();
         cfgs++;
     }
     fprintf(stdout, "    oac_packet_get_bandwidth() .................. OK.\n");
 
     for (i = 0; i < 256; i++) {
         int fp3s, rate;
+        memset(packet, 0, 8);
         packet[0] = i;
         fp3s = packet[0]>>3;
         fp3s = ((((3 - (fp3s&3))*13&119) + 9)>>2)*((fp3s > 13)*(3 - ((fp3s&3) == 3)) + 1)*25;
         for (rate = 0; rate < 5; rate++) {
-            if ((oac_rates[rate]*3/fp3s) != oac_packet_get_samples_per_frame(packet, oac_rates[rate])) test_failed();
+            if ((oac_rates[rate]*3/fp3s) != oac_packet_get_samples_per_frame(packet, 8, oac_rates[rate])) test_failed();
             cfgs++;
         }
     }
     fprintf(stdout, "    oac_packet_get_samples_per_frame() .......... OK.\n");
+
+    /* Both must refuse a packet oac_decode() would refuse, rather than
+       reporting a property of something unusable. A SILK ToC claiming four
+       channels is rejected by oaci_validate_config(). */
+    memset(packet, 0, 8);
+    packet[0] = (1<<3)|0x02;    /* config 1: SILK NB 20 ms, X=1 */
+    packet[1] = 0x01;           /* A=0, C=1, S=0 -> 3 channels */
+    if (oac_packet_get_bandwidth(packet, 8) != OAC_INVALID_PACKET) test_failed();
+    if (oac_packet_get_samples_per_frame(packet, 8, 48000) != OAC_INVALID_PACKET) test_failed();
+    if (oac_packet_get_nb_channels(packet, 8) != OAC_INVALID_PACKET) test_failed();
+    if (oac_packet_get_nb_frames(packet, 8) != OAC_INVALID_PACKET) test_failed();
+    if (oac_packet_get_format(packet, 8) != OAC_INVALID_PACKET) test_failed();
+    cfgs += 5;
+    /* The same configuration in CELT is fine. */
+    packet[0] = (31<<3)|0x02;   /* config 31: CELT FB 20 ms, X=1 */
+    if (oac_packet_get_nb_channels(packet, 8) != 3) test_failed();
+    if (oac_packet_get_bandwidth(packet, 8) != OAC_BANDWIDTH_FULLBAND) test_failed();
+    cfgs += 2;
+    /* Truncated headers are rejected, and no data at all is OAC_BAD_ARG. */
+    if (oac_packet_get_bandwidth(packet, 1) != OAC_INVALID_PACKET) test_failed();
+    if (oac_packet_get_samples_per_frame(packet, 1, 48000) != OAC_INVALID_PACKET) test_failed();
+    if (oac_packet_get_bandwidth(packet, 0) != OAC_BAD_ARG) test_failed();
+    if (oac_packet_get_samples_per_frame(packet, 0, 48000) != OAC_BAD_ARG) test_failed();
+    cfgs += 4;
+    fprintf(stdout, "    ToC accessor validation ..................... OK.\n");
 
     /* Config 2 is a 40 ms frame; F=1 would step it to 60 ms, i.e. 1.5 frames,
        which is not representable and must be rejected. */
@@ -483,8 +540,8 @@ oac_int32 test_dec_api(void) {
     if (oac_decode_float(0, packet, 1, 0, 2880, 0)       != OAC_INVALID_STATE)test_failed();
     if (oac_decoder_get_nb_samples(0, packet, 1)      != OAC_INVALID_STATE)test_failed();
     if (oac_packet_get_nb_frames(NULL, 1)            != OAC_BAD_ARG)test_failed();
-    if (oac_packet_get_bandwidth(NULL)              != OAC_BAD_ARG)test_failed();
-    if (oac_packet_get_samples_per_frame(NULL, 48000) != OAC_BAD_ARG) test_failed();
+    if (oac_packet_get_bandwidth(NULL, 1)           != OAC_BAD_ARG)test_failed();
+    if (oac_packet_get_samples_per_frame(NULL, 1, 48000) != OAC_BAD_ARG) test_failed();
 #endif
     oac_decoder_destroy(dec);
     cfgs++;
@@ -1139,10 +1196,15 @@ oac_int32 test_parse(void) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, hdr + 7, &toc, frames, size, &payload_offset);
             cfgs++;
-            /*The accessors resolve the ToC without applying the per-mode
-              channel policy, so they answer even for the rejected packets.*/
-            if (oac_packet_get_nb_channels(packet, hdr) != j) test_failed();
-            if (oac_packet_get_format(packet, hdr) != OAC_FORMAT_STANDARD) test_failed();
+            /*The accessors apply the same policy as the decoder, so they
+              answer only for the packets oac_packet_parse() accepts.*/
+            if (j <= max_channels) {
+                if (oac_packet_get_nb_channels(packet, hdr) != j) test_failed();
+                if (oac_packet_get_format(packet, hdr) != OAC_FORMAT_STANDARD) test_failed();
+            } else {
+                if (oac_packet_get_nb_channels(packet, hdr) != OAC_INVALID_PACKET) test_failed();
+                if (oac_packet_get_format(packet, hdr) != OAC_INVALID_PACKET) test_failed();
+            }
             cfgs += 2;
             if (j <= max_channels) {
                 if (ret != 1) test_failed();
@@ -1157,7 +1219,8 @@ oac_int32 test_parse(void) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, hdr + 7, &toc, frames, size, &payload_offset);
             cfgs++;
-            if (oac_packet_get_nb_channels(packet, hdr) != j) test_failed();
+            if (oac_packet_get_nb_channels(packet, hdr)
+                != (j <= max_channels ? j : OAC_INVALID_PACKET)) test_failed();
             cfgs++;
             if (j <= max_channels) {
                 if (ret != 1) test_failed();
@@ -1179,13 +1242,18 @@ oac_int32 test_parse(void) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, hdr + 7, &toc, frames, size, &payload_offset);
             cfgs++;
-            if (oac_packet_get_nb_channels(packet, hdr) != (j + 1)*(j + 1)) test_failed();
-            if (oac_packet_get_format(packet, hdr) != OAC_FORMAT_AMBISONICS) test_failed();
-            cfgs += 2;
             if (config >= 16 || j == 0) {
+                if (oac_packet_get_nb_channels(packet, hdr) != (j + 1)*(j + 1)) test_failed();
+                if (oac_packet_get_format(packet, hdr) != OAC_FORMAT_AMBISONICS) test_failed();
+                cfgs += 2;
                 if (ret != 1) test_failed();
                 if (size[0] != 7) test_failed();
-            } else if (ret != OAC_INVALID_PACKET) test_failed();
+            } else {
+                if (oac_packet_get_nb_channels(packet, hdr) != OAC_INVALID_PACKET) test_failed();
+                if (oac_packet_get_format(packet, hdr) != OAC_INVALID_PACKET) test_failed();
+                cfgs += 2;
+                if (ret != OAC_INVALID_PACKET) test_failed();
+            }
         }
     }
     fprintf(stdout, "    ambisonics signalling (%2d cases) .......... OK.\n", cfgs);
@@ -1682,7 +1750,7 @@ int test_repacketizer_api(void) {
         /* TOC types, test half with stereo */
         int maxi;
         packet[0] = ((j<<1) + (j&1))<<2;
-        maxi = 960/oac_packet_get_samples_per_frame(packet, 8000);
+        maxi = 960/oac_packet_get_samples_per_frame(packet, 1, 8000);
         for (i = 1; i <= maxi; i++) {
             /* Number of CBR frames in the input packets */
             int maxp, in_toc, F;
@@ -1693,7 +1761,7 @@ int test_repacketizer_api(void) {
             in_toc = i > 1 ? 2 : 1;
             packet[0] = (j<<3) | ((j&1)<<2) | (i > 1 ? 0x02 : 0);
             packet[1] = F<<4;
-            maxp = 960/(i*oac_packet_get_samples_per_frame(packet, 8000));
+            maxp = 960/(i*oac_packet_get_samples_per_frame(packet, 2, 8000));
             for (k = 0; k <= TEST_REPACK_MAX; k += 3) {
                 /*Payload size*/
                 oac_int32 cnt, rcnt;
@@ -1845,7 +1913,7 @@ int test_repacketizer_api(void) {
         /* TOC types, test half with stereo */
         int maxi, sum, rcnt;
         packet[0] = ((j<<1) + (j&1))<<2;
-        maxi = 960/oac_packet_get_samples_per_frame(packet, 8000);
+        maxi = 960/oac_packet_get_samples_per_frame(packet, 1, 8000);
         sum = 0;
         rcnt = 0;
         oac_repacketizer_init(rp);

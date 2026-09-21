@@ -131,8 +131,24 @@ int oaci_write_toc(unsigned char base_toc, int nb_frames, int vbr, int padding,
  * only means touching this function. Returns OAC_OK or OAC_INVALID_PACKET. */
 int oaci_validate_config(int mode, int format, int channels, int nb_frames);
 
-/** MODE_SILK_ONLY, MODE_HYBRID or MODE_CELT_ONLY, from the main ToC byte. */
-int oaci_packet_get_mode(const unsigned char *data);
+/** Raw readers for the main ToC byte. These look at that one byte only and do
+ * no validation, so they are safe to call on a ToC the encoder is still
+ * building. The public oac_packet_get_*() functions wrap them with a call to
+ * oaci_packet_parse_toc() so that they cannot describe a packet oac_decode()
+ * would reject. */
+int oaci_toc_mode(unsigned char toc);          /**< MODE_SILK_ONLY/HYBRID/CELT_ONLY */
+int oaci_toc_bandwidth(unsigned char toc);     /**< OAC_BANDWIDTH_* */
+int oaci_toc_samples_per_frame(unsigned char toc, oac_int32 Fs);
+
+/** Resolve and validate the ToC header of a packet. Fills in whichever of the
+ * out-parameters are non-NULL: the format, the channel count, the number of
+ * frames, and the number of ToC bytes consumed (1, 2 or 3; note this can be 3
+ * even for a channel count that would canonically fit in 2, since the escape
+ * byte is legal for 1..15 channels too). Returns OAC_OK, OAC_BAD_ARG if there
+ * is no data at all, or OAC_INVALID_PACKET. */
+int oaci_packet_parse_toc(const unsigned char *data, oac_int32 len,
+                          int *out_format, int *out_channels,
+                          int *out_nb_frames, int *out_hdr_bytes);
 
 struct OacRepacketizer {
     unsigned char toc;

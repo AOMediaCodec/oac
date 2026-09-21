@@ -93,25 +93,26 @@ static int oac_repacketizer_cat_impl(OacRepacketizer *rp, const unsigned char *d
     unsigned char tmp_toc;
     int curr_nb_frames, ret;
     int channels, format;
-    /* Set of check ToC */
+    /* Set or check ToC */
     if (len < 1) return OAC_INVALID_PACKET;
-    channels = oac_packet_get_nb_channels(data, len);
-    if (channels < 0) return channels;
-    format = oac_packet_get_format(data, len);
-    if (format < 0) return format;
+    if (oaci_packet_parse_toc(data, len, &format, &channels, NULL, NULL) != OAC_OK)
+        return OAC_INVALID_PACKET;
     if (rp->nb_frames == 0) {
         rp->toc = data[0];
-        rp->framesize = oac_packet_get_samples_per_frame(data, 8000);
-        rp->dur_index = oaci_dur_index(oac_packet_get_samples_per_frame(data, 400));
+        rp->framesize = oaci_toc_samples_per_frame(data[0], 8000);
+        rp->dur_index = oaci_dur_index(oaci_toc_samples_per_frame(data[0], 400));
         if (rp->dur_index < 0) return OAC_INVALID_PACKET;
         rp->channels = channels;
         rp->format = format;
-    } else if ((rp->toc&0xFC) != (data[0]&0xFC)) {
-        /*fprintf(stderr, "toc mismatch: 0x%x vs 0x%x\n", rp->toc, data[0]);*/
+    } else if ((rp->toc&0xF8) != (data[0]&0xF8)) {
+        /* Bits 3-7 are the mode, bandwidth and frame duration, which every
+           frame in the output packet has to share. S is deliberately left out:
+           it is part of how the channel count is spelled, and the same count
+           can legally be spelled two ways (e.g. 5 channels as C=2,S=0 or via
+           the escape byte as C=7,S=1). The resolved comparison below is the
+           authoritative one. */
         return OAC_INVALID_PACKET;
     } else if (channels != rp->channels || format != rp->format) {
-        /* The M/S check above catches most of this, but the resolved channel
-           count can also live in the extended and escape bytes. */
         return OAC_INVALID_PACKET;
     }
     curr_nb_frames = oac_packet_get_nb_frames(data, len);
@@ -171,6 +172,13 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
         return OAC_BAD_ARG;
     }
     count = end - begin;
+    /* The frame count has to be representable by the F field for this frame
+       size. The inputs were fine, the requested output is not, so BAD_ARG.
+       Checked before we walk the extensions so we fail without allocating. */
+    if (oaci_frames_to_F(rp->dur_index, count) < 0) {
+        RESTORE_STACK;
+        return OAC_BAD_ARG;
+    }
 
     len = rp->len + begin;
     frames = rp->frames + begin;
@@ -211,12 +219,6 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
     }
 
     ptr = data;
-    /* The frame count has to be representable by the F field for this frame
-       size. The inputs were fine, the requested output is not, so BAD_ARG. */
-    if (oaci_frames_to_F(rp->dur_index, count) < 0) {
-        RESTORE_STACK;
-        return OAC_BAD_ARG;
-    }
     vbr = 0;
     for (i = 1; i < count; i++) {
         if (len[i] != len[0]) {
