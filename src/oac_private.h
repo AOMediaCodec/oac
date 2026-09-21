@@ -341,29 +341,17 @@ oac_int32 oac_packet_pad_impl(unsigned char *data, oac_int32 len, oac_int32 new_
 /** Validate format and channel count combination.
  * @param format OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS
  * @param channels Number of channels
+ * @param max_order Highest ambisonics order to accept (OAC_MAX_AMBISONICS_ORDER
+ *        for decoder, OAC_MAX_ENCODER_AMBISONICS_ORDER for encoder)
  * @returns 1 if valid, 0 if invalid
  */
-static OAC_INLINE int oaci_validate_format_channels(int format, int channels) {
+static OAC_INLINE int oaci_validate_format_channels(int format, int channels, int max_order) {
     if (format == OAC_FORMAT_STANDARD) {
         return (channels == 1 || channels == 2);
     } else if (format == OAC_FORMAT_AMBISONICS) {
-        /* Valid ambisonics channel counts: (order+1)^2 for orders 0 to OAC_MAX_AMBISONICS_ORDER */
+        /* Valid ambisonics channel counts: (order+1)^2 for orders 0 to max_order */
         int order;
-        for (order = 0; order <= OAC_MAX_AMBISONICS_ORDER; order++) {
-            if (channels == (order+1)*(order+1))
-                return 1;
-        }
-        return 0;
-    }
-    return 0;
-}
-
-static OAC_INLINE int oaci_validate_encoder_format_channels(int format, int channels) {
-    if (format == OAC_FORMAT_STANDARD) {
-        return (channels == 1 || channels == 2);
-    } else if (format == OAC_FORMAT_AMBISONICS) {
-        int order;
-        for (order = 0; order <= OAC_MAX_ENCODER_AMBISONICS_ORDER; order++) {
+        for (order = 0; order <= max_order; order++) {
             if (channels == (order+1)*(order+1))
                 return 1;
         }

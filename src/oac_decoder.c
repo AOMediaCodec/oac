@@ -161,7 +161,7 @@ int oac_decoder_get_size(int channels, int format) {
     int silkDecSizeBytes, celtDecSizeBytes;
     int ret;
     int skip_silk;
-    if (!oaci_validate_format_channels(format, channels))
+    if (!oaci_validate_format_channels(format, channels, OAC_MAX_AMBISONICS_ORDER))
         return 0;
     /* For multi-channel ambisonics (>2 channels), skip SILK (only supports 1-2 channels) */
     skip_silk = (format == OAC_FORMAT_AMBISONICS && channels > 2);
@@ -188,7 +188,7 @@ int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
          && Fs != 96000
 #endif
          )
-        || !oaci_validate_format_channels(format, channels))
+        || !oaci_validate_format_channels(format, channels, OAC_MAX_AMBISONICS_ORDER))
         return OAC_BAD_ARG;
 
     /* For multi-channel ambisonics (>2 channels), skip SILK (only supports 1-2 channels) */
@@ -250,7 +250,7 @@ OacDecoder *oac_decoder_create(oac_int32 Fs, int channels, int format, int *erro
          && Fs != 96000
 #endif
          )
-        || !oaci_validate_format_channels(format, channels)) {
+        || !oaci_validate_format_channels(format, channels, OAC_MAX_AMBISONICS_ORDER)) {
         if (error)
             *error = OAC_BAD_ARG;
         return NULL;
@@ -1213,7 +1213,7 @@ static int oaci_packet_parse_toc(const unsigned char packet[], oac_int32 len,
     if (len < 1)
         return OAC_BAD_ARG;
 
-    samples_400 = oac_packet_get_samples_per_frame(packet, 48000) / 120;
+    samples_400 = oac_packet_get_samples_per_frame(packet, 400);
     base_dur_idx = oaci_dur_to_index(samples_400);
 
     toc = packet[0];

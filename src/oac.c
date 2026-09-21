@@ -375,7 +375,7 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     unsigned char toc;
     int S, X, P;
     int pkt_format, pkt_channels;
-    int framesize, samples_400, base_dur_idx;
+    int samples_400, base_dur_idx;
     oac_int32 last_size;
     oac_int32 pad = 0;
     const unsigned char *data0 = data;
@@ -391,8 +391,7 @@ int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     if (len == 0)
         return OAC_INVALID_PACKET;
 
-    framesize = oac_packet_get_samples_per_frame(data, 48000);
-    samples_400 = framesize / 120;
+    samples_400 = oac_packet_get_samples_per_frame(data, 400);
     base_dur_idx = oaci_dur_to_index(samples_400);
 
     toc = *data++;

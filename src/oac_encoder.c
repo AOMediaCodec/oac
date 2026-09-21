@@ -249,7 +249,7 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
         return OAC_BAD_ARG;
 
     /* Validate format and channel count */
-    if (!oaci_validate_encoder_format_channels(format, channels))
+    if (!oaci_validate_format_channels(format, channels, OAC_MAX_ENCODER_AMBISONICS_ORDER))
         return OAC_BAD_ARG;
     /* Validate application */
     if (application != OAC_APPLICATION_VOIP && application != OAC_APPLICATION_AUDIO
@@ -411,7 +411,7 @@ static int oaci_gen_toc_header(unsigned char *data, int mode, int framerate,
                                int bandwidth, int format, int channels,
                                int nb_frames) {
     unsigned char toc = oaci_gen_toc(mode, framerate, bandwidth, 1);
-    int base_dur_idx = oaci_dur_to_index(oac_packet_get_samples_per_frame(&toc, 48000) / 120);
+    int base_dur_idx = oaci_dur_to_index(oac_packet_get_samples_per_frame(&toc, 400));
     return oaci_write_toc(data, toc >> 3, format, channels, base_dur_idx, nb_frames, 0, 0);
 }
 #ifdef FIXED_POINT
@@ -654,7 +654,7 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int format, int appli
 #ifdef ENABLE_QEXT
          && Fs != 96000
 #endif
-         ) || !oaci_validate_encoder_format_channels(format, channels)
+         ) || !oaci_validate_format_channels(format, channels, OAC_MAX_ENCODER_AMBISONICS_ORDER)
         || (application != OAC_APPLICATION_VOIP && application != OAC_APPLICATION_AUDIO
             && application != OAC_APPLICATION_RESTRICTED_LOWDELAY
             && application != OAC_APPLICATION_RESTRICTED_SILK
@@ -1338,7 +1338,8 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     dred_bitrate_bps = oaci_compute_dred_bitrate(st, st->bitrate_bps, frame_size);
     st->bitrate_bps -= dred_bitrate_bps;
 #endif
-    if (max_data_bytes < 3 || st->bitrate_bps < 3*frame_rate*8
+    if (max_data_bytes < oaci_toc_bytes(st->format, st->channels, 1) + 2
+        || st->bitrate_bps < 3*frame_rate*8
         || (frame_rate < 50 && (max_data_bytes*(oac_int32)frame_rate < 300 || st->bitrate_bps < 2400))) {
         /*If the space is too low to do something useful, emit 'PLC' frames.*/
         int tocmode = st->mode;
@@ -2379,6 +2380,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     if (st->application != OAC_APPLICATION_RESTRICTED_SILK)
         celt_encoder_ctl(celt_enc, CELT_SET_START_BAND(start_band));
 
+    OAC_CLEAR(data - toc_bytes, toc_bytes);
     if (st->mode != MODE_SILK_ONLY) {
         celt_encoder_ctl(celt_enc, OAC_SET_VBR(st->use_vbr));
         if (st->mode == MODE_HYBRID) {

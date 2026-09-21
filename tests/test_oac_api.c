@@ -1966,6 +1966,69 @@ int test_repacketizer_api(void) {
     if (oac_multistream_packet_pad(po, 5, 4, 1) != OAC_BAD_ARG) test_failed();
     cfgs++;
 
+    /* Multi-channel (1..256 discrete and Ambisonics orders 0..15) repacketizer round-trip */
+    {
+        int ch, order;
+        for (ch = 1; ch <= 256; ch++) {
+            int in_hdr = (ch <= 2) ? 1 : (ch <= 15 ? 2 : 3);
+            int out_hdr = (ch <= 15) ? 2 : 3;
+            oac_repacketizer_init(rp);
+            if (ch <= 2) {
+                packet[0] = (unsigned char)((31 << 3) | ((ch - 1) << 2));
+            } else if (ch <= 15) {
+                packet[0] = (unsigned char)((31 << 3) | (((ch - 1) & 1) << 2) | 2);
+                packet[1] = (unsigned char)((ch - 1) >> 1);
+            } else {
+                packet[0] = (unsigned char)((31 << 3) | 4 | 2);
+                packet[1] = 7;
+                packet[2] = (unsigned char)(ch - 1);
+            }
+            packet[in_hdr] = 0x11;
+            packet[in_hdr + 1] = 0x22;
+            if (oac_repacketizer_cat(rp, packet, in_hdr + 2) != OAC_OK) test_failed();
+            if (oac_repacketizer_cat(rp, packet, in_hdr + 2) != OAC_OK) test_failed();
+            ret = oac_repacketizer_out(rp, po, max_out);
+            if (ret != out_hdr + 4) test_failed();
+            if (oac_packet_get_format(po, ret) != OAC_FORMAT_STANDARD) test_failed();
+            if (oac_packet_get_nb_channels(po, ret) != ch) test_failed();
+            if (oac_packet_get_nb_frames(po, ret) != 2) test_failed();
+            cfgs += 6;
+        }
+        /* Mixing canonical 1-byte (S=0) and 3-byte escape (C=7, S=1, data[2]=0) for 1 channel must succeed */
+        oac_repacketizer_init(rp);
+        packet[0] = (unsigned char)(31 << 3);
+        packet[1] = 0xAA;
+        if (oac_repacketizer_cat(rp, packet, 2) != OAC_OK) test_failed();
+        packet[0] = (unsigned char)((31 << 3) | 4 | 2);
+        packet[1] = 7;
+        packet[2] = 0;
+        packet[3] = 0xBB;
+        if (oac_repacketizer_cat(rp, packet, 4) != OAC_OK) test_failed();
+        ret = oac_repacketizer_out(rp, po, max_out);
+        if (ret != 4 || oac_packet_get_nb_channels(po, ret) != 1 || oac_packet_get_nb_frames(po, ret) != 2) test_failed();
+        /* Channel count or format mismatch must be rejected */
+        packet[2] = 1; /* 2 channels */
+        if (oac_repacketizer_cat(rp, packet, 4) != OAC_INVALID_PACKET) test_failed();
+        packet[0] = (unsigned char)((31 << 3) | 2);
+        packet[1] = 0x08; /* Ambisonics order 0 (1 channel, different format) */
+        if (oac_repacketizer_cat(rp, packet, 3) != OAC_INVALID_PACKET) test_failed();
+        cfgs += 7;
+        for (order = 0; order <= 15; order++) {
+            oac_repacketizer_init(rp);
+            packet[0] = (unsigned char)((31 << 3) | ((order & 1) << 2) | 2);
+            packet[1] = (unsigned char)(0x08 | (order >> 1));
+            packet[2] = 0x33;
+            if (oac_repacketizer_cat(rp, packet, 3) != OAC_OK) test_failed();
+            if (oac_repacketizer_cat(rp, packet, 3) != OAC_OK) test_failed();
+            ret = oac_repacketizer_out(rp, po, max_out);
+            if (ret != 4) test_failed();
+            if (oac_packet_get_format(po, ret) != OAC_FORMAT_AMBISONICS) test_failed();
+            if (oac_packet_get_nb_channels(po, ret) != (order + 1) * (order + 1)) test_failed();
+            if (oac_packet_get_nb_frames(po, ret) != 2) test_failed();
+            cfgs += 6;
+        }
+    }
+
     fprintf(stdout, "    oac_repacketizer_cat ........................ OK.\n");
     fprintf(stdout, "    oac_repacketizer_out ........................ OK.\n");
     fprintf(stdout, "    oac_repacketizer_out_range .................. OK.\n");
@@ -2404,6 +2467,86 @@ oac_int32 test_encoder_buffer_independence(void) {
         free(data);
     }
     fprintf(stdout, "    large buffers do not blow the stack ......... OK.\n");
+
+    /* An ambisonics packet always spends two bytes on the ToC where a mono or
+       stereo packet spends one, and the frame encoder has to reserve exactly
+       that much up front. Also verify max_data_bytes = 1..4 (buffer-too-small
+       and low-bitrate PLC paths) with a 0xA5 guard byte immediately past
+       max_data_bytes. */
+    {
+        int order;
+
+        pcm = (short *)malloc(sizeof(short)*960*36);
+        out = (short *)malloc(sizeof(short)*960*36);
+        if (pcm == NULL || out == NULL) test_failed();
+        for (order = 1; order <= 5; order++) {
+            OacEncoder *enc;
+            OacDecoder *dec;
+            unsigned char *data;
+            int err, channels, budget, cap;
+
+            channels = (order + 1)*(order + 1);
+            enc = oac_encoder_create(48000, channels, OAC_FORMAT_AMBISONICS,
+                                     OAC_APPLICATION_AUDIO, &err);
+            if (err != OAC_OK || enc == NULL) test_failed();
+            dec = oac_decoder_create(48000, channels, OAC_FORMAT_AMBISONICS, &err);
+            if (err != OAC_OK || dec == NULL) test_failed();
+            if (oac_encoder_ctl(enc, OAC_SET_BITRATE(32000*channels)) != OAC_OK) test_failed();
+            if (oac_encoder_ctl(enc, OAC_SET_VBR(0)) != OAC_OK) test_failed();
+            if (oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(3)) != OAC_OK) test_failed();
+            /* 20 ms at the requested bitrate, which is what CBR will aim for. */
+            budget = 32000*channels/400;
+            data = (unsigned char *)malloc(budget + 1);
+            if (data == NULL) test_failed();
+            seed = 4321u;
+            for (f = 0; f < 2; f++) {
+                oac_uint32 erange, drange;
+                oac_int32 len;
+                int dlen;
+                for (i = 0; i < 960*channels; i++) {
+                    seed = 1664525u*seed + 1013904223u;
+                    pcm[i] = (short)((int)(seed>>20) - 2048);
+                }
+                data[budget] = 0xA5;
+                len = oac_encode(enc, pcm, 960, data, budget);
+                if (len < 0 || len > budget) test_failed();
+                if (data[budget] != 0xA5) test_failed();
+                if (oac_packet_get_format(data, len) != OAC_FORMAT_AMBISONICS) test_failed();
+                if (oac_packet_get_nb_channels(data, len) != channels) test_failed();
+                if (oac_encoder_ctl(enc, OAC_GET_FINAL_RANGE(&erange)) != OAC_OK) test_failed();
+                dlen = oac_decode(dec, data, len, out, 960, 0);
+                if (dlen != 960) test_failed();
+                if (oac_decoder_ctl(dec, OAC_GET_FINAL_RANGE(&drange)) != OAC_OK) test_failed();
+                if (erange != drange) test_failed();
+                cfgs += 6;
+            }
+            /* Test tiny output buffers (max_data_bytes = 1..4) in both CBR and VBR */
+            for (f = 0; f <= 1; f++) {
+                if (oac_encoder_ctl(enc, OAC_SET_VBR(f)) != OAC_OK) test_failed();
+                for (cap = 1; cap <= 4; cap++) {
+                    oac_int32 len;
+                    data[cap] = 0xA5;
+                    len = oac_encode(enc, pcm, 960, data, cap);
+                    if (data[cap] != 0xA5) test_failed();
+                    if (cap < 2) {
+                        if (len != OAC_BUFFER_TOO_SMALL) test_failed();
+                    } else {
+                        if (len < 2 || len > cap) test_failed();
+                        if (oac_packet_get_format(data, len) != OAC_FORMAT_AMBISONICS) test_failed();
+                        if (oac_packet_get_nb_channels(data, len) != channels) test_failed();
+                        if (oac_decode(dec, data, len, out, 960, 0) != 960) test_failed();
+                    }
+                    cfgs += 3;
+                }
+            }
+            free(data);
+            oac_encoder_destroy(enc);
+            oac_decoder_destroy(dec);
+        }
+        free(pcm);
+        free(out);
+    }
+    fprintf(stdout, "    ambisonics ToC reserve ..................... OK.\n");
 
     fprintf(stdout, "              All encoder buffer independence tests passed\n");
     fprintf(stdout, "                          (%d API invocations)\n", cfgs);
