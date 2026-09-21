@@ -257,10 +257,10 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
         && application != OAC_APPLICATION_RESTRICTED_SILK
         && application != OAC_APPLICATION_RESTRICTED_CELT)
         return OAC_BAD_ARG;
-    /* For ambisonics with >2 channels, force CELT-only (no SILK) */
-    if (format == OAC_FORMAT_AMBISONICS && channels > 2) {
+    /* For ambisonics, force CELT-only (no SILK) */
+    if (format == OAC_FORMAT_AMBISONICS) {
         skip_silk = 1;
-        /* Also disallow SILK-only mode for multi-channel ambisonics */
+        /* Also disallow SILK-only mode for ambisonics */
         if (application == OAC_APPLICATION_RESTRICTED_SILK)
             return OAC_BAD_ARG;
     }
@@ -380,7 +380,9 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
     return OAC_OK;
 }
 
-static unsigned char oaci_gen_toc(int mode, int framerate, int bandwidth, int channels) {
+/* Bits 0-4 of the main ToC byte: mode, bandwidth and frame duration. The S bit
+   and everything in the extended ToC byte are filled in by oaci_write_toc(). */
+static unsigned char oaci_gen_toc(int mode, int framerate, int bandwidth) {
     int period;
     unsigned char toc;
     period = 0;
@@ -403,17 +405,9 @@ static unsigned char oaci_gen_toc(int mode, int framerate, int bandwidth, int ch
         toc |= (bandwidth - OAC_BANDWIDTH_SUPERWIDEBAND)<<4;
         toc |= (period - 2)<<3;
     }
-    toc |= (channels == 2)<<2;
     return toc;
 }
 
-static int oaci_gen_toc_header(unsigned char *data, int mode, int framerate,
-                               int bandwidth, int format, int channels,
-                               int nb_frames) {
-    unsigned char toc = oaci_gen_toc(mode, framerate, bandwidth, 1);
-    int base_dur_idx = oaci_dur_to_index(oac_packet_get_samples_per_frame(&toc, 400));
-    return oaci_write_toc(data, toc >> 3, format, channels, base_dur_idx, nb_frames, 0, 0);
-}
 #ifdef FIXED_POINT
 /* Second order ARMA filter, alternative implementation */
 void oaci_silk_biquad_res(
@@ -655,6 +649,7 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int format, int appli
          && Fs != 96000
 #endif
          ) || !oaci_validate_format_channels(format, channels, OAC_MAX_ENCODER_AMBISONICS_ORDER)
+        || (format == OAC_FORMAT_AMBISONICS && application == OAC_APPLICATION_RESTRICTED_SILK)
         || (application != OAC_APPLICATION_VOIP && application != OAC_APPLICATION_AUDIO
             && application != OAC_APPLICATION_RESTRICTED_LOWDELAY
             && application != OAC_APPLICATION_RESTRICTED_SILK
@@ -666,7 +661,7 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int format, int appli
     size = oac_encoder_init(NULL, Fs, channels, format, application);
     if (size <= 0) {
         if (error)
-            *error = OAC_INTERNAL_ERROR;
+            *error = size < 0 ? size : OAC_INTERNAL_ERROR;
         return NULL;
     }
     st = (OacEncoder *)oac_alloc(size);
@@ -842,9 +837,12 @@ oac_int32 oaci_frame_size_select(int application, oac_int32 frame_size, int vari
         return -1;
     if (variable_duration == OAC_FRAMESIZE_ARG)
         new_size = frame_size;
-    else if (variable_duration >= OAC_FRAMESIZE_2_5_MS && variable_duration <= OAC_FRAMESIZE_120_MS)
-        new_size = oaci_frame_dur[variable_duration - OAC_FRAMESIZE_2_5_MS]*Fs/400;
-    else
+    else if (variable_duration >= OAC_FRAMESIZE_2_5_MS && variable_duration <= OAC_FRAMESIZE_120_MS) {
+        /* The OAC_FRAMESIZE_* values map one-to-one onto oaci_frame_dur[], which
+           is also what the ToC F field steps over, so the two can never drift
+           apart. Fs/400 is a whole number at every supported sampling rate. */
+        new_size = oaci_frame_dur[variable_duration - OAC_FRAMESIZE_2_5_MS]*(Fs/400);
+    } else
         return -1;
     if (new_size > frame_size)
         return -1;
@@ -1127,6 +1125,26 @@ static int oaci_decide_dtx_mode(oac_int activity,            /* indicates if thi
     return 0;
 }
 
+/* Smallest ToC this encoder could possibly emit for a frame of this size.
+   Every packet needs room for at least this much before anything is written.
+
+   The frame count only changes the answer for standard mono/stereo, where one
+   frame fits in a single byte but a split one needs the extended byte; every
+   other configuration already needs two or three bytes whatever the count, so
+   ambisonics and >2 channels do not have to be spelled out here. SILK codes up
+   to 60 ms in one frame and CELT up to 20 ms, so anything longer than 60 ms is
+   always split, and 40/60 ms is split whenever CELT is the only option. */
+static int oaci_min_toc_bytes(const OacEncoder *st, int frame_size) {
+    int min_frames = 1;
+    if (frame_size > 3*st->Fs/50
+        || (frame_size > st->Fs/50
+            && (st->application == OAC_APPLICATION_RESTRICTED_LOWDELAY
+                || st->application == OAC_APPLICATION_RESTRICTED_CELT
+                || st->user_forced_mode == MODE_CELT_ONLY)))
+        min_frames = 2;
+    return oaci_toc_bytes(min_frames, st->format, st->channels);
+}
+
 static int oaci_compute_redundancy_bytes(oac_int32 max_data_bytes, oac_int32 bitrate_bps, int frame_rate, int channels) {
     int redundancy_bytes_cap;
     int redundancy_bytes;
@@ -1188,6 +1206,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     oac_int32 max_rate; /* Max bitrate we're allowed to use */
     int curr_bandwidth;
     oac_int32 max_data_bytes; /* Max number of bytes we're allowed to use */
+    int min_toc_bytes;        /* Smallest ToC we could possibly emit */
     oac_int32 cbr_bytes = -1;
     oac_val16 stereo_width;
     const CELTMode *celt_mode = NULL;
@@ -1211,23 +1230,14 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         return OAC_BAD_ARG;
     }
 
-    {
-        int min_frames = 1;
-        int min_toc_bytes;
-        if (frame_size > (3 * st->Fs) / 50)
-            min_frames = 2;
-        else if (frame_size > st->Fs / 50 &&
-                 (st->application == OAC_APPLICATION_RESTRICTED_LOWDELAY ||
-                  st->application == OAC_APPLICATION_RESTRICTED_CELT ||
-                  st->user_forced_mode == MODE_CELT_ONLY ||
-                  st->format == OAC_FORMAT_AMBISONICS ||
-                  st->channels > 2))
-            min_frames = 2;
-        min_toc_bytes = oaci_toc_bytes(st->format, st->channels, min_frames);
-        if (max_data_bytes < min_toc_bytes) {
-            RESTORE_STACK;
-            return OAC_BUFFER_TOO_SMALL;
-        }
+    /* The ToC can be up to three bytes, and the low-bitrate path below writes
+       it unconditionally, so a buffer too small to hold even that has to be
+       rejected here rather than overrun later. 100 ms is no longer a
+       representable duration, so the old guard for it is gone. */
+    min_toc_bytes = oaci_min_toc_bytes(st, frame_size);
+    if (max_data_bytes < min_toc_bytes) {
+        RESTORE_STACK;
+        return OAC_BUFFER_TOO_SMALL;
     }
 
     if (st->application != OAC_APPLICATION_RESTRICTED_CELT)
@@ -1320,17 +1330,9 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
 
     frame_rate = st->Fs/frame_size;
     if (!st->use_vbr) {
-        int min_frames = (frame_size > (3 * st->Fs) / 50 ||
-                          (frame_size > st->Fs / 50 &&
-                           (st->application == OAC_APPLICATION_RESTRICTED_LOWDELAY ||
-                            st->application == OAC_APPLICATION_RESTRICTED_CELT ||
-                            st->user_forced_mode == MODE_CELT_ONLY ||
-                            st->format == OAC_FORMAT_AMBISONICS ||
-                            st->channels > 2))) ? 2 : 1;
-        int min_toc_bytes = oaci_toc_bytes(st->format, st->channels, min_frames);
         cbr_bytes = IMIN((oaci_bitrate_to_bits(st->bitrate_bps, st->Fs, frame_size) + 4)/8, max_data_bytes);
         st->bitrate_bps = oaci_bits_to_bitrate(cbr_bytes*8, st->Fs, frame_size);
-        /* Make sure we provide at least min_toc_bytes to avoid failing. */
+        /* Make sure we provide at least the ToC to avoid failing. */
         max_data_bytes = IMAX(min_toc_bytes, cbr_bytes);
     }
 #ifdef ENABLE_DRED
@@ -1338,32 +1340,45 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     dred_bitrate_bps = oaci_compute_dred_bitrate(st, st->bitrate_bps, frame_size);
     st->bitrate_bps -= dred_bitrate_bps;
 #endif
-    if (max_data_bytes < oaci_toc_bytes(st->format, st->channels, 1) + 2
+    if (max_data_bytes < oaci_toc_bytes(1, st->format, st->channels) + 2
         || st->bitrate_bps < 3*frame_rate*8
         || (frame_rate < 50 && (max_data_bytes*(oac_int32)frame_rate < 300 || st->bitrate_bps < 2400))) {
         /*If the space is too low to do something useful, emit 'PLC' frames.*/
         int tocmode = st->mode;
         int bw = st->bandwidth == 0 ? OAC_BANDWIDTH_NARROWBAND : st->bandwidth;
-        int nb_plc_frames = 1;
+        int nb_multiframes = 1;
+        unsigned char base_toc;
 
-        if (tocmode == 0 || (out_data_bytes == 1 && frame_rate < 50))
+        if (tocmode == 0)
             tocmode = MODE_SILK_ONLY;
-        if (frame_rate > 100 || st->format == OAC_FORMAT_AMBISONICS || st->channels > 2)
+        /* With a single byte to spend we cannot afford the extended ToC that
+           splitting a long frame would need, and only SILK can code 40 or
+           60 ms in one frame. */
+        if (out_data_bytes == 1 && frame_rate < 50)
+            tocmode = MODE_SILK_ONLY;
+        /* oaci_validate_config() rejects SILK and hybrid above two channels,
+           so signalling either here would produce a packet our own parser
+           throws out. CELT is the only mode defined for these layouts. */
+        if (frame_rate > 100 || st->format == OAC_FORMAT_AMBISONICS
+            || st->stream_channels > 2)
             tocmode = MODE_CELT_ONLY;
         /* 40 ms -> 2 x 20 ms if in CELT_ONLY or HYBRID mode */
         if (frame_rate == 25 && tocmode != MODE_SILK_ONLY) {
             frame_rate = 50;
-            nb_plc_frames = 2;
+            nb_multiframes = 2;
         }
 
         /* >= 60 ms frames */
         if (frame_rate <= 16) {
-            /* 1 x 60 ms, 2 x 40 ms, 2 x 60 ms in SILK_ONLY */
+            /* 1 x 60 ms, 2 x 40 ms, 2 x 60 ms. The mode was settled above; do
+               not force SILK back on here, since the channel layout may have
+               ruled it out. */
             if (tocmode == MODE_SILK_ONLY) {
-                nb_plc_frames = frame_rate <= 12 ? 2 : 1;
+                nb_multiframes = frame_rate <= 12 ? 2 : 1;
                 frame_rate = frame_rate == 12 ? 25 : 16;
             } else {
-                nb_plc_frames = 50/frame_rate;
+                /* 3 x 20 ms, 4 x 20 ms or 6 x 20 ms, all representable. */
+                nb_multiframes = 50/frame_rate;
                 frame_rate = 50;
             }
         }
@@ -1375,11 +1390,14 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         else if (tocmode == MODE_HYBRID && bw <= OAC_BANDWIDTH_SUPERWIDEBAND)
             bw = OAC_BANDWIDTH_SUPERWIDEBAND;
 
-        ret = oaci_gen_toc_header(data, tocmode, frame_rate, bw,
-                                  st->format, st->stream_channels, nb_plc_frames);
+        base_toc = oaci_gen_toc(tocmode, frame_rate, bw);
+        /* Read the duration back out of the ToC we just built rather than
+           deriving it from frame_rate, which is rounded down for 60 ms. */
+        ret = oaci_write_toc(base_toc, nb_multiframes, 0, 0, st->format, st->stream_channels,
+                             oaci_toc_samples_per_frame(base_toc, 400), data);
         if (ret < 0) {
             RESTORE_STACK;
-            return ret;
+            return OAC_INTERNAL_ERROR;
         }
 
         max_data_bytes = IMAX(max_data_bytes, ret);
@@ -1681,6 +1699,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         VARDECL(OacRepacketizer, rp);
         int max_header_bytes;
         int size_bytes;
+        int toc_bytes_single;
         oac_int32 repacketize_len;
         oac_int32 max_len_sum;
         oac_int32 tmp_data_size;
@@ -1691,14 +1710,26 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         int bak_to_mono;
 
         if (st->mode == MODE_SILK_ONLY) {
+            /* SILK codes up to 60 ms natively, so we only get here for 80 and
+               120 ms. */
             if (frame_size == 2*st->Fs/25) /* 80 ms -> 2x 40 ms */
                 enc_frame_size = st->Fs/25;
-            else /* 120 ms -> 2x 60 ms */
+            else {                         /* 120 ms -> 2x 60 ms */
+                celt_assert(frame_size == 3*st->Fs/25);
                 enc_frame_size = 3*st->Fs/50;
+            }
         } else
             enc_frame_size = st->Fs/50;
 
         nb_frames = frame_size/enc_frame_size;
+        /* Every count we can reach here is one the F field can signal, but the
+           ToC has no way to express e.g. 5 frames, so fail loudly rather than
+           emit something unparseable. */
+        if (oaci_frames_to_F(oaci_dur_index(enc_frame_size*400/st->Fs), nb_frames) < 0) {
+            celt_assert(0);
+            RESTORE_STACK;
+            return OAC_BAD_ARG;
+        }
 
 #ifndef DISABLE_FLOAT_API
         if (analysis_read_pos_bak != -1) {
@@ -1716,27 +1747,33 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
             repacketize_len = IMIN(cbr_bytes, out_data_bytes);
         }
         {
-            int single_toc_bytes = oaci_toc_bytes(st->format, st->channels, 1);
-            int multi_toc_bytes = oaci_toc_bytes(st->format, st->channels, nb_frames);
             oac_int32 max_frame_bytes = oaci_max_frame_bytes(enc_frame_size, st->Fs, st->channels);
-            repacketize_len = IMIN(repacketize_len, nb_frames * max_frame_bytes + multi_toc_bytes + (nb_frames - 1)*3);
+            int toc_bytes_multi = oaci_toc_bytes(nb_frames, st->format, st->channels);
+            repacketize_len = IMIN(repacketize_len,
+                nb_frames * max_frame_bytes + toc_bytes_multi + (nb_frames - 1)*3);
 
+            /* Worst case: VBR, i.e. an explicit length for every frame but the
+               last on top of the one to three ToC bytes. */
             size_bytes = oaci_size_bytes(IMIN(repacketize_len, max_frame_bytes));
-            max_header_bytes = multi_toc_bytes + (nb_frames - 1)*size_bytes;
+            max_header_bytes = toc_bytes_multi + (nb_frames - 1)*size_bytes;
             repacketize_len = IMIN(repacketize_len, nb_frames * max_frame_bytes + max_header_bytes);
-            max_len_sum = nb_frames * single_toc_bytes + repacketize_len - max_header_bytes;
-
-            /* The scratch buffer only ever holds what we actually ask the frame
-               encoder for, and that is curr_max below, not max_len_sum. Sizing it
-               from max_len_sum would put a multi-megabyte VLA on the stack as soon
-               as the channel count is high. Keep this in sync with curr_max. */
-            tmp_data_size = nb_frames*IMIN(oaci_bitrate_to_bits(st->bitrate_bps, st->Fs, enc_frame_size)/8,
-                                           max_len_sum/nb_frames);
-#ifdef ENABLE_DRED
-            tmp_data_size += oaci_bitrate_to_bits(dred_bitrate_bps, st->Fs, frame_size)/8;
-#endif
-            tmp_data_size = IMAX(nb_frames * single_toc_bytes, IMIN(max_len_sum, tmp_data_size));
+            /* Every sub-packet we hand to the repacketizer carries a ToC of its
+               own, which is two or three bytes for ambisonics and surround, not
+               the single byte a mono or stereo packet happens to use. */
+            toc_bytes_single = oaci_toc_bytes(1, st->format, st->channels);
         }
+        max_len_sum = nb_frames*toc_bytes_single + repacketize_len - max_header_bytes;
+
+        /* The scratch buffer only ever holds what we actually ask the frame
+           encoder for, and that is curr_max below, not max_len_sum. Sizing it
+           from max_len_sum would put a multi-megabyte VLA on the stack as soon
+           as the channel count is high. Keep this in sync with curr_max. */
+        tmp_data_size = nb_frames*IMIN(oaci_bitrate_to_bits(st->bitrate_bps, st->Fs, enc_frame_size)/8,
+                                       max_len_sum/nb_frames);
+#ifdef ENABLE_DRED
+        tmp_data_size += oaci_bitrate_to_bits(dred_bitrate_bps, st->Fs, frame_size)/8;
+#endif
+        tmp_data_size = IMAX(nb_frames*toc_bytes_single, IMIN(max_len_sum, tmp_data_size));
         ALLOC(tmp_data, tmp_data_size, unsigned char);
         curr_data = tmp_data;
         ALLOC(rp, 1, OacRepacketizer);
@@ -1794,7 +1831,8 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
             if (tmp_len < 0) {
                 RESTORE_STACK;
                 return OAC_INTERNAL_ERROR;
-            } else if (tmp_len == oaci_toc_bytes(st->format, st->stream_channels, 1)) {
+            } else if (tmp_len == oaci_toc_bytes(1, st->format, st->stream_channels)) {
+                /* A DTX frame is just its ToC, which is one to three bytes. */
                 dtx_count++;
             }
             ret = oac_repacketizer_cat(rp, curr_data, tmp_len);
@@ -1847,6 +1885,10 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     int i;
     int ret = 0;
     int max_data_bytes;
+    /* Size of the ToC this frame will need. Every reservation below is in
+       terms of this rather than the 1 byte a mono/stereo packet happens to
+       use, since ambisonics and surround need two or three. */
+    int toc_bytes;
     oac_int32 nBytes;
     ec_enc enc;
     int bits_target;
@@ -1858,7 +1900,6 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     int hp_freq_smth1;
     oac_val16 HB_gain;
     int apply_padding;
-    int toc_bytes;
     int frame_rate;
     int curr_bandwidth;
     int delay_compensation;
@@ -1932,9 +1973,11 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
         redundancy_bytes = 0;
     }
 
+    toc_bytes = oaci_toc_bytes(1, st->format, st->stream_channels);
+
     /* printf("%d %d %d %d\n", st->bitrate_bps, st->stream_channels, st->mode, curr_bandwidth); */
-    toc_bytes = oaci_toc_bytes(st->format, st->stream_channels, 1);
-    bits_target = IMIN(8*(max_data_bytes - redundancy_bytes), oaci_bitrate_to_bits(st->bitrate_bps, st->Fs, frame_size)) - 8*toc_bytes;
+    bits_target = IMIN(8*(max_data_bytes - redundancy_bytes), oaci_bitrate_to_bits(st->bitrate_bps, st->Fs, frame_size))
+                  - 8*toc_bytes;
 
     data += toc_bytes;
 
@@ -2196,9 +2239,10 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
 #endif
         }
         if (nBytes == 0) {
+            unsigned char base_toc = oaci_gen_toc(st->mode, st->Fs/frame_size, curr_bandwidth);
             st->rangeFinal = 0;
-            oaci_gen_toc_header(data - toc_bytes, st->mode, st->Fs/frame_size,
-                                curr_bandwidth, st->format, st->stream_channels, 1);
+            oaci_write_toc(base_toc, 1, 0, 0, st->format, st->stream_channels,
+                           oaci_toc_samples_per_frame(base_toc, 400), data - toc_bytes);
             RESTORE_STACK;
             return toc_bytes;
         }
@@ -2380,7 +2424,6 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     if (st->application != OAC_APPLICATION_RESTRICTED_SILK)
         celt_encoder_ctl(celt_enc, CELT_SET_START_BAND(start_band));
 
-    OAC_CLEAR(data - toc_bytes, toc_bytes);
     if (st->mode != MODE_SILK_ONLY) {
         celt_encoder_ctl(celt_enc, OAC_SET_VBR(st->use_vbr));
         if (st->mode == MODE_HYBRID) {
@@ -2464,10 +2507,15 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
         celt_encoder_ctl(celt_enc, OAC_GET_FINAL_RANGE(&redundant_rng));
     }
 
-    /* Signalling the mode in the ToC header */
+
+
+    /* Signalling the mode and the framing in the first one to three bytes */
     data -= toc_bytes;
-    oaci_gen_toc_header(data, st->mode, st->Fs/frame_size, curr_bandwidth,
-                        st->format, st->stream_channels, 1);
+    {
+        unsigned char base_toc = oaci_gen_toc(st->mode, st->Fs/frame_size, curr_bandwidth);
+        oaci_write_toc(base_toc, 1, 0, 0, st->format, st->stream_channels,
+                       oaci_toc_samples_per_frame(base_toc, 400), data);
+    }
 
     st->rangeFinal ^= redundant_rng;
 
@@ -2484,8 +2532,6 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     if (st->use_dtx && !st->silk_mode.useDTX) {
         if (oaci_decide_dtx_mode(activity, &st->nb_no_activity_ms_Q1, 2*1000*frame_size/st->Fs)) {
             st->rangeFinal = 0;
-            oaci_gen_toc_header(data, st->mode, st->Fs/frame_size, curr_bandwidth,
-                                st->format, st->stream_channels, 1);
             RESTORE_STACK;
             return toc_bytes;
         }
@@ -2523,7 +2569,9 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
         int dred_bytes_left;
         dred_chunks = IMIN((st->dred_duration + 5)/4, DRED_NUM_REDUNDANCY_FRAMES/2);
         if (st->use_vbr) dred_chunks = IMIN(dred_chunks, st->dred_target_chunks);
-        /* Remaining space for DRED, accounting for 2 extra bytes for padding length and extension number. */
+        /* Remaining space for DRED, accounting for the 2 extra bytes for the
+           padding length and the extension number. Padding no longer costs a
+           frame-count byte: it is the P bit of the ToC we already counted. */
         dred_bytes_left = IMIN(DRED_MAX_DATA_SIZE, orig_max_data_bytes - ret - 2);
         /* Account for the extra bytes required to signal large padding length. */
         dred_bytes_left -= (dred_bytes_left + 1 + DRED_EXPERIMENTAL_BYTES)/255;

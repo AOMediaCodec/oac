@@ -88,14 +88,79 @@ static OAC_INLINE oac_int32 oaci_max_frame_bytes(oac_int32 frame_size, oac_int32
     return (oac_int32)IMIN(bytes, OAC_SIZE_MAX);
 }
 
+/** The eight legal frame/packet durations, in units of 2.5 ms (Fs/400 samples):
+ * 2.5, 5, 10, 20, 40, 60, 80, 120 ms. Single source of truth: the
+ * OAC_FRAMESIZE_* enum, the ToC F field and oac_packet_get_samples_per_frame()
+ * all derive from this. */
+#define OAC_NB_FRAME_DURATIONS 8
+extern const unsigned char oaci_frame_dur[OAC_NB_FRAME_DURATIONS];
+
+/** Index into oaci_frame_dur[] for a duration given in Fs/400 units,
+ * or -1 if it is not one of the eight legal durations. */
+int oaci_dur_index(int samples_400);
+
+/** Number of frames a packet holds, given the base duration index and the ToC
+ * F field. Returns -1 when the combination is invalid, which happens either
+ * because dur_index+F runs off the end of the table or because the resulting
+ * packet duration is not an integer multiple of the frame duration (40 ms +
+ * F=1 would be 1.5 frames, 60 ms + F=1 would be 4/3, 80 ms + F=1 would be
+ * 1.5). */
+int oaci_F_to_frames(int dur_index, int F);
+
+/** Inverse of oaci_F_to_frames(): the F value that encodes nb_frames frames of
+ * the given base duration, or -1 if that frame count is not representable.
+ * Legal counts are 1,2,4,8,16,24,32,48 for a 2.5 ms base; 1,2,4,8,12,16,24 for
+ * 5 ms; 1,2,4,6,8,12 for 10 ms; 1,2,3,4,6 for 20 ms; 1,2,3 for 40 ms; 1,2 for
+ * 60 ms; and 1 for 80 ms and 120 ms. */
+int oaci_frames_to_F(int dur_index, int nb_frames);
+
+/** Number of ToC bytes a configuration needs: 1, 2 or 3. */
+int oaci_toc_bytes(int nb_frames, int format, int channels);
+
+/** Write the 1 to 3 ToC bytes for a packet. @a base_toc supplies bits 0-4
+ * (mode/bandwidth/duration) as produced by oaci_gen_toc(); S, X, P and the
+ * whole extended byte are derived here. Returns the number of bytes written,
+ * or OAC_BAD_ARG if the configuration cannot be signalled at all (a frame
+ * count the F field cannot reach, or an impossible channel count). */
+int oaci_write_toc(unsigned char base_toc, int nb_frames, int vbr, int padding,
+                   int format, int channels, int samples_400, unsigned char *data);
+
+/** The single place that decides whether a configuration is legal. Takes
+ * resolved values (channels, format, mode) rather than raw ToC bit fields, so
+ * that both the parser and the encoder can call it and so that adding a mode
+ * only means touching this function. Returns OAC_OK or OAC_INVALID_PACKET. */
+int oaci_validate_config(int mode, int format, int channels, int nb_frames);
+
+/** Raw readers for the main ToC byte. These look at that one byte only and do
+ * no validation, so they are safe to call on a ToC the encoder is still
+ * building. The public oac_packet_get_*() functions wrap them with a call to
+ * oaci_packet_parse_toc() so that they cannot describe a packet oac_decode()
+ * would reject. */
+int oaci_toc_mode(unsigned char toc);          /**< MODE_SILK_ONLY/HYBRID/CELT_ONLY */
+int oaci_toc_bandwidth(unsigned char toc);     /**< OAC_BANDWIDTH_* */
+int oaci_toc_samples_per_frame(unsigned char toc, oac_int32 Fs);
+
+/** Resolve and validate the ToC header of a packet. Fills in whichever of the
+ * out-parameters are non-NULL: the format, the channel count, the number of
+ * frames, and the number of ToC bytes consumed (1, 2 or 3; note this can be 3
+ * even for a channel count that would canonically fit in 2, since the escape
+ * byte is legal for 1..15 channels too). Returns OAC_OK, OAC_BAD_ARG if there
+ * is no data at all, or OAC_INVALID_PACKET. */
+int oaci_packet_parse_toc(const unsigned char *data, oac_int32 len,
+                          int *out_format, int *out_channels,
+                          int *out_nb_frames, int *out_hdr_bytes);
+
 struct OacRepacketizer {
     unsigned char toc;
     int nb_frames;
     const unsigned char *frames[OAC_MAX_FRAMES_PER_PACKET];
     oac_int32 len[OAC_MAX_FRAMES_PER_PACKET];
     int framesize;
+    /* Resolved from the first packet's ToC and required to match on every
+       subsequent one, since they all have to share the output ToC. */
     int format;
     int channels;
+    int dur_index;
     const unsigned char *paddings[OAC_MAX_FRAMES_PER_PACKET];
     oac_int32 padding_len[OAC_MAX_FRAMES_PER_PACKET];
     unsigned char padding_nb_frames[OAC_MAX_FRAMES_PER_PACKET];
@@ -234,18 +299,6 @@ void oac_pcm_soft_clip_impl(float *_x, int N, int C, float *declip_mem, int arch
 
 int oaci_encode_size(oac_int32 size, unsigned char *data);
 
-static OAC_INLINE int oac_packet_get_mode(const unsigned char *data) {
-    int mode;
-    if (data[0]&0x80) {
-        mode = MODE_CELT_ONLY;
-    } else if ((data[0]&0x60) == 0x60) {
-        mode = MODE_HYBRID;
-    } else {
-        mode = MODE_SILK_ONLY;
-    }
-    return mode;
-}
-
 oac_int32 oaci_frame_size_select(int application, oac_int32 frame_size, int variable_duration, oac_int32 Fs);
 
 oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
@@ -267,20 +320,6 @@ static OAC_INLINE int oaci_align(int i) {
        for all sensible alignment values. */
     return ((i + alignment - 1)/alignment)*alignment;
 }
-
-/* Single source of truth for the 8 valid packet/frame durations in 2.5 ms (Fs/400) units. */
-#define OAC_NB_FRAME_DURATIONS 8
-extern const unsigned char oaci_frame_dur[OAC_NB_FRAME_DURATIONS];
-
-int oaci_dur_to_index(int dur_2_5ms);
-int oaci_frames_to_F(int base_dur_idx, int count);
-int oaci_F_to_frames(int base_dur_idx, int F);
-int oaci_toc_bytes(int format, int channels, int count);
-int oaci_write_toc(unsigned char *data, unsigned char config5,
-    int format, int channels,
-    int base_dur_idx, int count, int vbr, int pad);
-int oaci_validate_config(int mode, int format, int channels,
-    int nb_frames, int samples_400);
 
 int oac_packet_parse_impl(const unsigned char *data, oac_int32 len,
     int self_delimited, unsigned char *out_toc,
@@ -341,8 +380,10 @@ oac_int32 oac_packet_pad_impl(unsigned char *data, oac_int32 len, oac_int32 new_
 /** Validate format and channel count combination.
  * @param format OAC_FORMAT_STANDARD or OAC_FORMAT_AMBISONICS
  * @param channels Number of channels
- * @param max_order Highest ambisonics order to accept (OAC_MAX_AMBISONICS_ORDER
- *        for decoder, OAC_MAX_ENCODER_AMBISONICS_ORDER for encoder)
+ * @param max_order Highest ambisonics order to accept. Pass
+ *        OAC_MAX_AMBISONICS_ORDER on the decoder side and
+ *        OAC_MAX_ENCODER_AMBISONICS_ORDER on the encoder side, which is lower
+ *        because we only have projection matrices up to order 5.
  * @returns 1 if valid, 0 if invalid
  */
 static OAC_INLINE int oaci_validate_format_channels(int format, int channels, int max_order) {

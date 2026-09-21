@@ -668,27 +668,27 @@ void test_oac_repacketizer_out_range_impl(void) {
     oac_repacketizer_init(&rp);
 
     memset(packet, 0, sizeof(packet));
-    /* Hybrid Packet with 20 msec frames, Extended ToC (X=1) + Padding (P=1) */
-    packet[0] = (15<<3)|3;
-    /* Extended ToC: V=0, F=0 (1 frame), A=0, C=0 */
+    /* Hybrid packet with 20 ms frames, one frame, padding present (P=1). */
+    packet[0] = (15<<3)|1;
+    /* Padding length, filled in below. */
     packet[1] = 0;
+    /* One byte of frame data. */
     packet[2] = 0;
-    packet[3] = 0;
 
     /* generate 2 extensions, id 33 and 100 */
-    len = oac_packet_extensions_generate(&packet[4], sizeof(packet) - 4, ext, 2,
+    len = oac_packet_extensions_generate(&packet[3], sizeof(packet) - 3, ext, 2,
     1, 0);
     /* update the padding length */
-    packet[2] = len;
+    packet[1] = len;
 
     /* concatenate 3 frames */
-    res = oac_repacketizer_cat(&rp, packet, 4 + len);
-    /* for the middle frame, no padding, no extensions (X=1, P=0) */
-    packet[0] = (15<<3)|2;
-    res = oac_repacketizer_cat(&rp, packet, 4);
-    /* switch back to extensions for the last frame extensions (X=1, P=1) */
-    packet[0] = (15<<3)|3;
-    res = oac_repacketizer_cat(&rp, packet, 4 + len);
+    res = oac_repacketizer_cat(&rp, packet, 3 + len);
+    /* for the middle frame, no padding, no extensions */
+    packet[0] = (15<<3);
+    res = oac_repacketizer_cat(&rp, packet, 2);
+    /* switch back to extensions for the last frame extensions */
+    packet[0] = (15<<3)|1;
+    res = oac_repacketizer_cat(&rp, packet, 3 + len);
 
     expect_true(rp.nb_frames == 3, "Expected 3 frames");
     res = oac_repacketizer_out_range_impl(&rp,

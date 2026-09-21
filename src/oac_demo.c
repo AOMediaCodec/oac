@@ -1061,7 +1061,7 @@ int main(int argc, char *argv[]) {
                 fprintf (stderr, "oac_encode() returned %d\n", len);
                 goto failure;
             }
-            nb_encoded = oac_packet_get_samples_per_frame(data, sampling_rate)*oac_packet_get_nb_frames(data, len);
+            nb_encoded = oac_packet_get_nb_samples(data, len, sampling_rate);
             remaining = frame_size - nb_encoded;
             for (i = 0; i < remaining*channels; i++)
                 in[i] = in[nb_encoded*channels + i];

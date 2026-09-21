@@ -106,6 +106,9 @@ int oac_multistream_decoder_init(
     int i, ret;
     char *ptr;
 
+    /* The multistream API is capped at 255 channels rather than
+       OAC_MAX_CHANNELS (256) because the mapping table uses the value 255 to
+       mark a channel as silent, so 255 is not usable as a stream index. */
     if ((channels > 255) || (channels < 1) || (coupled_streams > streams)
         || (streams < 1) || (coupled_streams < 0) || (streams > 255 - coupled_streams))
         return OAC_BAD_ARG;

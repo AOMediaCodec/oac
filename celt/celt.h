@@ -84,13 +84,17 @@
 #define CELTDecoder OacCustomDecoder
 #define CELTMode OacCustomMode
 
-/** Maximum supported ambisonics order (bitstream / decoder). */
+/** Maximum ambisonics order the bitstream and the decoder support.
+ * The extended ToC codes the order as 2*C+S on 4 bits, so 15 is the largest
+ * order that can be signalled at all. (15+1)^2 = 256 channels. */
 #define OAC_MAX_AMBISONICS_ORDER 15
-/** Maximum ambisonics order currently supported by the encoder. */
+/** Maximum ambisonics order the *encoder* supports. Lower than the decoder
+ * limit because we only have projection matrices up to order 5. */
 #define OAC_MAX_ENCODER_AMBISONICS_ORDER 5
 #define OAC_MAX_AMBISONICS_CHANNELS ((OAC_MAX_AMBISONICS_ORDER+1)*(OAC_MAX_AMBISONICS_ORDER+1))
 #define OAC_MAX_CHANNELS 256
-/* Check that OAC_MAX_CHANNELS is large enough */
+/* Check that OAC_MAX_CHANNELS is large enough. This is now tight: raising
+   OAC_MAX_AMBISONICS_ORDER without raising OAC_MAX_CHANNELS will trip it. */
 typedef char oac_assert_max_channels_sufficient[(OAC_MAX_CHANNELS >= OAC_MAX_AMBISONICS_CHANNELS) ? 1 : -1];
 #define LEAK_BANDS 19
 

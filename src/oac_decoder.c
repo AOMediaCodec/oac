@@ -707,6 +707,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     int count, offset;
     unsigned char toc;
     int packet_frame_size, packet_bandwidth, packet_mode, packet_stream_channels;
+    int packet_format;
+    int toc_ret;
     /* 48 x 2.5 ms = 120 ms */
     oac_int32 size[OAC_MAX_FRAMES_PER_PACKET];
     const unsigned char *padding;
@@ -763,10 +765,26 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     } else if (len < 0)
         return OAC_BAD_ARG;
 
-    packet_mode = oac_packet_get_mode(data);
-    packet_bandwidth = oac_packet_get_bandwidth(data);
-    packet_frame_size = oac_packet_get_samples_per_frame(data, st->Fs);
-    packet_stream_channels = oac_packet_get_nb_channels(data, len);
+    /* One validated pass over the ToC header; the rest come from the main ToC
+       byte alone, which that pass has already vetted. */
+    toc_ret = oaci_packet_parse_toc(data, len, &packet_format,
+                                    &packet_stream_channels, NULL, NULL);
+    if (toc_ret != OAC_OK)
+        return toc_ret;
+    packet_mode = oaci_toc_mode(data[0]);
+    packet_bandwidth = oaci_toc_bandwidth(data[0]);
+    packet_frame_size = oaci_toc_samples_per_frame(data[0], st->Fs);
+    /* The ToC describes what the packet contains; st->channels is what we
+       output. Mono/stereo up/downmixing is allowed, as in Opus. Anything else
+       would need a surround decoding path we do not have yet, and ambisonics
+       has no defined order conversion, so require an exact match there. */
+    if (packet_format != st->format)
+        return OAC_INVALID_PACKET;
+    if (st->format == OAC_FORMAT_STANDARD) {
+        if (packet_stream_channels > 2)
+            return OAC_INVALID_PACKET;
+    } else if (packet_stream_channels != st->channels)
+        return OAC_INVALID_PACKET;
 
     count = oac_packet_parse_impl(data, len, self_delimited, &toc, NULL,
                                   size, &offset, packet_offset, &padding, &padding_len);
@@ -776,12 +794,6 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     }
     if (count < 0)
         return count;
-    if (oac_packet_get_format(data, len) != st->format)
-        return OAC_INVALID_PACKET;
-    if (st->format == OAC_FORMAT_AMBISONICS && packet_stream_channels != st->channels)
-        return OAC_INVALID_PACKET;
-    if (st->format == OAC_FORMAT_STANDARD && packet_stream_channels > 2)
-        return OAC_INVALID_PACKET;
     oac_extension_iterator_init(&iter, padding, padding_len, count);
 
     data += offset;
@@ -828,6 +840,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     st->mode = packet_mode;
     st->bandwidth = packet_bandwidth;
     st->frame_size = packet_frame_size;
+    /* The ToC channel count was checked against the decoder's above, so for
+       ambisonics this is st->channels and for standard it is 1 or 2. */
     st->stream_channels = packet_stream_channels;
 
     nb_samples = 0;
@@ -1188,99 +1202,33 @@ void oac_decoder_destroy(OacDecoder *st) {
 }
 
 
-int oac_packet_get_bandwidth(const unsigned char *data) {
-    int bandwidth;
-    if (data[0]&0x80) {
-        bandwidth = OAC_BANDWIDTH_MEDIUMBAND + ((data[0]>>5)&0x3);
-        if (bandwidth == OAC_BANDWIDTH_MEDIUMBAND)
-            bandwidth = OAC_BANDWIDTH_NARROWBAND;
-    } else if ((data[0]&0x60) == 0x60) {
-        bandwidth = (data[0]&0x10) ? OAC_BANDWIDTH_FULLBAND :
-                    OAC_BANDWIDTH_SUPERWIDEBAND;
-    } else {
-        bandwidth = OAC_BANDWIDTH_NARROWBAND + ((data[0]>>5)&0x3);
-    }
-    return bandwidth;
-}
-
-static int oaci_packet_parse_toc(const unsigned char packet[], oac_int32 len,
-                                 int *out_format, int *out_channels, int *out_nb_frames) {
-    unsigned char toc;
-    int S, X;
-    int pkt_format, pkt_channels, count;
-    int samples_400, base_dur_idx;
-
-    if (len < 1)
-        return OAC_BAD_ARG;
-
-    samples_400 = oac_packet_get_samples_per_frame(packet, 400);
-    base_dur_idx = oaci_dur_to_index(samples_400);
-
-    toc = packet[0];
-    S = (toc >> 2) & 0x1;
-    X = (toc >> 1) & 0x1;
-    if (!X) {
-        pkt_format = OAC_FORMAT_STANDARD;
-        pkt_channels = S + 1;
-        count = 1;
-    } else {
-        unsigned char ext;
-        int F, C;
-        if (len < 2)
-            return OAC_INVALID_PACKET;
-        ext = packet[1];
-        F = (ext >> 4) & 0x07;
-        C = ext & 0x07;
-        count = oaci_F_to_frames(base_dur_idx, F);
-        if (ext & 0x08) {
-            int order = (C << 1) | S;
-            pkt_format = OAC_FORMAT_AMBISONICS;
-            pkt_channels = (order + 1) * (order + 1);
-        } else {
-            pkt_format = OAC_FORMAT_STANDARD;
-            if (C == 7 && S == 1) {
-                if (len < 3)
-                    return OAC_INVALID_PACKET;
-                pkt_channels = (int)packet[2] + 1;
-            } else {
-                pkt_channels = ((C << 1) | S) + 1;
-            }
-        }
-    }
-
-    if (oaci_validate_config(oac_packet_get_mode(packet), pkt_format,
-                             pkt_channels, count, samples_400) != OAC_OK)
-        return OAC_INVALID_PACKET;
-
-    if (out_format)
-        *out_format = pkt_format;
-    if (out_channels)
-        *out_channels = pkt_channels;
-    if (out_nb_frames)
-        *out_nb_frames = count;
-    return OAC_OK;
+int oac_packet_get_bandwidth(const unsigned char *data, oac_int32 len) {
+    int ret = oaci_packet_parse_toc(data, len, NULL, NULL, NULL, NULL);
+    if (ret != OAC_OK)
+        return ret;
+    return oaci_toc_bandwidth(data[0]);
 }
 
 int oac_packet_get_nb_channels(const unsigned char packet[], oac_int32 len) {
     int channels;
-    int ret = oaci_packet_parse_toc(packet, len, NULL, &channels, NULL);
-    if (ret < 0)
+    int ret = oaci_packet_parse_toc(packet, len, NULL, &channels, NULL, NULL);
+    if (ret != OAC_OK)
         return ret;
     return channels;
 }
 
 int oac_packet_get_format(const unsigned char packet[], oac_int32 len) {
     int format;
-    int ret = oaci_packet_parse_toc(packet, len, &format, NULL, NULL);
-    if (ret < 0)
+    int ret = oaci_packet_parse_toc(packet, len, &format, NULL, NULL, NULL);
+    if (ret != OAC_OK)
         return ret;
     return format;
 }
 
 int oac_packet_get_nb_frames(const unsigned char packet[], oac_int32 len) {
     int nb_frames;
-    int ret = oaci_packet_parse_toc(packet, len, NULL, NULL, &nb_frames);
-    if (ret < 0)
+    int ret = oaci_packet_parse_toc(packet, len, NULL, NULL, &nb_frames, NULL);
+    if (ret != OAC_OK)
         return ret;
     return nb_frames;
 }
@@ -1293,7 +1241,8 @@ int oac_packet_get_nb_samples(const unsigned char packet[], oac_int32 len,
     if (count < 0)
         return count;
 
-    samples = count*oac_packet_get_samples_per_frame(packet, Fs);
+    /* oac_packet_get_nb_frames() above already validated the ToC. */
+    samples = count*oaci_toc_samples_per_frame(packet[0], Fs);
     /* Can't have more than 120 ms */
     if (samples*25 > Fs*3)
         return OAC_INVALID_PACKET;
@@ -1309,12 +1258,13 @@ int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len) {
     int nb_frames = 1;
     int lbrr;
 
+    /* Guard the ToC byte before anything reads it. */
     if (len < 1)
         return OAC_BAD_ARG;
-    packet_mode = oac_packet_get_mode(packet);
+    packet_mode = oaci_toc_mode(packet[0]);
     if (packet_mode == MODE_CELT_ONLY)
         return 0;
-    packet_frame_size = oac_packet_get_samples_per_frame(packet, 48000);
+    packet_frame_size = oaci_toc_samples_per_frame(packet[0], 48000);
     if (packet_frame_size > 960)
         nb_frames = packet_frame_size/960;
     packet_stream_channels = oac_packet_get_nb_channels(packet, len);
@@ -1467,11 +1417,12 @@ static int oaci_dred_find_payload(const unsigned char *data, oac_int32 len, cons
     *payload = NULL;
     /* Get the padding section of the packet. */
     ret = oac_packet_parse_impl(data, len, 0, NULL, frames, size, NULL, NULL,
-                                &padding, &padding_len);
+    &padding, &padding_len);
     if (ret < 0)
         return ret;
     nb_frames = ret;
-    frame_size = oac_packet_get_samples_per_frame(data, 48000);
+    /* The parse above already validated the ToC. */
+    frame_size = oaci_toc_samples_per_frame(data[0], 48000);
     oac_extension_iterator_init(&iter, padding, padding_len, nb_frames);
     for (;;) {
         ret = oac_extension_iterator_find(&iter, &ext, DRED_EXTENSION_ID);

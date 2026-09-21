@@ -280,20 +280,29 @@ extern "C" {
  * @hideinitializer */
 #define OAC_SIZE_MAX 2105535
 
-/* OAC Packet Table of Contents (ToC) byte layout (MSB-first bit numbering):
- *   Main ToC byte (data[0]):
- *     bits 0..4 (0xF8): Mode, bandwidth, and base frame size (M)
- *     bit  5    (0x04): Stereo flag / Ambisonics order LSB / channel LSB (S)
- *     bit  6    (0x02): Extended ToC present flag (X)
- *     bit  7    (0x01): Padding / extension present flag (P)
- *   Extended ToC byte (data[1], present when X == 1):
- *     bit  0    (0x80): VBR frame sizes flag (V)
- *     bits 1..3 (0x70): Packet duration index offset (F)
- *     bit  4    (0x08): Ambisonics format flag (A)
- *     bits 5..7 (0x07): Channel count / Ambisonics order high bits (C)
- *   Optional channel escape byte (data[2], present when X == 1, A == 0, C == 7, S == 1):
- *     bits 0..7       : channels - 1 (1..256 channels)
- */
+/** @cond OAC_INTERNAL_DOC
+ * Table of Contents (ToC) layout, bits numbered MSB-first as in RFC 6716.
+ *
+ * Main ToC byte, always present:
+ *   bits 0-5 (mask 0xFC)  M/S  mode / bandwidth / frame duration, plus the
+ *                              stereo-or-channel-LSB flag S (mask 0x04)
+ *   bit  6   (mask 0x02)  X    an extended ToC byte follows
+ *   bit  7   (mask 0x01)  P    padding is present
+ *
+ * Extended ToC byte, present iff X=1:
+ *   bit  0   (mask 0x80)  V    0 = all frames the same size, 1 = explicit sizes
+ *   bits 1-3 (mask 0x70)  F    increment along 2.5/5/10/20/40/60/80/120 ms
+ *   bit  4   (mask 0x08)  A    0 = regular/surround, 1 = ambisonics
+ *   bits 5-7 (mask 0x07)  C    channel count / ambisonics order field
+ *
+ * With X=0 the packet holds exactly one frame of 1 or 2 (=S+1) channels.
+ * With X=1, A=1 the ambisonics order is 2*C+S, giving (order+1)^2 channels.
+ * With X=1, A=0 the channel count is 2*C+S+1, except that C=7,S=1 escapes to
+ * one more byte holding (channels-1).
+ *
+ * Byte order: main ToC, extended ToC, channel escape byte, padding length
+ * bytes, frame length fields, frame data, padding.
+ * @endcond */
 
 #define OAC_SIGNAL_VOICE                    3001 /**< Signal being encoded is voice */
 #define OAC_SIGNAL_MUSIC                    3002 /**< Signal being encoded is music */
@@ -303,6 +312,10 @@ extern "C" {
 #define OAC_BANDWIDTH_SUPERWIDEBAND         1104 /**<12 kHz bandpass @hideinitializer*/
 #define OAC_BANDWIDTH_FULLBAND              1105 /**<20 kHz bandpass @hideinitializer*/
 
+/* NOTE: OAC_FRAMESIZE_2_5_MS .. OAC_FRAMESIZE_120_MS must stay contiguous and in
+   increasing order: oaci_frame_size_select() indexes oaci_frame_dur[] with
+   (value - OAC_FRAMESIZE_2_5_MS). There is deliberately no 100 ms: the packet
+   duration list is 2.5/5/10/20/40/60/80/120 ms and 100 ms is not representable. */
 #define OAC_FRAMESIZE_ARG                   5000 /**< Select frame size from the argument (default) */
 #define OAC_FRAMESIZE_2_5_MS                5001 /**< Use 2.5 ms frames */
 #define OAC_FRAMESIZE_5_MS                  5002 /**< Use 5 ms frames */
