@@ -983,6 +983,15 @@ int oac_multistream_encode_native
         len = oac_repacketizer_out_range_impl(&rp, 0, oac_repacketizer_get_nb_frames(&rp),
             data, max_data_bytes - tot_size, s != st->layout.nb_streams - 1, !vbr && s == st->layout.nb_streams - 1,
         NULL, 0);
+        /* A negative length here would walk data backwards and underflow the
+           caller's buffer on the next stream. The frame count comes from a ToC
+           we produced ourselves and the budget was reserved above, so neither
+           OAC_BAD_ARG nor OAC_BUFFER_TOO_SMALL should be reachable, but the
+           cost of being sure is one branch. */
+        if (len < 0) {
+            RESTORE_STACK;
+            return OAC_INTERNAL_ERROR;
+        }
         data += len;
         tot_size += len;
     }

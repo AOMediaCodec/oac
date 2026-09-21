@@ -802,14 +802,19 @@ int main(int argc, char *argv[]) {
             goto failure;
         }
     } else if (oac_format == OAC_FORMAT_AMBISONICS) {
-        /* Valid ambisonics channel counts: (order+1)^2 for orders 0 to OAC_MAX_AMBISONICS_ORDER */
+        /* Valid ambisonics channel counts: (order+1)^2. The bitstream and the
+           decoder go up to OAC_MAX_AMBISONICS_ORDER, but the encoder only has
+           projection matrices up to OAC_MAX_ENCODER_AMBISONICS_ORDER, so hold
+           the input to the lower bound unless we are only decoding. */
         int valid = 0, order;
-        for (order = 0; order <= OAC_MAX_AMBISONICS_ORDER; order++) {
+        int max_order = decode_only ? OAC_MAX_AMBISONICS_ORDER
+                                    : OAC_MAX_ENCODER_AMBISONICS_ORDER;
+        for (order = 0; order <= max_order; order++) {
             if (channels == (order+1)*(order+1)) { valid = 1; break; }
         }
         if (!valid) {
             fprintf(stderr, "Ambisonics format requires (order+1)^2 channels for orders 0-%d.\n",
-                    OAC_MAX_AMBISONICS_ORDER);
+                    max_order);
             goto failure;
         }
     }
@@ -1156,7 +1161,7 @@ int main(int argc, char *argv[]) {
             /* FIXME: Figure out how to trigger the decoder when the last packet of the file is lost. */
             for (fr = 0; fr < run_decoder; fr++) {
                 oac_int32 output_samples = 0;
-                if (fr == lost_count - 1 && oac_packet_has_lbrr(data, len)) {
+                if (fr == lost_count - 1 && oac_packet_has_lbrr(data, len) > 0) {
                     oac_decoder_ctl(dec, OAC_GET_LAST_PACKET_DURATION(&output_samples));
                     output_samples = oac_decode24(dec, data, len, out, output_samples, 1);
                 } else if (fr < lost_count) {

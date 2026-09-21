@@ -338,8 +338,12 @@ oac_int32 oac_packet_pad_impl(unsigned char *data, oac_int32 len, oac_int32 new_
     /* Moving payload to the end of the packet so we can do in-place padding */
     OAC_COPY(copy, data, len);
     ret = oac_repacketizer_cat(&rp, copy, len);
-    if (ret != OAC_OK)
+    if (ret != OAC_OK) {
+        /* copy was taken from the pseudostack, so this path has to unwind it
+           too. */
+        RESTORE_STACK;
         return ret;
+    }
     ret = oac_repacketizer_out_range_impl(&rp, 0, rp.nb_frames, data, new_len, 0, pad, extensions, nb_extensions);
     RESTORE_STACK;
     return ret;

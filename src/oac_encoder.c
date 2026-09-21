@@ -258,16 +258,17 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
         && application != OAC_APPLICATION_RESTRICTED_CELT)
         return OAC_BAD_ARG;
     /* Ambisonics is always coded with CELT (see the MODE_CELT_ONLY override in
-       oac_encode_native()), and OAC_APPLICATION_RESTRICTED_SILK allocates no
-       CELT encoder at all, so the two can never be combined. This has to be
-       checked for every order, not just the multi-channel ones: order 0 is a
-       single channel and would otherwise slip through and then dereference a
-       NULL CELT encoder. */
-    if (format == OAC_FORMAT_AMBISONICS && application == OAC_APPLICATION_RESTRICTED_SILK)
-        return OAC_BAD_ARG;
-    /* For ambisonics with >2 channels, force CELT-only (no SILK) */
-    if (format == OAC_FORMAT_AMBISONICS && channels > 2)
+       oac_encode_native()), at every order including order 0, so no SILK
+       encoder is ever allocated for it. OAC_APPLICATION_RESTRICTED_SILK
+       allocates no CELT encoder at all, so the two can never be combined; this
+       has to be rejected for every order, not just the multi-channel ones,
+       since order 0 is a single channel and would otherwise slip through and
+       then dereference a NULL CELT encoder. */
+    if (format == OAC_FORMAT_AMBISONICS) {
+        if (application == OAC_APPLICATION_RESTRICTED_SILK)
+            return OAC_BAD_ARG;
         skip_silk = 1;
+    }
     /* Create SILK encoder */
     if (skip_silk) {
         silkEncSizeBytes = 0;
@@ -657,9 +658,9 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int format, int appli
             && application != OAC_APPLICATION_RESTRICTED_LOWDELAY
             && application != OAC_APPLICATION_RESTRICTED_SILK
             && application != OAC_APPLICATION_RESTRICTED_CELT)
-        /* Repeated from oac_encoder_init() so that we report OAC_BAD_ARG here
-           rather than turning it into OAC_INTERNAL_ERROR via the size probe
-           below. */
+        /* Repeated from oac_encoder_init() so the caller gets OAC_BAD_ARG from
+           the argument check rather than from the size probe below. The probe
+           now propagates its own error too, so this is belt and braces. */
         || (format == OAC_FORMAT_AMBISONICS
             && application == OAC_APPLICATION_RESTRICTED_SILK)) {
         if (error)
@@ -669,7 +670,7 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int format, int appli
     size = oac_encoder_init(NULL, Fs, channels, format, application);
     if (size <= 0) {
         if (error)
-            *error = OAC_INTERNAL_ERROR;
+            *error = size < 0 ? size : OAC_INTERNAL_ERROR;
         return NULL;
     }
     st = (OacEncoder *)oac_alloc(size);
@@ -1361,8 +1362,13 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
             tocmode = MODE_SILK_ONLY;
         /* With a single byte to spend we cannot afford the extended ToC that
            splitting a long frame would need, and only SILK can code 40 or
-           60 ms in one frame. */
-        if (out_data_bytes == 1 && frame_rate < 50)
+           60 ms in one frame. The budget to test is max_data_bytes, not the
+           caller's buffer: in CBR a one-byte rate target can come out of a
+           large buffer, and splitting the frame there would overshoot the
+           target. max_data_bytes is never below min_toc_bytes, so a value of
+           one already implies the standard format, at most two channels and a
+           frame no longer than 60 ms. */
+        if (max_data_bytes == 1 && frame_rate < 50)
             tocmode = MODE_SILK_ONLY;
         /* oaci_validate_config() rejects SILK and hybrid above two channels,
            so signalling either here would produce a packet our own parser
@@ -3154,8 +3160,15 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
 
             if (st->application != OAC_APPLICATION_RESTRICTED_SILK)
                 celt_encoder_ctl(celt_enc, OAC_RESET_STATE);
-            if (st->application != OAC_APPLICATION_RESTRICTED_CELT)
-                oaci_silk_InitEncoder( silk_enc, st->channels, st->arch, &dummy );
+            /* silkEncSizeBytes is zero whenever oac_encoder_init() skipped the
+               SILK encoder -- ambisonics, or OAC_APPLICATION_RESTRICTED_CELT --
+               and then silk_enc aliases the CELT encoder, so re-initialising it
+               here would write SILK state straight over CELT's. Comparing the
+               two offsets tests exactly that, and keeps working whatever the
+               skip condition in oac_encoder_init() grows into. The channel
+               count is clamped the same way oac_encoder_init() clamps it. */
+            if (st->celt_enc_offset != st->silk_enc_offset)
+                oaci_silk_InitEncoder( silk_enc, IMIN(st->channels, 2), st->arch, &dummy );
 #ifdef ENABLE_DRED
             /* Initialize DRED Encoder */
             oaci_dred_encoder_reset( &st->dred_encoder );
