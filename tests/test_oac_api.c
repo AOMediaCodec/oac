@@ -196,13 +196,15 @@ static int ref_nb_frames(int toc, int ext) {
    assumed to be exactly two bytes long, which makes the escape form of the
    channel count (S=1, C=7) truncated and therefore invalid. */
 static int ref_toc2_valid(int toc, int ext) {
-    int config, S, channels;
+    int config, S, channels, format;
     config = toc>>3;
     S = (toc>>2)&0x01;
+    format = OAC_FORMAT_STANDARD;
     if (!(toc&0x02)) {
         channels = S + 1;
     } else if (ext&0x08) {
         int order = 2*(ext&0x07) + S;
+        format = OAC_FORMAT_AMBISONICS;
         channels = (order + 1)*(order + 1);
     } else if ((ext&0x07) == 7 && S == 1) {
         return 0;
@@ -210,8 +212,9 @@ static int ref_toc2_valid(int toc, int ext) {
         channels = 2*(ext&0x07) + S + 1;
     }
     /* SILK (configs 0-11) and hybrid (configs 12-15) only ever code one or two
-       channels; CELT (16-31) codes any number. */
-    return !(config < 16 && channels > 2);
+       channels of the standard format; CELT (16-31) codes any number. Order-0
+       ambisonics is a single channel but is still ruled out by the format. */
+    return !(config < 16 && (channels > 2 || format != OAC_FORMAT_STANDARD));
 }
 
 /* Inverse of the above: the F value that packs exactly nb_frames frames of the
@@ -1233,8 +1236,9 @@ oac_int32 test_parse(void) {
     cfgs_total += cfgs; cfgs = 0;
 
     /*Ambisonics: 2*C+S is the order, so orders 0..15 are all representable and
-      the escape byte is never needed. Only order 0 fits in a SILK or hybrid
-      packet, since every higher order has more than two channels.*/
+      the escape byte is never needed. None of them fit in a SILK or hybrid
+      packet: the encoder codes ambisonics with CELT at every order, including
+      order 0, which is a single channel but still not the standard format.*/
     for (config = 0; config < 32; config++) {
         for (j = 0; j <= 15; j++) {
             hdr = ref_put_toc(packet, config, 0, 0, 0, 1, (j + 1)*(j + 1), 0);
@@ -1242,7 +1246,7 @@ oac_int32 test_parse(void) {
             UNDEFINE_FOR_PARSE
                 ret = oac_packet_parse(packet, hdr + 7, &toc, frames, size, &payload_offset);
             cfgs++;
-            if (config >= 16 || j == 0) {
+            if (config >= 16) {
                 if (oac_packet_get_nb_channels(packet, hdr) != (j + 1)*(j + 1)) test_failed();
                 if (oac_packet_get_format(packet, hdr) != OAC_FORMAT_AMBISONICS) test_failed();
                 cfgs += 2;
@@ -2475,7 +2479,7 @@ oac_int32 test_encoder_buffer_independence(void) {
             OacEncoder *enc;
             OacDecoder *dec;
             unsigned char *data;
-            int err, channels, budget;
+            int err, channels, budget, cap;
 
             channels = (order + 1)*(order + 1);
             enc = oac_encoder_create(48000, channels, OAC_FORMAT_AMBISONICS,
@@ -2511,6 +2515,29 @@ oac_int32 test_encoder_buffer_independence(void) {
                 if (oac_decoder_ctl(dec, OAC_GET_FINAL_RANGE(&drange)) != OAC_OK) test_failed();
                 if (erange != drange) test_failed();
                 cfgs += 6;
+            }
+            /* The smallest useful buffers. An ambisonics ToC is two bytes, so
+               one byte has to be refused outright and everything from two up
+               has to come back as a parseable packet that still decodes. Both
+               rate control modes go through here because they reach the
+               low-bitrate path by different routes. */
+            for (f = 0; f <= 1; f++) {
+                if (oac_encoder_ctl(enc, OAC_SET_VBR(f)) != OAC_OK) test_failed();
+                for (cap = 1; cap <= 4; cap++) {
+                    oac_int32 len;
+                    data[cap] = 0xA5;
+                    len = oac_encode(enc, pcm, 960, data, cap);
+                    if (data[cap] != 0xA5) test_failed();
+                    if (cap < 2) {
+                        if (len != OAC_BUFFER_TOO_SMALL) test_failed();
+                    } else {
+                        if (len < 2 || len > cap) test_failed();
+                        if (oac_packet_get_format(data, len) != OAC_FORMAT_AMBISONICS) test_failed();
+                        if (oac_packet_get_nb_channels(data, len) != channels) test_failed();
+                        if (oac_decode(dec, data, len, out, 960, 0) != 960) test_failed();
+                    }
+                    cfgs += 3;
+                }
             }
             free(data);
             oac_encoder_destroy(enc);

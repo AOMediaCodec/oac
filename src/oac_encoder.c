@@ -257,13 +257,17 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
         && application != OAC_APPLICATION_RESTRICTED_SILK
         && application != OAC_APPLICATION_RESTRICTED_CELT)
         return OAC_BAD_ARG;
+    /* Ambisonics is always coded with CELT (see the MODE_CELT_ONLY override in
+       oac_encode_native()), and OAC_APPLICATION_RESTRICTED_SILK allocates no
+       CELT encoder at all, so the two can never be combined. This has to be
+       checked for every order, not just the multi-channel ones: order 0 is a
+       single channel and would otherwise slip through and then dereference a
+       NULL CELT encoder. */
+    if (format == OAC_FORMAT_AMBISONICS && application == OAC_APPLICATION_RESTRICTED_SILK)
+        return OAC_BAD_ARG;
     /* For ambisonics with >2 channels, force CELT-only (no SILK) */
-    if (format == OAC_FORMAT_AMBISONICS && channels > 2) {
+    if (format == OAC_FORMAT_AMBISONICS && channels > 2)
         skip_silk = 1;
-        /* Also disallow SILK-only mode for multi-channel ambisonics */
-        if (application == OAC_APPLICATION_RESTRICTED_SILK)
-            return OAC_BAD_ARG;
-    }
     /* Create SILK encoder */
     if (skip_silk) {
         silkEncSizeBytes = 0;
@@ -652,7 +656,12 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int format, int appli
         || (application != OAC_APPLICATION_VOIP && application != OAC_APPLICATION_AUDIO
             && application != OAC_APPLICATION_RESTRICTED_LOWDELAY
             && application != OAC_APPLICATION_RESTRICTED_SILK
-            && application != OAC_APPLICATION_RESTRICTED_CELT)) {
+            && application != OAC_APPLICATION_RESTRICTED_CELT)
+        /* Repeated from oac_encoder_init() so that we report OAC_BAD_ARG here
+           rather than turning it into OAC_INTERNAL_ERROR via the size probe
+           below. */
+        || (format == OAC_FORMAT_AMBISONICS
+            && application == OAC_APPLICATION_RESTRICTED_SILK)) {
         if (error)
             *error = OAC_BAD_ARG;
         return NULL;

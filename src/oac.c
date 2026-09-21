@@ -349,11 +349,15 @@ int oaci_validate_config(int mode, int format, int channels, int nb_frames) {
         return OAC_INVALID_PACKET;
     if (nb_frames < 1 || nb_frames > OAC_MAX_FRAMES_PER_PACKET)
         return OAC_INVALID_PACKET;
-    /* SILK and hybrid only ever code one or two channels. The two modes are
+    /* SILK and hybrid only ever code one or two channels of the standard
+       format. Order-0 ambisonics is also one channel, but the encoder forces
+       CELT for every ambisonics order, so a speech-mode ambisonics packet is
+       something we can never produce and will not accept. The two modes are
        listed explicitly rather than as "anything but CELT" so that the modes
        still to come (lossless, other speech modes) have to state their own
        policy here instead of silently inheriting this one. */
-    if ((mode == MODE_SILK_ONLY || mode == MODE_HYBRID) && channels > 2)
+    if ((mode == MODE_SILK_ONLY || mode == MODE_HYBRID)
+        && (channels > 2 || format != OAC_FORMAT_STANDARD))
         return OAC_INVALID_PACKET;
     return OAC_OK;
 }
