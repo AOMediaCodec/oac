@@ -52,8 +52,9 @@
  * When SEMAC_ENERGY_ALLOC is defined, SEMAC biases the per-channel PVQ bit split in
  * quant_all_bands_multi toward higher-energy transport channels: each channel gets
  * +1 bit/dimension per doubling of amplitude (6.02 dB) above the mean channel
- * (per-band energy-weighted law). Weights are derived from the bit-exact coded transport
- * band energies (oldBandE), so the decoder reproduces them with no extra side-info. On by default. */
+ * (per-band energy-weighted law). Integer offsets are deterministic for identical
+ * canonical transport energies. Inter-frame prediction can still make those inputs
+ * differ after packet loss. On by default. */
 #define SEMAC_ENERGY_ALLOC
 
 /* Partial-weighting scalar lambda on the per-channel allocation offset. The offset is
@@ -62,8 +63,17 @@
  *   lambda = 0.5 -> half-amplitude
  *   lambda = 1.0 -> amplitude law (1 bit/dim per 6.02 dB amplitude doubling)   [default]
  * Higher lambda steers more bits to the louder channels. */
+/* Integer Q15 strength for transport allocation, supported range [0, 4].
+ * Legacy floating overrides are quantized once at compile time. */
+#ifndef SEMAC_ALLOC_LAMBDA_Q15
+#ifdef SEMAC_ALLOC_LAMBDA
+#define SEMAC_ALLOC_LAMBDA_Q15 ((oac_int32)(SEMAC_ALLOC_LAMBDA * 32768.f + .5f))
+#else
+#define SEMAC_ALLOC_LAMBDA_Q15 32768
+#endif
+#endif
 #ifndef SEMAC_ALLOC_LAMBDA
-#define SEMAC_ALLOC_LAMBDA 1.0f
+#define SEMAC_ALLOC_LAMBDA (SEMAC_ALLOC_LAMBDA_Q15 * (1.f/32768))
 #endif
 
 /** SEMAC transport (coding) domains. Mirrors the public OAC_SEMAC_DOMAIN_*
@@ -259,7 +269,7 @@ void oaci_semac_create_transport_channels(const CELTMode *mode,
                             full-order output_channels * N normalized spectrum.
     @param oldBandE         Decoded transport-channel band log-energies (input, read-only): used
                             to denormalize the transport. NOT modified, so it stays the transport
-                            energy for inter-frame prediction and the bit allocation.
+                            energy rather than the reconstructed output energy.
     @param outLogE          Output: full-order output-channel band log-energies for synthesis
                             [output_channels * nbEBands].
     @param spatialLogE      Decoded spatial beam band energies [num_beams * nbEBands]
@@ -282,14 +292,18 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    int LM, int arch);
 
 /** Compute Q6 PER-BAND per-transport-channel bit-allocation offsets (signed,
-    per-dimension BITRES) from the BIT-EXACT coded transport band energies (oldBandE).
-    Layout offsets_q6[c*nbEBands + i]. Length must be C*nbEBands. Deterministic and
-    called identically on encoder and decoder so the per-channel PVQ split stays
-    bit-exact. eMeans is per-band (constant across channels), so it cancels in the
+    per-dimension BITRES) from coded transport band energies (oldBandE).
+    Layout offsets_q6[c*nbEBands + i]. Length must be C*nbEBands. Identical canonical
+    inputs produce identical offsets on encoder and decoder. eMeans is per-band (constant across channels), so it cancels in the
     per-band mean and oldBandE serves directly as log2-amplitude. Logarithmic curve
     (+1 bit/dim per amplitude doubling above the per-band mean). Both SHD and BEAM
     transport use these coded transport energies as the weight source.
-    @param oldBandE   coded transport band energies, layout [c*nbEBands + i]
+    Inputs are converted to a canonical Q15 grid: fixed Q24 is rescaled and float
+    is multiplied by an exact power of two.
+    Centering, lambda scaling and final rounding are integer in both builds;
+    half ties round away from zero, without rounding the mean separately.
+    Values are defensively bounded to [-64, 64] before conversion (NaN floors).
+    @param oldBandE   coded transport energies, layout [c*nbEBands + i]
     @param C          number of transport (coding) channels
     @param nbEBands   bands per channel
     @param start,end  coded band range

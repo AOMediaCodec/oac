@@ -162,6 +162,7 @@ noinst_PROGRAMS = celt/tests/test_unit_cwrs32 \
                   celt/tests/test_unit_mathops \
                   celt/tests/test_unit_mdct \
                   celt/tests/test_unit_rotation \
+                  celt/tests/test_unit_semac \
                   celt/tests/test_unit_types \
                   oac_compare \
                   oac_demo \
@@ -185,6 +186,7 @@ TESTS = celt/tests/test_unit_cwrs32 \
         celt/tests/test_unit_mathops \
         celt/tests/test_unit_mdct \
         celt/tests/test_unit_rotation \
+        celt/tests/test_unit_semac \
         celt/tests/test_unit_types \
         silk/tests/test_unit_LPC_inv_pred_gain \
         tests/test_oac_api \
@@ -291,6 +293,12 @@ celt_tests_test_unit_rotation_SOURCES = celt/tests/test_unit_rotation.c
 celt_tests_test_unit_rotation_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(NE10_LIBS) $(LIBM)
 if OAC_ARM_EXTERNAL_ASM
 celt_tests_test_unit_rotation_LDADD += libarmasm.la
+endif
+
+celt_tests_test_unit_semac_SOURCES = celt/tests/test_unit_semac.c
+celt_tests_test_unit_semac_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(NE10_LIBS) $(LIBM)
+if OAC_ARM_EXTERNAL_ASM
+celt_tests_test_unit_semac_LDADD += libarmasm.la
 endif
 
 celt_tests_test_unit_types_SOURCES = celt/tests/test_unit_types.c

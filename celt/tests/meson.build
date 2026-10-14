@@ -6,6 +6,7 @@ tests = [
   'test_unit_dft',
   'test_unit_mdct',
   'test_unit_rotation',
+  'test_unit_semac',
   'test_unit_cwrs32',
 ]
 

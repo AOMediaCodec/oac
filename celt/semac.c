@@ -605,48 +605,53 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    oaci_compute_band_energies(mode, outFreq, outBandE, effEnd, output_channels, LM, arch);
    oaci_normalise_bands(mode, outFreq, X, outBandE, effEnd, output_channels, M);
 
-   /* Output (full-order) band log-energies for synthesis go to outLogE. oldBandE is left as the
-      DECODED TRANSPORT energy (the value just denormalized in Step 1), matching the encoder's
-      persistent state, so the next frame's transport coarse-energy prediction and the
-      energy-weighted bit allocation use the same transport energy on both sides. */
+   /* Output synthesis energies go to outLogE. Keep oldBandE as the decoded
+      transport energy, not the reconstructed full-order output energy. */
    oaci_amp2Log2(mode, effEnd, end, outBandE, outLogE, output_channels);
 
    RESTORE_STACK;
 }
 
-/* Turn one band's per-channel log2 amplitudes into signed per-dim BITRES offsets in Q6:
-   offset_c = lambda * (log2amp_c - per-band mean) scaled to bands.c units ((1<<BITRES) x Q6).
-   The mean is the conservation pivot, so offsets sum to ~0 across channels; SEMAC_ALLOC_LAMBDA
-   scales the steering strength (1.0 full, 0.0 equal). bands.c applies
-   (band_N-1)*offset + floor + renorm and shifts the Q6 out. */
-static void semac_write_band_offsets(const float *log2amp, int C, int nbEBands, int i,
-   oac_int32 *offsets_q6) {
-   int c;
-   float mean = 0.f;
-   for (c = 0; c < C; c++) mean += log2amp[c];
-   mean /= C;
-   for (c = 0; c < C; c++) {
-      float off = SEMAC_ALLOC_LAMBDA * (log2amp[c] - mean) * (float)((1 << BITRES) * 64);
-      offsets_q6[c*nbEBands + i] = (oac_int32)(off >= 0.f ? off + 0.5f : off - 0.5f);
-   }
+static oac_int32 semac_log_q15(celt_glog energy) {
+   /* Bound malformed inputs before float-to-integer conversion; NaN floors. */
+   if (!(energy > -GCONST(64.f))) return -2097152;
+   if (energy >= GCONST(64.f)) return 2097152;
+#ifdef FIXED_POINT
+   return energy / (1 << (DB_SHIFT - 15));
+#else
+   return (oac_int32)(energy * 32768.f);
+#endif
 }
 
-/* Per-(channel,band) bit-allocation offsets for SEMAC_ENERGY_ALLOC, derived directly from the
-   coded transport band energies oldBandE (the actual per-channel amplitudes). eMeans is per-band
-   (constant across channels), so it cancels in the per-band mean and oldBandE serves directly as
-   log2-amplitude. Both encoder and decoder hold the same oldBandE (coarse+fine), so no side-info.
-   Offset = log2(amp_c) - per-band mean(log2 amp): +1 bit/dim per amplitude doubling above the mean.
-   This is the default weight source. Layout offsets_q6[c*nbEBands + i]. */
+/* eMeans is constant across channels and cancels in the centered log energy.
+   Identical canonical Q15 energies give identical integer allocation offsets. */
 void oaci_semac_compute_bit_weights_from_tc(const celt_glog *oldBandE, int C, int nbEBands,
    int start, int end, oac_int32 *offsets_q6) {
+   static const oac_int32 lambda_q15 = SEMAC_ALLOC_LAMBDA_Q15;
    int c, i, k;
+   oac_int64 denominator;
+   celt_assert(lambda_q15 >= 0 && lambda_q15 <= 131072);
+   if (C <= 0 || C > SEMAC_MAX_BEAMS || nbEBands <= 0 || nbEBands > SEMAC_MAX_BANDS)
+      return;
    for (k = 0; k < C * nbEBands; k++) offsets_q6[k] = 0;
-   if (C <= 0 || C > SEMAC_MAX_BEAMS) return;
-   celt_assert(nbEBands <= SEMAC_MAX_BANDS);
+   if (start < 0 || end < start || end > nbEBands) return;
+   /* Q15 logs * Q15 lambda -> per-dimension BITRES, then Q6. */
+   denominator = (oac_int64)C * ((oac_int64)1 << (30 - BITRES - 6));
    for (i = start; i < end; i++) {
-      float log2amp[SEMAC_MAX_BEAMS];
-      for (c = 0; c < C; c++) log2amp[c] = (float)oldBandE[c*nbEBands + i];
-      semac_write_band_offsets(log2amp, C, nbEBands, i, offsets_q6);
+      oac_int32 log_q15[SEMAC_MAX_BEAMS];
+      oac_int64 sum = 0;
+      for (c = 0; c < C; c++) {
+         log_q15[c] = semac_log_q15(oldBandE[c*nbEBands + i]);
+         sum += log_q15[c];
+      }
+      for (c = 0; c < C; c++) {
+         oac_int64 numerator = ((oac_int64)C * log_q15[c] - sum)
+            * IMAX(0, IMIN(131072, lambda_q15));
+         /* Preserve the rational mean; round only once, half away from zero. */
+         offsets_q6[c*nbEBands + i] = (oac_int32)(numerator < 0
+            ? -((-numerator + denominator/2) / denominator)
+            : (numerator + denominator/2) / denominator);
+      }
    }
 }
 
