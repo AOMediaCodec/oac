@@ -614,21 +614,6 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    RESTORE_STACK;
 }
 
-/* 0.5*log2(energy) = log2 amplitude (0.6931471805599453 = ln 2). 1e-30 floors silence. */
-static float semac_log2amp(double energy) {
-   return 0.5f * (float)(log(energy + 1e-27) / 0.6931471805599453);
-}
-
-/* Per-band beam energies from the (log2-amplitude) spatial envelope: E_beam[b] = (2^env)^2. */
-static void semac_band_beam_energy(const celt_glog *oldSpatialBandE, int num_beams,
-   int nbEBands, int i, double *beam_energy) {
-   int b;
-   for (b = 0; b < num_beams; b++) {
-      double amp = pow(2.0, (double)oldSpatialBandE[b*nbEBands + i]);
-      beam_energy[b] = amp*amp;
-   }
-}
-
 /* Turn one band's per-channel log2 amplitudes into signed per-dim BITRES offsets in Q6:
    offset_c = lambda * (log2amp_c - per-band mean) scaled to bands.c units ((1<<BITRES) x Q6).
    The mean is the conservation pivot, so offsets sum to ~0 across channels; SEMAC_ALLOC_LAMBDA
@@ -665,83 +650,4 @@ void oaci_semac_compute_bit_weights_from_tc(const celt_glog *oldBandE, int C, in
    }
 }
 
-/* Alternative weight source (SEMAC_ALLOC_FROM_ENV): derive the offsets from the spatial energy
-   envelope oldSpatialBandE (a diagonal projection of the per-beam energies) instead of the coded
-   transport energies. Encoder and decoder agree with no side-info. Offset =
-   log2(amp_c) - per-band mean(log2 amp): +1 bit/dim per amplitude doubling above the mean.
-   Output layout offsets_q6[c*nbEBands + i]. Per-transport-channel energy (diagonal approx):
-     SHD          : transport channels are the first C SH channels; project beams -> SH.
-     BEAM full    : transport beam c == input beam c; use the envelope directly.
-     BEAM reduced : downmix beams -> SH (first C) -> C reduced beams via from_shd[order(C)]. */
-void oaci_semac_compute_bit_weights_from_env(const celt_glog *oldSpatialBandE, int num_beams,
-   int C, int input_order, int transport_domain, int nbEBands,
-   int start, int end, oac_int32 *offsets_q6) {
-   int c, b, i, k;
-
-   /* Buffers (here and at the call sites) are sized SEMAC_MAX_BEAMS*SEMAC_MAX_BANDS. */
-   celt_assert(nbEBands <= SEMAC_MAX_BANDS);
-
-   /* Default = equal split (offset 0) everywhere, incl. bands outside [start, end). */
-   for (k = 0; k < C * nbEBands; k++) offsets_q6[k] = 0;
-   if (C <= 0 || C > num_beams || C > SEMAC_MAX_BEAMS) return;
-
-   if (transport_domain == SEMAC_DOMAIN_SHD) {
-      /* Transport channels are the first C SH channels: E_tp[c] = sum_b to_shd[c,b]^2 E_beam[b]. */
-      const float *to_shd = oaci_semac_get_to_shd_matrix(input_order);
-      if (!to_shd) return;
-      for (i = start; i < end; i++) {
-         double beam_energy[SEMAC_MAX_BEAMS];
-         float log2amp[SEMAC_MAX_BEAMS];
-         semac_band_beam_energy(oldSpatialBandE, num_beams, nbEBands, i, beam_energy);
-         for (c = 0; c < C; c++) {
-            double e = 0.0;
-            for (b = 0; b < num_beams; b++) {
-               double m = (double)to_shd[c*num_beams + b];
-               e += m*m*beam_energy[b];
-            }
-            log2amp[c] = semac_log2amp(e);
-         }
-         semac_write_band_offsets(log2amp, C, nbEBands, i, offsets_q6);
-      }
-
-   } else if (transport_domain == SEMAC_DOMAIN_BEAM ) {
-      if (C == num_beams){
-         /* BEAM, full transport: transport beam c == input beam c (envelope is already log2 amp). */
-         for (i = start; i < end; i++) {
-            float log2amp[SEMAC_MAX_BEAMS];
-            for (c = 0; c < C; c++)
-               log2amp[c] = (float)oldSpatialBandE[c*nbEBands + i];
-            semac_write_band_offsets(log2amp, C, nbEBands, i, offsets_q6);
-         }
-      } else {
-         /* BEAM, reduced transport: downmix beams -> SH (first C) -> C reduced beams.
-         E_sh[k] = sum_b to_shd[k,b]^2 E_beam[b];  E_tp[c] = sum_k from_shd_R[c,k]^2 E_sh[k]. */
-         const float *to_shd = oaci_semac_get_to_shd_matrix(input_order);
-         const float *from_shd_R = oaci_semac_get_from_shd_matrix(oaci_semac_get_order(C));
-         if (!to_shd || !from_shd_R) return;
-         for (i = start; i < end; i++) {
-            double beam_energy[SEMAC_MAX_BEAMS], sh_energy[SEMAC_MAX_BEAMS];
-            float log2amp[SEMAC_MAX_BEAMS];
-            semac_band_beam_energy(oldSpatialBandE, num_beams, nbEBands, i, beam_energy);
-            for (k = 0; k < C; k++) {
-               double e = 0.0;
-               for (b = 0; b < num_beams; b++) {
-                  double m = (double)to_shd[k*num_beams + b];
-                  e += m*m*beam_energy[b];
-               }
-               sh_energy[k] = e;
-            }
-            for (c = 0; c < C; c++) {
-               double e = 0.0;
-               for (k = 0; k < C; k++) {
-                  double m = (double)from_shd_R[c*C + k];
-                  e += m*m*sh_energy[k];
-               }
-               log2amp[c] = semac_log2amp(e);
-            }
-            semac_write_band_offsets(log2amp, C, nbEBands, i, offsets_q6);
-         }
-      }
-   }
-}
 #endif

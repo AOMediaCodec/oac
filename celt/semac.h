@@ -56,12 +56,6 @@
  * band energies (oldBandE), so the decoder reproduces them with no extra side-info. On by default. */
 #define SEMAC_ENERGY_ALLOC
 
-/* By default the allocation weights are derived from the coded transport band energies
- * (oldBandE) directly -- the channels' actual coded amplitude. Define SEMAC_ALLOC_FROM_ENV to
- * instead derive them by projecting the spatial energy envelope (a diagonal approximation).
- * Both are bit-exact on encoder and decoder. */
-/* #define SEMAC_ALLOC_FROM_ENV */
-
 /* Partial-weighting scalar lambda on the per-channel allocation offset. The offset is
  * lambda * (log2(a_c) - per-band mean), where a_c is the channel amplitude (= sqrt energy):
  *   lambda = 0.0 -> equal split
@@ -293,31 +287,14 @@ void oaci_semac_reconstruct(const CELTMode *mode,
     called identically on encoder and decoder so the per-channel PVQ split stays
     bit-exact. eMeans is per-band (constant across channels), so it cancels in the
     per-band mean and oldBandE serves directly as log2-amplitude. Logarithmic curve
-    (+1 bit/dim per amplitude doubling above the per-band mean). This is the default
-    weight source (see SEMAC_ALLOC_FROM_ENV for the envelope-projection alternative).
+    (+1 bit/dim per amplitude doubling above the per-band mean). Both SHD and BEAM
+    transport use these coded transport energies as the weight source.
     @param oldBandE   coded transport band energies, layout [c*nbEBands + i]
     @param C          number of transport (coding) channels
     @param nbEBands   bands per channel
     @param start,end  coded band range
     @param offsets_q6 output array of length C*nbEBands (signed per-dim BITRES, Q6) */
 void oaci_semac_compute_bit_weights_from_tc(const celt_glog *oldBandE, int C, int nbEBands,
-   int start, int end, oac_int32 *offsets_q6);
-
-/** Like oaci_semac_compute_bit_weights_from_tc but derives the offsets from the
-    spatial energy envelope (a diagonal projection of the per-beam energies) instead of
-    the coded transport energies. Beam transport domain uses the envelope directly per
-    band; SHD projects each band's beam energies through the to_shd matrix. Selected via
-    SEMAC_ALLOC_FROM_ENV.
-    @param oldSpatialBandE per-beam envelope, layout [beam*nbEBands + band]
-    @param num_beams       number of beams in the envelope (full input order)
-    @param C               number of transport (coding) channels
-    @param input_order     ambisonics input order (selects the to_shd matrix)
-    @param transport_domain SEMAC_DOMAIN_SHD or SEMAC_DOMAIN_BEAM
-    @param nbEBands        bands per channel
-    @param start,end       coded band range
-    @param offsets_q6      output array of length C*nbEBands (signed per-dim BITRES, Q6) */
-void oaci_semac_compute_bit_weights_from_env(const celt_glog *oldSpatialBandE, int num_beams,
-   int C, int input_order, int transport_domain, int nbEBands,
    int start, int end, oac_int32 *offsets_q6);
 
 #endif /* SEMAC_H */
