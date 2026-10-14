@@ -52,9 +52,9 @@
  * When SEMAC_ENERGY_ALLOC is defined, SEMAC biases the per-channel PVQ bit split in
  * quant_all_bands_multi toward higher-energy transport channels: each channel gets
  * +1 bit/dimension per doubling of amplitude (6.02 dB) above the mean channel
- * (per-band energy-weighted law). Integer offsets are deterministic for identical
- * canonical transport energies. Inter-frame prediction can still make those inputs
- * differ after packet loss. On by default. */
+ * (per-band energy-weighted law). The default weights use intra-coded transport
+ * energies, so packet loss cannot change the allocation inputs. If the budget
+ * cannot signal intra, both sides use equal allocation. On by default. */
 #define SEMAC_ENERGY_ALLOC
 
 /* Partial-weighting scalar lambda on the per-channel allocation offset. The offset is
@@ -291,6 +291,11 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    int start, int effEnd, int end,
    int LM, int arch);
 
+/** Match fixed coarse decoder saturation before adding fine energy. Call only
+    for SEMAC transport intra frames, on both encoder and decoder. */
+void oaci_semac_clamp_transport_energy(celt_glog *oldBandE, int C, int nbEBands,
+   int start, int end);
+
 /** Compute Q6 PER-BAND per-transport-channel bit-allocation offsets (signed,
     per-dimension BITRES) from coded transport band energies (oldBandE).
     Layout offsets_q6[c*nbEBands + i]. Length must be C*nbEBands. Identical canonical
@@ -298,12 +303,12 @@ void oaci_semac_reconstruct(const CELTMode *mode,
     per-band mean and oldBandE serves directly as log2-amplitude. Logarithmic curve
     (+1 bit/dim per amplitude doubling above the per-band mean). Both SHD and BEAM
     transport use these coded transport energies as the weight source.
-    Inputs are converted to a canonical Q15 grid: fixed Q24 is rescaled and float
-    is multiplied by an exact power of two.
+    Inputs must be intra coarse+fine reconstructed energies. They lie on a Q15
+    grid: fixed Q24 is rescaled and float is multiplied by an exact power of two.
     Centering, lambda scaling and final rounding are integer in both builds;
     half ties round away from zero, without rounding the mean separately.
     Values are defensively bounded to [-64, 64] before conversion (NaN floors).
-    @param oldBandE   coded transport energies, layout [c*nbEBands + i]
+    @param oldBandE   intra-coded transport energies, layout [c*nbEBands + i]
     @param C          number of transport (coding) channels
     @param nbEBands   bands per channel
     @param start,end  coded band range

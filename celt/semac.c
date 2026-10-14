@@ -612,6 +612,17 @@ void oaci_semac_reconstruct(const CELTMode *mode,
    RESTORE_STACK;
 }
 
+void oaci_semac_clamp_transport_energy(celt_glog *oldBandE, int C, int nbEBands,
+   int start, int end) {
+   int c, i;
+   for (c = 0; c < C; c++) {
+      for (i = start; i < end; i++) {
+         oldBandE[c*nbEBands + i] = MING(GCONST(28.f),
+            MAXG(-GCONST(28.f), oldBandE[c*nbEBands + i]));
+      }
+   }
+}
+
 static oac_int32 semac_log_q15(celt_glog energy) {
    /* Bound malformed inputs before float-to-integer conversion; NaN floors. */
    if (!(energy > -GCONST(64.f))) return -2097152;
@@ -624,7 +635,8 @@ static oac_int32 semac_log_q15(celt_glog energy) {
 }
 
 /* eMeans is constant across channels and cancels in the centered log energy.
-   Identical canonical Q15 energies give identical integer allocation offsets. */
+   Intra reconstruction uses integer residuals and a Q15 across-band predictor;
+   fine offsets are dyadic. Conversion is exact for those shared inputs. */
 void oaci_semac_compute_bit_weights_from_tc(const celt_glog *oldBandE, int C, int nbEBands,
    int start, int end, oac_int32 *offsets_q6) {
    static const oac_int32 lambda_q15 = SEMAC_ALLOC_LAMBDA_Q15;

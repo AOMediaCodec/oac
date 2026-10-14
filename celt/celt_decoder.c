@@ -1366,6 +1366,10 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
    /* Get band energies */
     oaci_unquant_coarse_energy(mode, start, end, oldBandE,
          intra_ener, dec, C, LM);
+#if defined(ENABLE_SEMAC) && defined(SEMAC_ENERGY_ALLOC)
+    if (semac_active && intra_ener)
+        oaci_semac_clamp_transport_energy(oldBandE, C, nbEBands, start, end);
+#endif
 
 #ifdef ENABLE_SEMAC
     /* SEMAC: Decode spatial beam energies right after coarse energy (mirrors encoder) */
@@ -1472,7 +1476,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
         const oac_int32 *qab_chan_w = NULL;
 #ifdef SEMAC_ENERGY_ALLOC
         oac_int32 semac_chan_w[SEMAC_MAX_BEAMS*SEMAC_MAX_BANDS];   /* per-band offsets: c*nbEBands + i */
-        if (semac_active) {
+        if (semac_active && intra_ener) {
             oaci_semac_compute_bit_weights_from_tc(oldBandE, C, nbEBands, start, end, semac_chan_w);
             qab_chan_w = semac_chan_w;
         }

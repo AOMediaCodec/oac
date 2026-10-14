@@ -1751,6 +1751,9 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
 #ifdef ENABLE_SEMAC
     celt_glog *oldSpatialBandE;
     int semac_active, transport_order, coding_channels, num_beams, semac_domain;
+#ifdef SEMAC_ENERGY_ALLOC
+    int semac_intra;
+#endif
 #endif
     int shortBlocks = 0;
     int isTransient = 0;
@@ -2310,10 +2313,23 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
             }
         }
     } while (++c < C);
-   oaci_quant_coarse_energy(mode, start, end, effEnd, bandLogE,
-        oldBandE, total_bits, error, enc,
-        C, LM, nbAvailableBytes, st->force_intra,
-        &st->delayedIntra, st->complexity >= 4, st->loss_rate, st->lfe);
+    {
+        int force_intra = st->force_intra;
+#if defined(ENABLE_SEMAC) && defined(SEMAC_ENERGY_ALLOC)
+        /* Allocation must not depend on energy history modified by packet loss. */
+        force_intra |= semac_active;
+        /* Forced intra has only the coarse coder's insufficient-budget fallback. */
+        semac_intra = semac_active && oaci_ec_tell(enc) + 3 <= total_bits;
+#endif
+        oaci_quant_coarse_energy(mode, start, end, effEnd, bandLogE,
+             oldBandE, total_bits, error, enc,
+             C, LM, nbAvailableBytes, force_intra,
+             &st->delayedIntra, st->complexity >= 4, st->loss_rate, st->lfe);
+#if defined(ENABLE_SEMAC) && defined(SEMAC_ENERGY_ALLOC)
+        if (semac_intra)
+            oaci_semac_clamp_transport_energy(oldBandE, C, nbEBands, start, end);
+#endif
+    }
 
 #ifdef ENABLE_SEMAC
     /* SEMAC: Encode spatial beam energies right after coarse energy so that
@@ -2655,7 +2671,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
         const oac_int32 *qab_chan_w = NULL;
 #ifdef SEMAC_ENERGY_ALLOC
         oac_int32 semac_chan_w[SEMAC_MAX_BEAMS*SEMAC_MAX_BANDS];   /* per-band offsets: c*nbEBands + i */
-        if (semac_active) {
+        if (semac_active && semac_intra) {
             oaci_semac_compute_bit_weights_from_tc(oldBandE, C, nbEBands, start, end, semac_chan_w);
             qab_chan_w = semac_chan_w;
         }
