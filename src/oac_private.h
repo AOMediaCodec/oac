@@ -140,6 +140,15 @@ int oaci_toc_mode(unsigned char toc);          /**< MODE_SILK_ONLY/HYBRID/CELT_O
 int oaci_toc_bandwidth(unsigned char toc);     /**< OAC_BANDWIDTH_* */
 int oaci_toc_samples_per_frame(unsigned char toc, oac_int32 Fs);
 
+/** CELT <-> OLAC overlap and pre-emphasis memory conversions, used by both
+ * the encoder and the decoder when switching between the two codecs. The
+ * OLAC arrays are [channels] and [channels][HALF_OVERLAP]; ctz is the scale
+ * OLAC last used. */
+void oaci_celt_to_olac_mem(const celt_sig *preemph, const celt_sig *tdac, int channels,
+                           oac_int32 *olac_preemph, oac_int32 *olac_tdac);
+void oaci_olac_to_celt_mem(const oac_int32 *olac_preemph, const oac_int32 *olac_tdac, int channels, int ctz,
+                           celt_sig *preemph, celt_sig *tdac);
+
 /** Resolve and validate the ToC header of a packet. Fills in whichever of the
  * out-parameters are non-NULL: the format, the channel count, the number of
  * frames, and the number of ToC bytes consumed (1, 2 or 3; note this can be 3
