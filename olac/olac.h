@@ -64,9 +64,16 @@ extern oac_int8 rc_scale[PRED_ORDER];
 #define MUL(a,b) ((int)floor(.5f+(a)*(b)))
 
 #define OLAC_ABS(x) (((oac_uint32)(x) ^ (oac_uint32)(-((x) < 0))) + (oac_uint32)((x) < 0))
+/* Wrap-around (defined behaviour) versions for arithmetic that a corrupt
+   packet can drive past 32 bits. Not to be confused with the ADD32_ovflw()
+   family in arch.h, which is a float add in float builds. */
+#define OLAC_ADD32_ovflw(a, b) ((oac_int32)((oac_uint32)(a)+(oac_uint32)(b)))
+#define OLAC_SUB32_ovflw(a, b) ((oac_int32)((oac_uint32)(a)-(oac_uint32)(b)))
+#define OLAC_NEG32_ovflw(a) ((oac_int32)(0U-(oac_uint32)(a)))
 #define OLAC_SHL32(a, b) ((oac_int32)((oac_uint32)(a)<<(b)))
 #define OLAC_SHR32(a, b) ((oac_int32)(a)>>(b))
 #define OLAC_PSHR32(a, b) (((oac_int32)(a)+(1L<<(b)>>1))>>(b))
+#define OLAC_PSHR32_ovflw(a, b) OLAC_SHR32(OLAC_ADD32_ovflw(a, 1L<<(b)>>1), b)
 #define OLAC_SHR64(a, b) ((oac_int64)(a)>>(b))
 #define OLAC_PSHR64(a, b) (((oac_int64)(a)+(1LL<<(b)>>1))>>(b))
 #define OLAC_MUL_P31(a, b) (((oac_int64)(a)*(oac_int64)(b)+(1LL<<30)) >> 31)
@@ -74,7 +81,7 @@ extern oac_int8 rc_scale[PRED_ORDER];
 #define OLAC_MUL16_16_P15(a, b) (((oac_int32)(a)*(oac_int32)(b)+(1<<14)) >> 15)
 #define OLAC_MUL16_32_P15(a, b) (((oac_int64)(a)*(oac_int64)(b)+(1<<14)) >> 15)
 
-#define OLAC_MAC16_16(c,a,b) ((oac_int32)(c) + ((oac_int32)(oac_int16)(a)*(oac_int16)(b)))
+#define OLAC_MAC16_16(c,a,b) OLAC_ADD32_ovflw(c, (oac_int32)(oac_int16)(a)*(oac_int16)(b))
 
 #define MOD(a, b) (((a)%(b)+(b))%(b))
 

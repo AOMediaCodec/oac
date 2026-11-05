@@ -48,12 +48,12 @@ static void untdac(oac_int32 *pcm, int len, oac_int32 *mem) {
 
     for (i = 0; i < HALF_OVERLAP; i++) {
         oac_int32 a = mem[i];
-        oac_int32 b = -pcm[HALF_OVERLAP - i - 1]; /* Negate to restore the 'b' state */
+        oac_int32 b = OLAC_NEG32_ovflw(pcm[HALF_OVERLAP - i - 1]); /* Negate to restore the 'b' state */
 
         /* Perfect inverse lifting */
-        a -= OLAC_MUL_P31(lift_p[i], b);
-        b -= OLAC_MUL_P31(lift_q[i], a);
-        a -= OLAC_MUL_P31(lift_p[i], b);
+        a = OLAC_SUB32_ovflw(a, OLAC_MUL_P31(lift_p[i], b));
+        b = OLAC_SUB32_ovflw(b, OLAC_MUL_P31(lift_q[i], a));
+        a = OLAC_SUB32_ovflw(a, OLAC_MUL_P31(lift_p[i], b));
 
         /* Un-swap the variables to their original PCM positions */
         tmp[i] = b;
@@ -77,7 +77,7 @@ static void olac_deemphasis(oac_int32 *pcm, int len, oac_int32 *_mem) {
     int i;
     oac_int32 mem = *_mem;
     for (i=0;i<len;i++) {
-        pcm[i] += OLAC_MUL16_32_P15(PREEMPH_Q15, mem);
+        pcm[i] = OLAC_ADD32_ovflw(pcm[i], OLAC_MUL16_32_P15(PREEMPH_Q15, mem));
         mem = pcm[i];
     }
     *_mem = mem;
@@ -107,7 +107,7 @@ static void syn_filter(oac_int32 *out, const oac_int32 *in, int len, const oac_i
         for (j=0;j<order;j++) {
             pred = OLAC_MAC16_16(pred, mem[j], aks16[offset + j]);
         }
-        out[i] = in[i] + OLAC_PSHR32(pred, OLAC_COEF_SHIFT-shift);
+        out[i] = OLAC_ADD32_ovflw(in[i], OLAC_PSHR32_ovflw(pred, OLAC_COEF_SHIFT-shift));
         for (j=order-2;j>=0;j--) {
             mem[j+1] = mem[j];
         }
@@ -149,8 +149,8 @@ static int unquantize_coefs(ec_dec *dec, oac_int32 *rc) {
         int q, m, s;
         s = EC_ILOG(IMAX(1, res*rc_scale[i]>>8));
         m = OLAC_SHL32(decode_unary(dec), s);
-        if (s > 0) m += oaci_ec_dec_bits(dec, s);
-        if (m > 2*res) return -1;
+        if (s > 0) m = OLAC_ADD32_ovflw(m, oaci_ec_dec_bits(dec, s));
+        if (m < 0 || m > 2*res) return -1;
         q = rc_unmap(m, ((rc_center[i]+64)*res+32)>>6, 2*res) - res;
         rc[i] = (oac_int64)q*RC_SCALE/res;
         res = OLAC_MUL16_16_P15(rc_factor(rc[i]), res);
@@ -173,7 +173,7 @@ static int decode_unary(ec_dec *dec) {
 static oac_int32 decode_golomb_rice(ec_dec *dec, int s) {
     oac_int32 x;
     x = OLAC_SHL32(decode_unary(dec), s);
-    if (s > 0) x += oaci_ec_dec_bits(dec, s);
+    if (s > 0) x = OLAC_ADD32_ovflw(x, oaci_ec_dec_bits(dec, s));
     x = deinterleave(x);
     return x;
 }
@@ -205,7 +205,7 @@ static int decode_residual(ec_dec *dec, oac_int32 *residual, int len, oac_int32 
         }
     }
     if (ref != NULL) {
-        for (i=0;i<len;i++) residual[i] += OLAC_PSHR64(qgain * (oac_int64)ref[i], 4);
+        for (i=0;i<len;i++) residual[i] = OLAC_ADD32_ovflw(residual[i], OLAC_PSHR64(qgain * (oac_int64)ref[i], 4));
     }
     return 0;
 }
@@ -219,7 +219,7 @@ static int decode_lsbs(ec_dec *dec, oac_int32 *sig, int frame_size, int shift) {
         }
     }
     for (i=0;i<frame_size;i++) {
-        sig[i] = (sig[i] << shift) | lsbs[i];
+        sig[i] = OLAC_SHL32(sig[i], shift) | lsbs[i];
     }
     return 0;
 }
@@ -256,10 +256,10 @@ oac_int32 olac_decode(OlacDecoder *st, const unsigned char *data, int len, oac_i
         syn_filter(sig, residual, frame_size, rc, order, st->last_ctz, ctz);
         decode_lsbs(&dec, sig, frame_size, shift);
         untdac(sig, frame_size, st->untdac_mem[c]);
-        offset = (st->dmem[c] - modulo) % PREEMPH_MOD;
+        offset = OLAC_SUB32_ovflw(st->dmem[c], modulo) % PREEMPH_MOD;
         if (offset < 0) offset += PREEMPH_MOD;
         if (offset > PREEMPH_MOD / 2) offset -= PREEMPH_MOD;
-        st->dmem[c] -= offset;
+        st->dmem[c] = OLAC_SUB32_ovflw(st->dmem[c], offset);
         olac_deemphasis(sig, OVERLAP_SIZE, &st->dmem[c]);
         if (ctz > st->last_ctz) st->dmem[c] = OLAC_SHR32(st->dmem[c], ctz - st->last_ctz);
         else if (ctz < st->last_ctz) st->dmem[c] = OLAC_SHL32(st->dmem[c], st->last_ctz - ctz);

@@ -97,15 +97,15 @@ void olac_aks_from_rc(oac_int32 *aks, const oac_int32 *rc, int order) {
         for( k = 0; k < (n + 1) >> 1; k++ ) {
             tmp1 = ak[ k ];
             tmp2 = ak[ n - k - 1 ];
-            ak[ k ]         = tmp1 + OLAC_PSHR64(rc[n] * (oac_int64)tmp2, RC_SHIFT);
-            ak[ n - k - 1 ] = tmp2 + OLAC_PSHR64(rc[n] * (oac_int64)tmp1, RC_SHIFT);
+            ak[ k ]         = OLAC_ADD32_ovflw(tmp1, OLAC_PSHR64(rc[n] * (oac_int64)tmp2, RC_SHIFT));
+            ak[ n - k - 1 ] = OLAC_ADD32_ovflw(tmp2, OLAC_PSHR64(rc[n] * (oac_int64)tmp1, RC_SHIFT));
         }
 #if OLAC_COEF_SHIFT > RC_SHIFT
         ak[ n ] = OLAC_SHL32(rc[n], OLAC_COEF_SHIFT-RC_SHIFT);
 #else
         ak[ n ] = OLAC_SHR32(rc[n], RC_SHIFT-OLAC_COEF_SHIFT);
 #endif
-        for (k=0;k<=n;k++) *aks++ = -ak[ k ];
+        for (k=0;k<=n;k++) *aks++ = OLAC_NEG32_ovflw(ak[ k ]);
     }
 }
 
@@ -151,7 +151,7 @@ int aks_downshift(const oac_int32 *aks, oac_int16 *aks16, int order) {
     shift = EC_ILOG(maxval) - COEF_BITS;
     if (shift < 0) shift = 0;
     for (i=0;i<N;i++) {
-        aks16[i] = OLAC_PSHR32(aks[i], shift);
+        aks16[i] = OLAC_PSHR32_ovflw(aks[i], shift);
     }
     return shift;
 }
