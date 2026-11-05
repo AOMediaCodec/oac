@@ -67,6 +67,7 @@
 #include "celt.h"
 #include "mathops.h"
 #include "oac_private.h"
+#include "olac.h"
 
 #ifndef DISABLE_FLOAT_API
 
@@ -635,3 +636,11 @@ int oac_packet_parse(const unsigned char *data, oac_int32 len,
     return oac_packet_parse_impl(data, len, 0, out_toc,
                                  frames, size, payload_offset, NULL, NULL, NULL);
 }
+
+int oac_packet_is_lossless(const unsigned char packet[], oac_int32 len) {
+    int ret = oaci_packet_parse_toc(packet, len, NULL, NULL, NULL, NULL);
+    if (ret < 0)
+        return ret;
+    return oaci_toc_mode(packet[0]) == MODE_OLAC;
+}
+
