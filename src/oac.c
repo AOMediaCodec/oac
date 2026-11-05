@@ -66,6 +66,7 @@
 #include "oac.h"
 #include "celt.h"
 #include "mathops.h"
+#include "float_cast.h"
 #include "oac_private.h"
 #include "olac.h"
 
@@ -644,3 +645,40 @@ int oac_packet_is_lossless(const unsigned char packet[], oac_int32 len) {
     return oaci_toc_mode(packet[0]) == MODE_OLAC;
 }
 
+
+/* CELT <-> OLAC memory handoff. OLAC keeps 24-bit integer memories, scaled
+   down by the ctz of the frame that produced them; CELT keeps celt_sig. The
+   pre-emphasis memory holds the last sample times the 0.85 coefficient on the
+   CELT side and the plain last sample on the OLAC side. The TDAC memories have
+   the same layout on both sides by construction of the CELT MDCT. */
+#define OLAC_CLAMP24(x) IMAX(-8388608, IMIN(8388607, (x)))
+
+void oaci_celt_to_olac_mem(const celt_sig *preemph, const celt_sig *tdac, int channels,
+                           oac_int32 *olac_preemph, oac_int32 *olac_tdac) {
+    int c, i;
+    for (c = 0; c < channels; c++) {
+#ifdef FIXED_POINT
+        olac_preemph[c] = OLAC_CLAMP24(SIG2RES(OLAC_MUL16_32_P15(INV_PREEMPH_Q15, preemph[c])));
+#else
+        olac_preemph[c] = OLAC_CLAMP24(RES2INT24(SIG2RES(preemph[c])*(1.f/PREEMPH)));
+#endif
+        for (i = 0; i < HALF_OVERLAP; i++)
+            olac_tdac[c*HALF_OVERLAP + i] = OLAC_CLAMP24(RES2INT24(SIG2RES(tdac[c*HALF_OVERLAP + i])));
+    }
+}
+
+void oaci_olac_to_celt_mem(const oac_int32 *olac_preemph, const oac_int32 *olac_tdac, int olac_channels,
+                           int ctz, int channels, celt_sig *preemph, celt_sig *tdac) {
+    int c, i;
+    /* A mono OLAC stream in a stereo decoder is duplicated, as CELT does. */
+    for (c = 0; c < channels; c++) {
+        int oc = IMIN(c, olac_channels - 1);
+#ifdef FIXED_POINT
+        preemph[c] = MULT16_32_Q15(PREEMPH_Q15, RES2SIG(OLAC_SHL32(olac_preemph[oc], ctz)));
+#else
+        preemph[c] = PREEMPH*RES2SIG(INT24TORES(OLAC_SHL32(olac_preemph[oc], ctz)));
+#endif
+        for (i = 0; i < HALF_OVERLAP; i++)
+            tdac[c*HALF_OVERLAP + i] = RES2SIG(INT24TORES(OLAC_SHL32(olac_tdac[oc*HALF_OVERLAP + i], ctz)));
+    }
+}
