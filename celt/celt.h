@@ -194,6 +194,12 @@ typedef struct {
 #define CELT_GET_TDAC_MEM_REQUEST       10033
 #define CELT_GET_TDAC_MEM(x) CELT_GET_TDAC_MEM_REQUEST, celt_check_sig_ptr(x)
 
+/* Encoder only: whether the last encoded frame used the comb prefilter. The
+   TDAC memory of such a frame is of the prefiltered signal, which only the
+   decoder's postfilter can undo, so it cannot be handed to another codec. */
+#define CELT_GET_PREFILTER_ACTIVE_REQUEST 10035
+#define CELT_GET_PREFILTER_ACTIVE(x) CELT_GET_PREFILTER_ACTIVE_REQUEST, oac_check_int_ptr(x)
+
 /* Highest bit-rate the frame length signalling can represent: a full
    OAC_SIZE_MAX payload every 20 ms. Only used to saturate the bits<->bit-rate
    conversions below, so they cannot overflow oac_int32. */

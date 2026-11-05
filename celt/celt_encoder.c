@@ -2879,6 +2879,13 @@ int oac_custom_encoder_ctl(CELTEncoder * OAC_RESTRICT st, int request, ...) {
             }
         }
         break;
+        case CELT_GET_PREFILTER_ACTIVE_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) goto bad_arg;
+            *value = st->prefilter_gain != 0;
+        }
+        break;
         case OAC_RESET_STATE:
         {
             int i;
