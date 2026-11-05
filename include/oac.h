@@ -846,6 +846,16 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_get_nb_samples(const unsigned c
  */
 OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len);
 
+/** Checks whether an Oac packet is coded losslessly (OLAC mode). Note that a
+ * lossy encoder may also produce such packets when they are cheaper than the
+ * lossy coding would be, so this only describes the packet's coding mode.
+ * @param [in] packet <tt>char*</tt>: Oac packet
+ * @param [in] len <tt>oac_int32</tt>: Length of packet
+ * @returns 1 if the packet is coded losslessly, 0 otherwise
+ * @retval OAC_INVALID_PACKET The compressed data passed is corrupted or of an unsupported type
+ */
+OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_is_lossless(const unsigned char packet[], oac_int32 len);
+
 /** Gets the number of samples of an Oac packet.
  * @param [in] dec <tt>OacDecoder*</tt>: Decoder state
  * @param [in] packet <tt>char*</tt>: Oac packet
