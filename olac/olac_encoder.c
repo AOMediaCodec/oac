@@ -509,6 +509,10 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
     oac_int32 lsbs[FRAME_SIZE];
     oac_int32 residual[FRAME_SIZE];
     oac_int32 ref[FRAME_SIZE];
+    /* Restored on failure so the caller can retry with a bigger buffer or
+       code the same frame with a different codec. */
+    OlacEncoder bak = *st;
+    if (nbCompressedBytes < 2) return OAC_BUFFER_TOO_SMALL;
     oaci_ec_enc_init(&enc, data, nbCompressedBytes);
     for (i=0;i<frame_size*st->nb_channels;i++) lsb_mask |= pcm[i];
     while ((lsb_mask & 1) == 0 && ctz < 24) {
@@ -545,7 +549,11 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
         oaci_ec_enc_shrink(&enc, nbCompressedBytes);
     }
     oaci_ec_enc_done(&enc);
+    if (enc.error) {
+        *st = bak;
+        return OAC_BUFFER_TOO_SMALL;
+    }
     st->last_ctz = ctz;
     st->rng = enc.rng;
-    return enc.error ? OAC_BUFFER_TOO_SMALL : nbCompressedBytes;
+    return nbCompressedBytes;
 }
