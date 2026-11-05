@@ -409,7 +409,7 @@ static float compute_chan_pred_gain(const oac_int32 *residual, int len, const oa
     return xy/(yy+1);
 }
 
-static void code_residual(ec_enc *enc, oac_int32 *residual, int len, const oac_int32 *ref) {
+static void code_residual(ec_enc *enc, oac_int32 *residual, int len, oac_int32 *ref) {
     int best_s, best_t;
     int split_pos;
     int i;
@@ -437,7 +437,13 @@ static void code_residual(ec_enc *enc, oac_int32 *residual, int len, const oac_i
             qgain += best_d;
         }
         encode_golomb_rice(enc, qgain-5, 3);
-        for (i=0;i<len;i++) residual[i] -= OLAC_PSHR64(qgain * (oac_int64)ref[i], 4);
+        /* The next channel predicts from this channel's residual *before*
+           inter-channel prediction, which is what the decoder reconstructs. */
+        for (i=0;i<len;i++) {
+            oac_int32 r = residual[i];
+            residual[i] -= OLAC_PSHR64(qgain * (oac_int64)ref[i], 4);
+            ref[i] = r;
+        }
     }
     find_residual_params(residual, len, &best_s, &best_t, &split_pos);
     oaci_ec_enc_uint(enc, best_s, MAX_SHIFT+1);
@@ -532,7 +538,7 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
         predict(&enc, residual, sig, frame_size, st->last_ctz, ctz);
         code_residual(&enc, residual, frame_size, (c==0) ? NULL : ref);
         code_lsbs(&enc, lsbs, frame_size, shift);
-        OAC_COPY(ref, residual, frame_size);
+        if (c==0) OAC_COPY(ref, residual, frame_size);
     }
     if (!enc.error) {
         nbCompressedBytes = IMIN(nbCompressedBytes, (oaci_ec_tell(&enc)+7)>>3);
