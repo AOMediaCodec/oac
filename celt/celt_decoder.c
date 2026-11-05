@@ -716,6 +716,10 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
         int end;
         int effEnd;
         celt_glog decay;
+        /* Nothing has been decoded since the state was last reset or imported
+           with CELT_SET_TDAC_MEM, so the band energies are meaningless: just let
+           the overlap memory decay to zero instead of filling with noise. */
+        int silence = st->last_frame_type == FRAME_NONE;
         end = st->end;
         effEnd = IMAX(start, IMIN(end, mode->effEBands));
 
@@ -752,7 +756,7 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
         }
         st->rng = seed;
 
-        oaci_celt_synthesis(mode, X, out_syn, oldBandE, start, effEnd, C, C, 0, LM, st->downsample, 0, st->arch);
+        oaci_celt_synthesis(mode, X, out_syn, oldBandE, start, effEnd, C, C, 0, LM, st->downsample, silence, st->arch);
 
         c = 0; do {
             st->postfilter_period = IMAX(st->postfilter_period, COMBFILTER_MINPERIOD);
@@ -1049,7 +1053,10 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
         st->skip_plc = 0;
     }
 #endif
-    st->last_frame_type = curr_frame_type;
+    /* Stay in the "nothing decoded yet" state across consecutive lost frames
+       so that they all come out silent (see the FRAME_PLC_NOISE branch). */
+    if (!(curr_frame_type == FRAME_PLC_NOISE && st->last_frame_type == FRAME_NONE))
+        st->last_frame_type = curr_frame_type;
     RESTORE_STACK;
 }
 
@@ -1679,6 +1686,12 @@ int oac_custom_decoder_ctl(CELTDecoder * OAC_RESTRICT st, int request, ...) {
             st->postfilter_period_old = 0;
             st->postfilter_gain_old = 0;
             st->postfilter_tapset_old = 0;
+            /* The rest of the decode buffer is stale: a lost frame must not
+               run the pitch PLC on it (see oaci_celt_decode_lost()). */
+            st->prefilter_and_fold = 0;
+            st->skip_plc = 1;
+            st->loss_duration = 0;
+            st->last_frame_type = FRAME_NONE;
         }
         break;
         case CELT_GET_TDAC_MEM_REQUEST:
