@@ -166,6 +166,8 @@ void print_usage( char* argv[] ) {
     fprintf(stderr,
     "-lossy_fallback      : lossless only: code the frames that do not fit the payload size (or the bit-rate, with -cbr) with CELT\n" );
     fprintf(stderr,
+    "-no_dc_reject        : do not high-pass the input of the lossy applications (makes their lossless frames bit-exact)\n" );
+    fprintf(stderr,
     "-delayed-decision    : use look-ahead for speech/music detection (experts only); default: disabled\n" );
     fprintf(stderr,
     "-bandwidth <NB|MB|WB|SWB|FB> : audio bandwidth (from narrowband to fullband); default: sampling rate\n" );
@@ -453,6 +455,7 @@ int main(int argc, char *argv[]) {
     int forcechannels;
     int cvbr = 0;
     int lossy_fallback = 0;
+    int dc_reject = 1;
     int packet_loss_perc;
 #ifdef ENABLE_LOSSGEN
     float lossgen_perc = -1.f;
@@ -695,6 +698,10 @@ int main(int argc, char *argv[]) {
             check_encoder_option(decode_only, "-lossy_fallback");
             lossy_fallback = 1;
             args++;
+        } else if (strcmp( argv[ args ], "-no_dc_reject" ) == 0) {
+            check_encoder_option(decode_only, "-no_dc_reject");
+            dc_reject = 0;
+            args++;
         } else if (strcmp( argv[ args ], "-delayed-decision" ) == 0) {
             check_encoder_option(decode_only, "-delayed-decision");
             delayed_decision = 1;
@@ -890,6 +897,7 @@ int main(int argc, char *argv[]) {
         oac_encoder_ctl(enc, OAC_SET_VBR(use_vbr));
         oac_encoder_ctl(enc, OAC_SET_VBR_CONSTRAINT(cvbr));
         oac_encoder_ctl(enc, OAC_SET_LOSSY_FALLBACK(lossy_fallback));
+        oac_encoder_ctl(enc, OAC_SET_DC_REJECT(dc_reject));
         oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(complexity));
         oac_encoder_ctl(enc, OAC_SET_INBAND_FEC(use_inbandfec));
         oac_encoder_ctl(enc, OAC_SET_FORCE_CHANNELS(forcechannels));
