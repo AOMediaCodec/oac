@@ -610,6 +610,7 @@ int run_test1(int no_fuzz) {
         oac_uint32 dec_final_range2;
         int jj, dec2;
         int len, out_samples;
+        int rejected;
         int frame_size = fsizes[db62[fsize]];
         oac_int32 offset = i%(SAMPLES - MAX_FRAME_SAMP);
 
@@ -637,18 +638,24 @@ int run_test1(int no_fuzz) {
         for (j = (oac_int32)(frames[0] - packet); j < len;
              j++) for (jj = 0; jj < 8; jj++) packet[j] ^= ((!no_fuzz) && ((fast_rand()&1023) == 0))<<jj;
         out_samples = oac_decode(dec_err[0], len > 0?packet:NULL, len, out2buf, MAX_FRAME_SAMP, 0);
-        if (out_samples < 0 || out_samples > MAX_FRAME_SAMP) test_failed();
-        if ((len > 0 && out_samples != frame_size)) test_failed(); /*FIXME use lastframe*/
+        /* A lossless packet the fuzzing corrupted may be rejected rather than decoded. */
+        rejected = len > 0 && out_samples == OAC_INVALID_PACKET && oac_packet_is_lossless(packet, len) == 1;
+        if (!rejected && (out_samples < 0 || out_samples > MAX_FRAME_SAMP)) test_failed();
+        if (!rejected && len > 0 && out_samples != frame_size) test_failed(); /*FIXME use lastframe*/
 
         oac_decoder_ctl(dec_err[0], OAC_GET_FINAL_RANGE(&dec_final_range));
 
         /*randomly select one of the decoders to compare with*/
         dec2 = fast_rand()%9 + 1;
         out_samples = oac_decode(dec_err[dec2], len > 0?packet:NULL, len, out2buf, MAX_FRAME_SAMP, 0);
-        if (out_samples < 0 || out_samples > MAX_FRAME_SAMP) test_failed(); /*FIXME, use factor, lastframe for loss*/
+        if (rejected) {
+            if (out_samples != OAC_INVALID_PACKET) test_failed();
+        } else {
+            if (out_samples < 0 || out_samples > MAX_FRAME_SAMP) test_failed(); /*FIXME, use factor, lastframe for loss*/
 
-        oac_decoder_ctl(dec_err[dec2], OAC_GET_FINAL_RANGE(&dec_final_range2));
-        if (len > 0 && dec_final_range != dec_final_range2) test_failed();
+            oac_decoder_ctl(dec_err[dec2], OAC_GET_FINAL_RANGE(&dec_final_range2));
+            if (len > 0 && dec_final_range != dec_final_range2) test_failed();
+        }
 
         fswitch--;
         if (fswitch < 1) {

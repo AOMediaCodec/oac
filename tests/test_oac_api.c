@@ -1607,6 +1607,13 @@ oac_int32 test_enc_api(void) {
      "    OAC_SET_PREDICTION_DISABLED ................. OK.\n",
      "    OAC_GET_PREDICTION_DISABLED ................. OK.\n")
 
+    err = oac_encoder_ctl(enc, OAC_GET_LOSSY_FALLBACK(null_int_ptr));
+    if (err != OAC_BAD_ARG) test_failed();
+    cfgs++;
+    CHECK_SETGET(OAC_SET_LOSSY_FALLBACK(i), OAC_GET_LOSSY_FALLBACK(&i), -1, 2, 1, 0,
+     "    OAC_SET_LOSSY_FALLBACK ...................... OK.\n",
+     "    OAC_GET_LOSSY_FALLBACK ...................... OK.\n")
+
     err = oac_encoder_ctl(enc, OAC_GET_EXPERT_FRAME_DURATION(null_int_ptr));
     if (err != OAC_BAD_ARG) test_failed();
     cfgs++;
