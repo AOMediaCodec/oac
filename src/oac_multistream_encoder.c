@@ -441,6 +441,11 @@ static int oac_multistream_encoder_init_impl(
         || (streams < 1) || (coupled_streams < 0) || (streams > 255 - coupled_streams)
         || (streams + coupled_streams > channels))
         return OAC_BAD_ARG;
+    /* The output buffer is split between the streams as they are coded, so a
+       stream that cannot code its frame losslessly would fail after the
+       streams before it have already moved on. */
+    if (application == OAC_APPLICATION_LOSSLESS)
+        return OAC_BAD_ARG;
 
     coupled_size = oac_encoder_init(NULL, Fs, 2, OAC_FORMAT_STANDARD, application);
     if (coupled_size < 0)
@@ -1179,6 +1184,11 @@ int oac_multistream_encoder_ctl_va_list(OacMSEncoder *st, int request,
             int s;
             /* This works for int32 params */
             oac_int32 value = va_arg(ap, oac_int32);
+            /* See oac_multistream_encoder_init_impl(). */
+            if (request == OAC_SET_APPLICATION_REQUEST && value == OAC_APPLICATION_LOSSLESS) {
+                ret = OAC_BAD_ARG;
+                break;
+            }
             for (s = 0; s < st->layout.nb_streams; s++) {
                 OacEncoder *enc;
 

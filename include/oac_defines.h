@@ -213,6 +213,8 @@ extern "C" {
 #define OAC_SET_IGNORE_EXTENSIONS_REQUEST 4058
 #define OAC_GET_IGNORE_EXTENSIONS_REQUEST 4059
 #define OAC_GET_FORMAT_REQUEST 4060
+#define OAC_SET_LOSSY_FALLBACK_REQUEST 4062
+#define OAC_GET_LOSSY_FALLBACK_REQUEST 4063
 
 /** Defines for the presence of extended APIs. */
 #define OAC_HAVE_OAC_PROJECTION_H
@@ -258,6 +260,14 @@ extern "C" {
 #define OAC_APPLICATION_RESTRICTED_SILK     2052
 /** Experts only: forces CELT encoding; don't allocate SILK state at all. Disables OAC_SET_APPLICATION. */
 #define OAC_APPLICATION_RESTRICTED_CELT     2053
+/** Lossless coding (48 kHz only, frames of at most 20 ms). The output is
+ * bit-exact up to the input's precision (the integer APIs, or
+ * OAC_SET_LSB_DEPTH for the float API) and 2.5 ms of look-ahead, at
+ * whatever bit-rate that takes: OAC_SET_BITRATE is ignored and
+ * oac_encode() returns OAC_BUFFER_TOO_SMALL (leaving the encoder state
+ * untouched) when the packet does not fit the output buffer. See
+ * OAC_SET_LOSSY_FALLBACK for a rate-controlled variant. */
+#define OAC_APPLICATION_LOSSLESS            2054
 
 /** Standard format supporting mono and stereo (1-2 channels) @hideinitializer */
 #define OAC_FORMAT_STANDARD    0
@@ -552,6 +562,8 @@ extern "C" {
  * <dt>#OAC_APPLICATION_RESTRICTED_LOWDELAY</dt>
  * <dd>Configure the minimum possible coding delay by disabling certain modes
  * of operation.</dd>
+ * <dt>#OAC_APPLICATION_LOSSLESS</dt>
+ * <dd>Lossless coding; only on an encoder that could have been created with it.</dd>
  * </dl>
  * @hideinitializer */
 #define OAC_SET_APPLICATION(x) OAC_SET_APPLICATION_REQUEST, oac_check_int(x)
@@ -726,6 +738,25 @@ extern "C" {
  * </dl>
  * @hideinitializer */
 #define OAC_GET_PREDICTION_DISABLED(x) OAC_GET_PREDICTION_DISABLED_REQUEST, oac_check_int_ptr(x)
+
+/** With #OAC_APPLICATION_LOSSLESS, allows frames that cannot be coded
+ * losslessly within the output buffer to be coded with CELT instead, at the
+ * bit-rate set with OAC_SET_BITRATE (which is otherwise ignored). Along with
+ * OAC_SET_VBR(0) this gives a constant-rate stream that is lossless whenever
+ * it can be. Ignored in other applications. Can be changed at any time.
+ * @see OAC_GET_LOSSY_FALLBACK
+ * @param[in] x <tt>oac_int32</tt>: Allowed values:
+ * <dl>
+ * <dt>0</dt><dd>Strictly lossless (default).</dd>
+ * <dt>1</dt><dd>Fall back to lossy coding when needed.</dd>
+ * </dl>
+ * @hideinitializer */
+#define OAC_SET_LOSSY_FALLBACK(x) OAC_SET_LOSSY_FALLBACK_REQUEST, oac_check_int(x)
+/** Gets the encoder's lossy fallback setting.
+ * @see OAC_SET_LOSSY_FALLBACK
+ * @param[out] x <tt>oac_int32 *</tt>: Returns 0 or 1.
+ * @hideinitializer */
+#define OAC_GET_LOSSY_FALLBACK(x) OAC_GET_LOSSY_FALLBACK_REQUEST, oac_check_int_ptr(x)
 
 /** If non-zero, enables Deep Redundancy (DRED) and use the specified maximum number of 10-ms redundant frames
  * @hideinitializer */
