@@ -1946,6 +1946,33 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     }
 }
 
+/* Whether a lossy application should try coding this CELT frame losslessly,
+   which is worth it whenever that is cheaper than the lossy target. Only when
+   OLAC can represent what CELT would code (48 kHz, full-band, mono or stereo
+   coded as is), not on the inactive frames of a DTX stream, and not right
+   after a frame coded with CELT's comb prefilter, whose TDAC memory is that
+   of the prefiltered signal and cannot be handed over. */
+static int oaci_try_olac(const OacEncoder *st, CELTEncoder *celt_enc, int bandwidth, int activity) {
+    oac_int32 prefilter = 0;
+    if (st->application == OAC_APPLICATION_VOIP || st->application == OAC_APPLICATION_RESTRICTED_SILK)
+        return 0;
+    if (st->Fs != 48000 || bandwidth != OAC_BANDWIDTH_FULLBAND || st->format != OAC_FORMAT_STANDARD
+        || st->channels > MAX_CHANNELS || st->stream_channels != st->channels)
+        return 0;
+    /* With DTX, the inactive frames (including the periodic refreshes) have to
+       be CELT frames: the decoder's comfort noise is generated from the band
+       energies of the last CELT frame it decoded. */
+    if (st->use_dtx && !activity)
+        return 0;
+#ifdef ENABLE_DRED
+    if (st->dred_duration > 0)
+        return 0;
+#endif
+    if (!st->prev_olac)
+        celt_encoder_ctl(celt_enc, CELT_GET_PREFILTER_ACTIVE(&prefilter));
+    return !prefilter;
+}
+
 /* Codes a frame with OLAC in place of CELT. Returns the payload size (without
    the ToC), or OAC_BUFFER_TOO_SMALL if it does not fit in max_bytes, in which
    case the OLAC state is left as it was. */
@@ -2594,13 +2621,17 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
             celt_encoder_ctl(celt_enc, CELT_SET_PREDICTION(0));
         }
         /* Code the frame losslessly in place of CELT when that is what the
-           application asked for. */
+           application asked for, or when it is cheaper than the lossy target. */
         if (olac_allowed && st->mode == MODE_CELT_ONLY && !redundancy
-            && st->application == OAC_APPLICATION_LOSSLESS) {
+            && (st->application == OAC_APPLICATION_LOSSLESS || oaci_try_olac(st, celt_enc, curr_bandwidth, activity))) {
             int olac_max_bytes = max_data_bytes - toc_bytes;
+            /* In the lossy applications the frame also has to fit the bit-rate
+               (the output buffer already does in CBR). */
+            if (st->application != OAC_APPLICATION_LOSSLESS)
+                olac_max_bytes = IMIN(olac_max_bytes, (oaci_bitrate_to_bits(st->bitrate_bps, st->Fs, frame_size) + 4)/8 - toc_bytes);
             ret = oaci_olac_encode_frame(st, celt_enc, pcm_buf, frame_size, lsb_depth, data, olac_max_bytes);
             olac = ret > 0;
-            if (!olac && !st->lossy_fallback) {
+            if (!olac && st->application == OAC_APPLICATION_LOSSLESS && !st->lossy_fallback) {
                 RESTORE_STACK;
                 return OAC_BUFFER_TOO_SMALL;
             }
