@@ -473,6 +473,34 @@ static void test_opportunistic(void) {
         }
         oac_encoder_destroy(enc);
     }
+
+    /* Without the high-pass filter, a lossy application that codes every
+       frame losslessly is bit-exact, after its own look-ahead. */
+    if (!fuzzing) {
+        OacEncoder *enc = oac_encoder_create(FS, 1, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
+        OacDecoder *dec = oac_decoder_create(FS, 1, OAC_FORMAT_STANDARD, &err);
+        oac_int16 *in = malloc(sizeof(*in)*5*frame_size);
+        oac_int16 *all_out = malloc(sizeof(*all_out)*5*frame_size);
+        oac_int32 lookahead, value;
+        oac_test_assert(enc && dec && in && all_out);
+        oac_test_assert(oac_encoder_ctl(enc, OAC_GET_DC_REJECT(&value)) == OAC_OK && value == 1);
+        oac_test_assert(oac_encoder_ctl(enc, OAC_SET_DC_REJECT(0)) == OAC_OK);
+        oac_test_assert(oac_encoder_ctl(enc, OAC_SET_BITRATE(OAC_BITRATE_MAX)) == OAC_OK);
+        oac_test_assert(oac_encoder_ctl(enc, OAC_GET_LOOKAHEAD(&lookahead)) == OAC_OK);
+        /* A DC step, which the filter would not have left alone. */
+        for (i = 0; i < 4*frame_size; i++)
+            in[i] = i < 1000 ? 10000 : -7777;
+        for (f = 0; f < 5; f++) {
+            int len = oac_encode(enc, in + f*frame_size, frame_size, packet, MAX_PACKET);
+            oac_test_assert(len > 0 && oac_packet_is_lossless(packet, len) == 1);
+            oac_test_assert(oac_decode(dec, packet, len, all_out + f*frame_size, frame_size, 0) == frame_size);
+        }
+        oac_test_assert(memcmp(in, all_out + lookahead, sizeof(*in)*4*frame_size) == 0);
+        free(in);
+        free(all_out);
+        oac_encoder_destroy(enc);
+        oac_decoder_destroy(dec);
+    }
     free(noise);
     free(pitchy);
     free(silence);
