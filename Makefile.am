@@ -173,6 +173,7 @@ noinst_PROGRAMS = celt/tests/test_unit_cwrs32 \
                   tests/test_oac_dred \
                   tests/test_oac_encode \
                   tests/test_oac_extensions \
+                  tests/test_oac_lossless \
                   tests/test_oac_padding \
                   tests/test_oac_projection \
                   trivial_example
@@ -191,6 +192,7 @@ TESTS = celt/tests/test_unit_cwrs32 \
         tests/test_oac_decode \
         tests/test_oac_encode \
         tests/test_oac_extensions \
+        tests/test_oac_lossless \
         tests/test_oac_padding \
         tests/test_oac_projection
 
@@ -226,6 +228,9 @@ tests_test_oac_decode_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
 
 tests_test_oac_padding_SOURCES = tests/test_oac_padding.c tests/test_oac_common.h
 tests_test_oac_padding_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+
+tests_test_oac_lossless_SOURCES = tests/test_oac_lossless.c tests/test_oac_common.h
+tests_test_oac_lossless_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
 
 tests_test_oac_dred_SOURCES = tests/test_oac_dred.c tests/test_oac_common.h
 tests_test_oac_dred_LDADD = liboac.la $(NE10_LIBS) $(LIBM)

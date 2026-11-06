@@ -67,6 +67,8 @@ get_oac_sources(tests_test_oac_decode_SOURCES Makefile.am
                  test_oac_decode_sources)
 get_oac_sources(tests_test_oac_padding_SOURCES Makefile.am
                  test_oac_padding_sources)
+get_oac_sources(tests_test_oac_lossless_SOURCES Makefile.am
+                 test_oac_lossless_sources)
 get_oac_sources(tests_test_oac_dred_SOURCES Makefile.am
                  test_oac_dred_sources)
 get_oac_sources(tests_test_oac_custom_SOURCES Makefile.am
