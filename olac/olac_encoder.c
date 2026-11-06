@@ -495,7 +495,6 @@ int olac_encoder_init(OlacEncoder *st, int channels, int sampling_rate) {
     st->last_ctz = 0;
     OAC_CLEAR(st->tdac_mem, channels);
     OAC_CLEAR(st->pmem, channels);
-    OAC_CLEAR(st->last_last_sample, channels);
     OAC_CLEAR(st->mem_modulo, channels);
     return OAC_OK;
 }
@@ -528,12 +527,15 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
         if (ctz > st->last_ctz) st->pmem[c] = OLAC_SHR32(st->pmem[c], ctz - st->last_ctz);
         else if (ctz < st->last_ctz) st->pmem[c] = OLAC_SHL32(st->pmem[c], st->last_ctz - ctz);
         oaci_ec_enc_uint(&enc, st->mem_modulo[c], PREEMPH_MOD);
+        /* The de-emphasis memory the decoder will need at the start of the next
+           frame, i.e. the sample preceding the next frame's overlap region: in
+           this frame if it is longer than the overlap, otherwise the sample
+           preceding this frame, which is pmem at this frame's scale. */
         if (frame_size > OVERLAP_SIZE) {
             st->mem_modulo[c] = MOD(sig[frame_size-OVERLAP_SIZE-1],PREEMPH_MOD);
         } else {
-            st->mem_modulo[c] = MOD(st->last_last_sample[c],PREEMPH_MOD);
+            st->mem_modulo[c] = MOD(st->pmem[c],PREEMPH_MOD);
         }
-        st->last_last_sample[c] = sig[frame_size-1];
         olac_preemphasis(sig, frame_size, &st->pmem[c]);
         tdac(sig, frame_size, st->tdac_mem[c]);
         shift = downshift_signal(sig, lsbs, frame_size, SIGNAL_BITS);

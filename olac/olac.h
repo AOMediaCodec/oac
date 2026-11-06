@@ -91,7 +91,6 @@ typedef struct {
     int last_ctz;
     oac_uint32 rng;
     oac_int32 mem_modulo[MAX_CHANNELS];
-    oac_int32 last_last_sample[MAX_CHANNELS];
     oac_int32 pmem[MAX_CHANNELS];
     oac_int32 tdac_mem[MAX_CHANNELS][HALF_OVERLAP];
 } OlacEncoder;
