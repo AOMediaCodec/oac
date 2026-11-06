@@ -138,6 +138,7 @@ struct OacEncoder {
     int use_dtx;                          /* general DTX for both SILK and CELT */
     int fec_config;
     int lossy_fallback;
+    int dc_reject;
 #ifndef DISABLE_FLOAT_API
     TonalityAnalysisState analysis;
 #endif
@@ -374,6 +375,7 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
     st->user_bitrate_bps = OAC_AUTO;
     st->bitrate_bps = 3000 + Fs*channels;
     st->application = application;
+    st->dc_reject = 1;
     st->signal_type = OAC_AUTO;
     st->user_bandwidth = OAC_AUTO;
     st->max_bandwidth = OAC_BANDWIDTH_FULLBAND;
@@ -2161,7 +2163,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
             }
         }
 #endif
-    } else if (st->application == OAC_APPLICATION_LOSSLESS) {
+    } else if (st->application == OAC_APPLICATION_LOSSLESS || !st->dc_reject) {
         /* Any filtering would defeat the purpose. */
         OAC_COPY(&pcm_buf[total_buffer*st->channels], pcm, frame_size*st->channels);
     } else {
@@ -3285,6 +3287,26 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
             if (!value)
                 goto bad_arg;
             *value = st->lossy_fallback;
+        }
+        break;
+        case OAC_SET_DC_REJECT_REQUEST:
+        {
+            oac_int32 value = va_arg(ap, oac_int32);
+            if (value < 0 || value > 1) {
+                goto bad_arg;
+            }
+            /* Start from a clean filter when turning it back on. */
+            if (value && !st->dc_reject)
+                OAC_CLEAR(st->hp_mem, 2*st->channels);
+            st->dc_reject = value;
+        }
+        break;
+        case OAC_GET_DC_REJECT_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value)
+                goto bad_arg;
+            *value = st->dc_reject;
         }
         break;
         case OAC_SET_PHASE_INVERSION_DISABLED_REQUEST:

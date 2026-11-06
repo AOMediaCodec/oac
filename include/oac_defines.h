@@ -215,6 +215,8 @@ extern "C" {
 #define OAC_GET_FORMAT_REQUEST 4060
 #define OAC_SET_LOSSY_FALLBACK_REQUEST 4062
 #define OAC_GET_LOSSY_FALLBACK_REQUEST 4063
+#define OAC_SET_DC_REJECT_REQUEST 4064
+#define OAC_GET_DC_REJECT_REQUEST 4065
 
 /** Defines for the presence of extended APIs. */
 #define OAC_HAVE_OAC_PROJECTION_H
@@ -757,6 +759,25 @@ extern "C" {
  * @param[out] x <tt>oac_int32 *</tt>: Returns 0 or 1.
  * @hideinitializer */
 #define OAC_GET_LOSSY_FALLBACK(x) OAC_GET_LOSSY_FALLBACK_REQUEST, oac_check_int_ptr(x)
+
+/** Configures the 3 Hz DC-rejection high-pass filter applied to the input in
+ * the lossy applications other than #OAC_APPLICATION_VOIP (which has its own
+ * high-pass filter). Disabling it is the only way for a lossy application to
+ * produce bit-exact output when it codes a frame losslessly. Has no effect in
+ * #OAC_APPLICATION_LOSSLESS, where the input is never filtered.
+ * @see OAC_GET_DC_REJECT
+ * @param[in] x <tt>oac_int32</tt>: Allowed values:
+ * <dl>
+ * <dt>0</dt><dd>Do not filter the input.</dd>
+ * <dt>1</dt><dd>Reject DC (default).</dd>
+ * </dl>
+ * @hideinitializer */
+#define OAC_SET_DC_REJECT(x) OAC_SET_DC_REJECT_REQUEST, oac_check_int(x)
+/** Gets the encoder's DC rejection setting.
+ * @see OAC_SET_DC_REJECT
+ * @param[out] x <tt>oac_int32 *</tt>: Returns 0 or 1.
+ * @hideinitializer */
+#define OAC_GET_DC_REJECT(x) OAC_GET_DC_REJECT_REQUEST, oac_check_int_ptr(x)
 
 /** If non-zero, enables Deep Redundancy (DRED) and use the specified maximum number of 10-ms redundant frames
  * @hideinitializer */
