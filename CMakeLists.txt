@@ -723,6 +723,15 @@ if(BUILD_TESTING AND NOT BUILD_SHARED_LIBS)
            -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
            -P "${PROJECT_SOURCE_DIR}/cmake/RunTest.cmake")
 
+  add_executable(test_oac_lossless ${test_oac_lossless_sources})
+  target_include_directories(test_oac_lossless
+                             PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+  target_link_libraries(test_oac_lossless PRIVATE oac)
+  add_test(NAME test_oac_lossless COMMAND ${CMAKE_COMMAND}
+           -DTEST_EXECUTABLE=$<TARGET_FILE:test_oac_lossless>
+           -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
+           -P "${PROJECT_SOURCE_DIR}/cmake/RunTest.cmake")
+
   add_executable(test_oac_api ${test_oac_api_sources})
   target_include_directories(test_oac_api
                             PRIVATE ${CMAKE_CURRENT_BINARY_DIR} celt)
