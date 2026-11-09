@@ -156,13 +156,15 @@ void print_usage( char* argv[] ) {
         "<bits per second>  [options] <input> <output>\n", argv[0]);
     fprintf(stderr, "       %s -d <sampling rate (Hz)> <channels (1/2)> "
         "[options] <input> <output>\n\n", argv[0]);
-    fprintf(stderr, "application: voip | audio | restricted-lowdelay | restricted-silk | restricted-celt\n" );
+    fprintf(stderr, "application: voip | audio | restricted-lowdelay | restricted-silk | restricted-celt | lossless\n" );
     fprintf(stderr, "options:\n" );
     fprintf(stderr, "-e                   : only runs the encoder (output the bit-stream)\n" );
     fprintf(stderr, "-d                   : only runs the decoder (reads the bit-stream as input)\n" );
     fprintf(stderr, "-format <std|ambix>  : audio format (std=standard 1-2ch, ambix=ambisonics 1/4/9/16/25/36ch); default: std\n" );
     fprintf(stderr, "-cbr                 : enable constant bitrate; default: variable bitrate\n" );
     fprintf(stderr, "-cvbr                : enable constrained variable bitrate; default: unconstrained\n" );
+    fprintf(stderr,
+    "-lossy_fallback      : lossless only: code the frames that do not fit the payload size (or the bit-rate, with -cbr) with CELT\n" );
     fprintf(stderr,
     "-delayed-decision    : use look-ahead for speech/music detection (experts only); default: disabled\n" );
     fprintf(stderr,
@@ -450,12 +452,13 @@ int main(int argc, char *argv[]) {
     int use_dtx;
     int forcechannels;
     int cvbr = 0;
+    int lossy_fallback = 0;
     int packet_loss_perc;
 #ifdef ENABLE_LOSSGEN
     float lossgen_perc = -1.f;
     LossGenState lossgen;
 #endif
-    oac_int32 count = 0, count_act = 0;
+    oac_int32 count = 0, count_act = 0, count_lossless = 0;
     int k;
     oac_int32 skip = 0;
     int format = FORMAT_S16_LE;
@@ -539,6 +542,8 @@ int main(int argc, char *argv[]) {
             application = OAC_APPLICATION_RESTRICTED_SILK;
         else if (strcmp(argv[args], "restricted-celt") == 0)
             application = OAC_APPLICATION_RESTRICTED_CELT;
+        else if (strcmp(argv[args], "lossless") == 0)
+            application = OAC_APPLICATION_LOSSLESS;
         else if (strcmp(argv[args], "audio") != 0) {
             fprintf(stderr, "unknown application: %s\n", argv[args]);
             print_usage(argv);
@@ -686,6 +691,10 @@ int main(int argc, char *argv[]) {
             check_encoder_option(decode_only, "-cvbr");
             cvbr = 1;
             args++;
+        } else if (strcmp( argv[ args ], "-lossy_fallback" ) == 0) {
+            check_encoder_option(decode_only, "-lossy_fallback");
+            lossy_fallback = 1;
+            args++;
         } else if (strcmp( argv[ args ], "-delayed-decision" ) == 0) {
             check_encoder_option(decode_only, "-delayed-decision");
             delayed_decision = 1;
@@ -821,6 +830,17 @@ int main(int argc, char *argv[]) {
     if (sweep_max)
         sweep_min = bitrate_bps;
 
+    if (application == OAC_APPLICATION_LOSSLESS) {
+        if (sampling_rate != 48000 || oac_format != OAC_FORMAT_STANDARD) {
+            fprintf(stderr, "The lossless application needs 48000 Hz and the std format.\n");
+            goto failure;
+        }
+        if (frame_size > sampling_rate/50) {
+            fprintf(stderr, "The lossless application needs frames of at most 20 ms.\n");
+            goto failure;
+        }
+    }
+
     if (max_payload_bytes < 0) {
         if (decode_only)
             max_payload_bytes = MAX_PACKET;
@@ -869,6 +889,7 @@ int main(int argc, char *argv[]) {
         oac_encoder_ctl(enc, OAC_SET_BANDWIDTH(bandwidth));
         oac_encoder_ctl(enc, OAC_SET_VBR(use_vbr));
         oac_encoder_ctl(enc, OAC_SET_VBR_CONSTRAINT(cvbr));
+        oac_encoder_ctl(enc, OAC_SET_LOSSY_FALLBACK(lossy_fallback));
         oac_encoder_ctl(enc, OAC_SET_COMPLEXITY(complexity));
         oac_encoder_ctl(enc, OAC_SET_INBAND_FEC(use_inbandfec));
         oac_encoder_ctl(enc, OAC_SET_FORCE_CHANNELS(forcechannels));
@@ -930,6 +951,9 @@ int main(int argc, char *argv[]) {
     if (decode_only)
         fprintf(stderr, "Decoding with %ld Hz output (%d channels)\n",
             (long)sampling_rate, channels);
+    else if (application == OAC_APPLICATION_LOSSLESS && !lossy_fallback)
+        fprintf(stderr, "Encoding %ld Hz input losslessly with %d-sample frames.\n",
+            (long)sampling_rate, frame_size);
     else
         fprintf(stderr, "Encoding %ld Hz input at %.3f kb/s "
                        "in %s with %d-sample frames.\n",
@@ -1063,7 +1087,7 @@ int main(int argc, char *argv[]) {
             }
             len = oac_encode24(enc, in, frame_size, data, max_payload_bytes);
             if (len < 0) {
-                fprintf (stderr, "oac_encode() returned %d\n", len);
+                fprintf (stderr, "oac_encode() failed: %s\n", oac_strerror(len));
                 goto failure;
             }
             nb_encoded = oac_packet_get_nb_samples(data, len, sampling_rate);
@@ -1252,6 +1276,8 @@ int main(int argc, char *argv[]) {
             bits += len*8;
             bits_max = (len*8 > bits_max) ? len*8 : bits_max;
             bits2 += len*(double)len*64;
+            if (len > 1 && oac_packet_is_lossless(data, len) == 1)
+                count_lossless++;
             if (!decode_only) {
                 nrg = 0.0;
                 for (k = 0; k < frame_size*channels; k++) {
@@ -1285,6 +1311,9 @@ int main(int argc, char *argv[]) {
             var = 0;
         fprintf (stderr, "bitrate standard deviation:  %7.3f kb/s\n",
                         1e-3*sqrt(var)*sampling_rate/frame_size);
+        if (count_lossless > 0)
+            fprintf (stderr, "lossless packets:            %ld of %ld (%.1f%%)\n",
+                            (long)count_lossless, (long)count, 100.*count_lossless/count);
     } else {
         fprintf(stderr, "bitrate statistics are undefined\n");
     }
