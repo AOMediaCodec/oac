@@ -356,6 +356,7 @@ static int oaci_olac_decode_frame(OacDecoder *st, CELTDecoder *celt_dec, const u
         /* Corrupt packet: silence, and start afresh as after a reset. */
         olac_decoder_init(olac_dec, st->stream_channels, st->Fs);
         OAC_CLEAR(pcm, frame_size*st->channels);
+        st->rangeFinal = 0;
         RESTORE_STACK;
         return ret;
     }
@@ -717,6 +718,9 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
         /* Decode CELT (or OLAC in its place) */
         if (olac) {
             celt_ret = oaci_olac_decode_frame(st, celt_dec, data, len, pcm, celt_frame_size);
+            /* A rejected packet comes out as silence: nothing to cross-fade into. */
+            if (celt_ret < 0)
+                transition = 0;
         } else {
             celt_ret = oaci_celt_decode_with_ec_dred(celt_dec, decode_fec ? NULL : data,
                                          len, pcm, celt_frame_size, &dec, celt_accum

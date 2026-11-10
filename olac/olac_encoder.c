@@ -113,7 +113,7 @@ static void pred_filter(oac_int32 *out, const oac_int32 *in, int len, const oac_
         for (j=0;j<order;j++) {
             pred = OLAC_MAC16_16(pred, mem[j], aks16[offset + j]);
         }
-        out[i] = in[i] - OLAC_PSHR32(pred, OLAC_COEF_SHIFT-shift);
+        out[i] = OLAC_SUB32_ovflw(in[i], OLAC_PSHR32_ovflw(pred, OLAC_COEF_SHIFT-shift));
         for (j=order-2;j>=0;j--) {
             mem[j+1] = mem[j];
         }
@@ -339,6 +339,7 @@ static void find_residual_params(const oac_int32 *residual, int len, int *s_ptr,
     for (i=0; i<len-1; i++) {
         int min_L = 2000000000, local_s = 0;
         int min_R = 2000000000, local_t = 0;
+        int split_bits;
 
         /* Shift one element, and track the independent minimums */
         for (s=min_shift; s<=max_shift; s++) {
@@ -364,7 +365,7 @@ static void find_residual_params(const oac_int32 *residual, int len, int *s_ptr,
         }
 
         /* The penalty is now a constant 12 (or whatever your static overhead is) */
-        int split_bits = min_L + min_R + 12;
+        split_bits = min_L + min_R + 12;
 
         if (split_bits < min_bits && (i+1)%8==0) {
             min_bits = split_bits;
@@ -464,13 +465,21 @@ static void code_residual(ec_enc *enc, oac_int32 *residual, int len, oac_int32 *
     }
 }
 
-static int downshift_signal(oac_int32 *sig, oac_int32 *lsbs, int frame_size, int max_bits) {
+/* Reduces the signal to max_bits by moving the LSBs to lsbs[]. The first
+   HALF_OVERLAP values are at the previous frame's scale: when the predictor
+   crosses into this frame it multiplies its memory by 2^ctz_diff, which has
+   to fit the same budget. */
+static int downshift_signal(oac_int32 *sig, oac_int32 *lsbs, int frame_size, int max_bits, int ctz_diff) {
     int i, shift;
-    oac_int32 maxval=1;
-    for (i=0;i<frame_size;i++) {
+    oac_int32 maxval=1, maxmem=0;
+    for (i=0;i<HALF_OVERLAP;i++) {
+        if ((oac_int32)OLAC_ABS(sig[i]) > maxmem) maxmem = OLAC_ABS(sig[i]);
+    }
+    for (;i<frame_size;i++) {
         if ((oac_int32)OLAC_ABS(sig[i]) > maxval) maxval = OLAC_ABS(sig[i]);
     }
     shift = EC_ILOG(maxval) - max_bits;
+    if (maxmem > 0) shift = IMAX(shift, EC_ILOG(maxmem) + ctz_diff - max_bits);
     if (shift < 0) shift=0;
     for (i=0;i<frame_size;i++) {
         lsbs[i] = sig[i] & ((1 << shift) - 1);
@@ -489,7 +498,7 @@ static int code_lsbs(ec_enc *enc, oac_int32 *lsbs, int frame_size, int shift) {
     return 0;
 }
 
-int olac_encoder_init(OlacEncoder *st, int channels, int sampling_rate) {
+int olac_encoder_init(OlacEncoder *st, int channels, oac_int32 sampling_rate) {
     st->nb_channels = channels;
     st->sampling_rate = sampling_rate;
     st->last_ctz = 0;
@@ -538,7 +547,7 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
         }
         olac_preemphasis(sig, frame_size, &st->pmem[c]);
         tdac(sig, frame_size, st->tdac_mem[c]);
-        shift = downshift_signal(sig, lsbs, frame_size, SIGNAL_BITS);
+        shift = downshift_signal(sig, lsbs, frame_size, SIGNAL_BITS, IMAX(0, st->last_ctz - ctz));
         celt_assert(shift < 16);
         oaci_ec_enc_bits(&enc, shift, 4);
         predict(&enc, residual, sig, frame_size, st->last_ctz, ctz);

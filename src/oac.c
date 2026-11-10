@@ -646,22 +646,32 @@ int oac_packet_is_lossless(const unsigned char packet[], oac_int32 len) {
 }
 
 
-/* CELT <-> OLAC memory handoff. OLAC keeps 24-bit integer memories, scaled
-   down by the ctz of the frame that produced them; CELT keeps celt_sig. The
-   pre-emphasis memory holds the last sample times the 0.85 coefficient on the
-   CELT side and the plain last sample on the OLAC side, so the coefficient is
-   applied (in OLAC's integer domain, which is the same in every build) on the
-   way across. The TDAC memories have the same layout on both sides by
-   construction of the CELT MDCT. */
-#define OLAC_CLAMP24(x) IMAX(-8388608, IMIN(8388607, (x)))
+/* CELT <-> OLAC memory handoff. OLAC keeps integer memories in 24-bit units,
+   scaled down by the ctz of the frame that produced them; CELT keeps celt_sig.
+   The pre-emphasis memory holds the last sample times the 0.85 coefficient on
+   the CELT side and the plain last sample on the OLAC side, so the coefficient
+   is applied (in OLAC's integer domain, which is the same in every build) on
+   the way across. The TDAC memories have the same layout on both sides by
+   construction of the CELT MDCT. Being pre-emphasised and folded, they exceed
+   24 bits on loud high-frequency material (by up to 1.85*sqrt(2)), so the
+   bound is four times full scale: that is CELT's SIG_SAT in these units, and
+   OLAC's own range leaves room for it. */
+#define OLAC_MEM_MAX 33554431
+#define OLAC_CLAMP_MEM(x) IMAX(-OLAC_MEM_MAX, IMIN(OLAC_MEM_MAX, (x)))
+
+static oac_int32 oaci_sig_to_olac(celt_sig x) {
+    oac_res r = SIG2RES(x);
+    r = MAX32(-INT24TORES(OLAC_MEM_MAX), MIN32(INT24TORES(OLAC_MEM_MAX), r));
+    return RES2INT24(r);
+}
 
 void oaci_celt_to_olac_mem(const celt_sig *preemph, const celt_sig *tdac, int channels,
                            oac_int32 *olac_preemph, oac_int32 *olac_tdac) {
     int c, i;
     for (c = 0; c < channels; c++) {
-        olac_preemph[c] = OLAC_CLAMP24(OLAC_MUL16_32_P15(INV_PREEMPH_Q15, RES2INT24(SIG2RES(preemph[c]))));
+        olac_preemph[c] = OLAC_CLAMP_MEM(OLAC_MUL16_32_P15(INV_PREEMPH_Q15, oaci_sig_to_olac(preemph[c])));
         for (i = 0; i < HALF_OVERLAP; i++)
-            olac_tdac[c*HALF_OVERLAP + i] = OLAC_CLAMP24(RES2INT24(SIG2RES(tdac[c*HALF_OVERLAP + i])));
+            olac_tdac[c*HALF_OVERLAP + i] = oaci_sig_to_olac(tdac[c*HALF_OVERLAP + i]);
     }
 }
 
@@ -669,8 +679,11 @@ void oaci_olac_to_celt_mem(const oac_int32 *olac_preemph, const oac_int32 *olac_
                            celt_sig *preemph, celt_sig *tdac) {
     int c, i;
     for (c = 0; c < channels; c++) {
-        preemph[c] = RES2SIG(INT24TORES(OLAC_MUL16_32_P15(PREEMPH_Q15, OLAC_SHL32(olac_preemph[c], ctz))));
-        for (i = 0; i < HALF_OVERLAP; i++)
-            tdac[c*HALF_OVERLAP + i] = RES2SIG(INT24TORES(OLAC_SHL32(olac_tdac[c*HALF_OVERLAP + i], ctz)));
+        oac_int32 p = OLAC_CLAMP_MEM(OLAC_MUL16_32_P15(PREEMPH_Q15, OLAC_SHL32(olac_preemph[c], ctz)));
+        preemph[c] = RES2SIG(INT24TORES(p));
+        for (i = 0; i < HALF_OVERLAP; i++) {
+            oac_int32 t = OLAC_CLAMP_MEM(OLAC_SHL32(olac_tdac[c*HALF_OVERLAP + i], ctz));
+            tdac[c*HALF_OVERLAP + i] = RES2SIG(INT24TORES(t));
+        }
     }
 }

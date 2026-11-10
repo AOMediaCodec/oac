@@ -1752,8 +1752,11 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     /* CELT mode doesn't support narrowband/mediumband in OAC, use wideband instead */
     if (st->mode == MODE_CELT_ONLY && st->bandwidth < OAC_BANDWIDTH_WIDEBAND)
         st->bandwidth = OAC_BANDWIDTH_WIDEBAND;
+    /* Wideband is the narrowest bandwidth a CELT ToC can signal, so an LFE
+       stream has to be coded as such for the decoder to read the same number
+       of bands; its allocation leaves the upper bands empty anyway. */
     if (st->lfe)
-        st->bandwidth = OAC_BANDWIDTH_NARROWBAND;
+        st->bandwidth = OAC_BANDWIDTH_WIDEBAND;
 
     curr_bandwidth = st->bandwidth;
 
@@ -2477,7 +2480,9 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     }
     st->prev_HB_gain = HB_gain;
     if (st->mode != MODE_HYBRID || st->stream_channels == 1) {
-        if (equiv_rate > 32000)
+        /* Never narrow the stereo image of a lossless frame, whatever the
+           equivalent rate of a small buffer or of the fallback's bit-rate. */
+        if (st->application == OAC_APPLICATION_LOSSLESS || equiv_rate > 32000)
             st->silk_mode.stereoWidth_Q14 = 16384;
         else if (equiv_rate < 16000)
             st->silk_mode.stereoWidth_Q14 = 0;

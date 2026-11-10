@@ -255,7 +255,9 @@ static void test_strict_lossless(void) {
 
     /* A buffer too small for the frame fails without changing the state, so
        the frame can be retried with a larger one and give the same packet as
-       an encoder that never failed. */
+       an encoder that never failed. A buffer of a few dozen bytes is the case
+       that matters: its equivalent rate is below anything the stereo-width
+       reduction of the lossy modes would tolerate. */
     {
         OacEncoder *enc = oac_encoder_create(FS, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_LOSSLESS, &err);
         OacEncoder *ref = oac_encoder_create(FS, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_LOSSLESS, &err);
@@ -264,7 +266,8 @@ static void test_strict_lossless(void) {
         for (f = 0; f < 8; f++) {
             int len = oac_encode24(ref, in + f*960*2, 960, packet, MAX_PACKET);
             int len2, small;
-            oac_test_assert(len > 3);
+            oac_test_assert(len > 50);
+            oac_test_assert(oac_encode24(enc, in + f*960*2, 960, packet2, 50) == OAC_BUFFER_TOO_SMALL);
             for (small = 1; small < len; small += 1 + len/5)
                 oac_test_assert(oac_encode24(enc, in + f*960*2, 960, packet2, small) == OAC_BUFFER_TOO_SMALL);
             len2 = oac_encode24(enc, in + f*960*2, 960, packet2, len);
@@ -272,6 +275,29 @@ static void test_strict_lossless(void) {
         }
         oac_encoder_destroy(enc);
         oac_encoder_destroy(ref);
+    }
+
+    /* A stereo signal simple enough to fit a tiny buffer must come out with
+       its full width, and a loud frame at a coarse depth followed by a quiet
+       one at full depth (the predictor's memory is rescaled by 2^12 at the
+       boundary) must stay exact. */
+    {
+        OacEncoder *enc = oac_encoder_create(FS, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_LOSSLESS, &err);
+        OacDecoder *dec = oac_decoder_create(FS, 2, OAC_FORMAT_STANDARD, &err);
+        oac_test_assert(enc && dec);
+        for (i = 0; i < 4*960; i++) {
+            oac_int32 v = (i%960 == 60) ? (1<<22) : 0;
+            in[2*i] = v;
+            in[2*i + 1] = -v;
+        }
+        oac_test_assert(roundtrip24(enc, dec, in, out, 960, 4, 2, 65, lossless) == 5);
+        oac_test_assert(oac_encoder_ctl(enc, OAC_RESET_STATE) == OAC_OK);
+        oac_test_assert(oac_decoder_ctl(dec, OAC_RESET_STATE) == OAC_OK);
+        for (i = 0; i < 960*2; i++) in[i] = ((i&1) ? 200 : -200)*(1<<12);
+        for (i = 960*2; i < 4*960*2; i++) in[i] = (oac_int32)(fast_rand()%201) - 100;
+        oac_test_assert(roundtrip24(enc, dec, in, out, 960, 4, 2, MAX_PACKET, lossless) == 5);
+        oac_encoder_destroy(enc);
+        oac_decoder_destroy(dec);
     }
     free(in);
     free(out);
@@ -355,6 +381,36 @@ static void test_lossy_fallback(void) {
         oac_test_assert(len > 0 && oac_packet_is_lossless(packet, len) == 1);
         len = oac_encode24(enc, in + 4*frame_size*channels, frame_size, packet, 1000*channels);
         oac_test_assert(len == OAC_BUFFER_TOO_SMALL);
+
+        /* Switching from CELT to OLAC on loud high-frequency material: the
+           overlap handed over is pre-emphasised and folded, so it exceeds
+           24 bits and must not be clipped on the way. The first OLAC packet
+           then reproduces the end of the CELT frame about as well as CELT did
+           (within 1/16 of full scale here), instead of a click twice full
+           scale. */
+        if (!fuzzing) {
+            oac_int32 err_max = 0;
+            oac_test_assert(oac_encoder_ctl(enc, OAC_RESET_STATE) == OAC_OK);
+            oac_test_assert(oac_decoder_ctl(dec, OAC_RESET_STATE) == OAC_OK);
+            oac_test_assert(oac_encoder_ctl(enc, OAC_SET_LOSSY_FALLBACK(1)) == OAC_OK);
+            oac_test_assert(oac_encoder_ctl(enc, OAC_SET_BITRATE(256000*channels)) == OAC_OK);
+            for (i = 0; i < frame_size*channels; i++) {
+                int n = i/channels;
+                in[i] = (oac_int32)floor(.5 + 8000000*cos(2*M_PI*16000*n/(double)FS)) + ((int)(fast_rand()&63) - 32);
+                in[frame_size*channels + i] = 0;
+            }
+            len = oac_encode24(enc, in, frame_size, packet, 600*channels);
+            oac_test_assert(len > 0 && oac_packet_is_lossless(packet, len) == 0);
+            oac_test_assert(oac_decode24(dec, packet, len, out, frame_size, 0) == frame_size);
+            len = oac_encode24(enc, in + frame_size*channels, frame_size, packet, MAX_PACKET);
+            oac_test_assert(len > 0 && oac_packet_is_lossless(packet, len) == 1);
+            oac_test_assert(oac_decode24(dec, packet, len, out + frame_size*channels, frame_size, 0) == frame_size);
+            for (i = 0; i < LOOKAHEAD*channels; i++) {
+                oac_int32 e = abs(out[frame_size*channels + i] - in[(frame_size - LOOKAHEAD)*channels + i]);
+                if (e > err_max) err_max = e;
+            }
+            oac_test_assert(err_max < (1<<19));
+        }
         oac_encoder_destroy(enc);
         oac_decoder_destroy(dec);
     }

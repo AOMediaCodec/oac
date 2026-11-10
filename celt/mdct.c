@@ -173,6 +173,8 @@ void oaci_clt_mdct_forward_c(const mdct_lookup *l, kiss_fft_scalar *in, kiss_fft
     N4 = N>>2;
     K = overlap>>1;
     K4 = (overlap + 3)>>2;
+    /* The shuffle below assumes this of the folds (modes.c guarantees it). */
+    celt_assert((overlap & 3) == 0 || overlap == N2);
 
     ALLOC(f, N2, kiss_fft_scalar);
     ALLOC(f2, N4, kiss_fft_cpx);

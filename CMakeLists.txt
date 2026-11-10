@@ -727,6 +727,10 @@ if(BUILD_TESTING AND NOT BUILD_SHARED_LIBS)
   target_include_directories(test_oac_lossless
                              PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
   target_link_libraries(test_oac_lossless PRIVATE oac)
+  target_compile_definitions(test_oac_lossless PRIVATE OAC_BUILD)
+  if(NOT OAC_ENABLE_FLOAT_API)
+    target_compile_definitions(test_oac_lossless PRIVATE DISABLE_FLOAT_API)
+  endif()
   add_test(NAME test_oac_lossless COMMAND ${CMAKE_COMMAND}
            -DTEST_EXECUTABLE=$<TARGET_FILE:test_oac_lossless>
            -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}

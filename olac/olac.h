@@ -54,12 +54,12 @@
 #define SIGNAL_BITS 12
 #define COEF_BITS 13
 
-extern oac_int32 lift_p[];
-extern oac_int32 lift_q[];
+extern const oac_int32 lift_p[];
+extern const oac_int32 lift_q[];
 
-extern oac_int8 rc_center[PRED_ORDER];
+extern const oac_int8 rc_center[PRED_ORDER];
 
-extern oac_int8 rc_scale[PRED_ORDER];
+extern const oac_int8 rc_scale[PRED_ORDER];
 
 #define MUL(a,b) ((int)floor(.5f+(a)*(b)))
 
@@ -72,8 +72,8 @@ extern oac_int8 rc_scale[PRED_ORDER];
 #define OLAC_NEG32_ovflw(a) ((oac_int32)(0U-(oac_uint32)(a)))
 #define OLAC_SHL32(a, b) ((oac_int32)((oac_uint32)(a)<<(b)))
 #define OLAC_SHR32(a, b) ((oac_int32)(a)>>(b))
-#define OLAC_PSHR32(a, b) (((oac_int32)(a)+(1L<<(b)>>1))>>(b))
-#define OLAC_PSHR32_ovflw(a, b) OLAC_SHR32(OLAC_ADD32_ovflw(a, 1L<<(b)>>1), b)
+#define OLAC_PSHR32(a, b) (((oac_int32)(a)+(oac_int32)(((oac_uint32)1<<(b))>>1))>>(b))
+#define OLAC_PSHR32_ovflw(a, b) OLAC_SHR32(OLAC_ADD32_ovflw(a, ((oac_uint32)1<<(b))>>1), b)
 #define OLAC_SHR64(a, b) ((oac_int64)(a)>>(b))
 #define OLAC_PSHR64(a, b) (((oac_int64)(a)+(1LL<<(b)>>1))>>(b))
 #define OLAC_MUL_P31(a, b) (((oac_int64)(a)*(oac_int64)(b)+(1LL<<30)) >> 31)

@@ -384,6 +384,7 @@ EXTRA_DIST = oac.pc.in \
              celt/tests/meson.build \
              dnn/meson.build \
              dnn/README.md \
+             olac/README.md \
              silk/meson.build \
              silk/tests/meson.build \
              src/meson.build \

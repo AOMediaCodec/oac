@@ -1,3 +1,36 @@
+/*  Copyright (c) 2026, Alliance for Open Media
+    All rights reserved. */
+/*
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted (subject to the limitations in the
+    disclaimer below) provided that the following conditions are met:
+
+    - Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+    - Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+    - Neither the name of the Alliance for Open Media nor the names of
+    its contributors may be used to endorse or promote products derived
+    from this software without specific prior written permission.
+
+    NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE
+    GRANTED BY THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT
+    HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+    WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+    OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+    DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+    BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+    OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+    OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+    BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+    LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+    NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 /***********************************************************************
 Copyright (c) 2006-2011, Skype Limited. All rights reserved.
 Redistribution and use in source and binary forms, with or without
@@ -31,7 +64,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <math.h>
 #include <string.h>
-#include <assert.h>
 #include "oac_types.h"
 #include "olac.h"
 
@@ -59,7 +91,7 @@ static double olac_energy(
         result += data[ i ] * (double)data[ i ];
     }
 
-    assert( result >= 0.0 );
+    celt_sig_assert( result >= 0.0 );
     return result;
 }
 
@@ -112,7 +144,7 @@ float olac_burg_analysis(              /* O    returns residual energy          
     if (optimal_order) *optimal_order = 0;
 
 
-    assert( subfr_length * nb_subfr <= FRAME_SIZE );
+    celt_assert( subfr_length * nb_subfr <= FRAME_SIZE );
 
     /* Compute autocorrelations, added over subframes */
     C0 = olac_energy( x, nb_subfr * subfr_length );
@@ -170,12 +202,12 @@ float olac_burg_analysis(              /* O    returns residual energy          
             nrg_b += CAb[ k + 1 ] * Atmp;
             nrg_f += CAf[ k + 1 ] * Atmp;
         }
-        assert( nrg_f > 0.0 );
-        assert( nrg_b > 0.0 );
+        celt_sig_assert( nrg_f > 0.0 );
+        celt_sig_assert( nrg_b > 0.0 );
 
         /* Calculate the next order reflection (parcor) coefficient */
         rc = -2.0 * num / ( nrg_f + nrg_b );
-        assert( rc > -1.0 && rc < 1.0 );
+        celt_sig_assert( rc > -1.0 && rc < 1.0 );
 
         /* Update inverse prediction gain */
         tmp1 = invGain * ( 1.0 - rc * rc );

@@ -49,8 +49,6 @@
 
 #define MAX_PAYLOAD_BYTES 65536
 #define MAX_FRAME_SIZE 960
-#define MAX_CHANNELS 2
-#define OVERLAP_SIZE 120
 #define SAMPLING_RATE 48000
 
 static void print_usage(const char *prog) {
@@ -159,7 +157,7 @@ static void pcm_to_bytes(const oac_int32 *pcm, unsigned char *fbytes, int num_sa
         for (i = 0; i < num_samples * channels; i++) {
             oac_int32 s = pcm[i];
             if (s > 0x007fff00) s = 0x007fff00;
-            if (s < -0x007fff00) s = -0x007fff00;
+            if (s < -0x00800000) s = -0x00800000;
             s = (s + 128) >> 8;
             if (s > 32767) s = 32767;
             if (s < -32768) s = -32768;

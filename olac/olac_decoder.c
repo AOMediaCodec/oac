@@ -115,7 +115,7 @@ static void syn_filter(oac_int32 *out, const oac_int32 *in, int len, const oac_i
     }
 }
 
-int rc_unmap(int y, int p, int N) {
+static int rc_unmap(int y, int p, int N) {
     int m = IMIN(p, N - p);
 
     if (y <= 2 * m) {
@@ -224,7 +224,7 @@ static int decode_lsbs(ec_dec *dec, oac_int32 *sig, int frame_size, int shift) {
     return 0;
 }
 
-int olac_decoder_init(OlacDecoder *st, int channels, int sampling_rate) {
+int olac_decoder_init(OlacDecoder *st, int channels, oac_int32 sampling_rate) {
     st->last_ctz = 0;
     st->nb_channels = channels;
     st->sampling_rate = sampling_rate;
