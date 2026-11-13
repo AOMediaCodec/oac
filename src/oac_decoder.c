@@ -179,7 +179,7 @@ int oac_decoder_get_size(int channels, int format) {
     } else {
         silkDecSizeBytes = 0;
     }
-    celtDecSizeBytes = oaci_celt_decoder_get_size(channels);
+    celtDecSizeBytes = oaci_align(oaci_celt_decoder_get_size(channels));
     olacDecSizeBytes = oaci_align(sizeof(OlacDecoder));
     return oaci_align(sizeof(OacDecoder)) + silkDecSizeBytes + celtDecSizeBytes + olacDecSizeBytes;
 }
@@ -219,7 +219,7 @@ int oac_decoder_init(OacDecoder *st, oac_int32 Fs, int channels, int format) {
         st->celt_dec_offset = oaci_align(sizeof(OacDecoder));
         silk_dec = NULL;
     }
-    celtDecSizeBytes = oaci_celt_decoder_get_size(channels);
+    celtDecSizeBytes = oaci_align(oaci_celt_decoder_get_size(channels));
     st->olac_dec_offset = st->celt_dec_offset + celtDecSizeBytes;
     celt_dec = (CELTDecoder*)((char*)st + st->celt_dec_offset);
     st->stream_channels = st->channels = channels;
@@ -504,17 +504,23 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
         frame_size = audiosize;
     }
 
-    if (st->prev_olac && !olac && st->Fs <= 48000) {
-        /* Resume CELT (or its PLC) from where OLAC left off (a 96 kHz decoder
-           cannot yet, see oaci_olac_decode_frame()). */
-        OlacDecoder *olac_dec = (OlacDecoder*)((char*)st + st->olac_dec_offset);
-        celt_sig preemph[MAX_CHANNELS];
-        celt_sig tdac[MAX_CHANNELS*HALF_OVERLAP];
-        oaci_olac_set_channels(olac_dec, st->channels);
-        oaci_olac_to_celt_mem(olac_dec->dmem, &olac_dec->untdac_mem[0][0], st->channels, olac_dec->last_ctz,
-                              preemph, tdac);
-        MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_SET_PREEMPHASIS(preemph)));
-        MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_SET_TDAC_MEM(tdac)));
+    if (st->prev_olac && !olac) {
+        /* Going from OLAC to CELT is a CELT reset, here and in the encoder:
+           nothing CELT remembers from before the OLAC frames (band energies,
+           post-filter history) is used again. */
+        MUST_SUCCEED(celt_decoder_ctl(celt_dec, OAC_RESET_STATE));
+        if (st->Fs <= 48000) {
+            /* Resume CELT (or its PLC) from where OLAC left off (a 96 kHz decoder
+               cannot yet, see oaci_olac_decode_frame()). */
+            OlacDecoder *olac_dec = (OlacDecoder*)((char*)st + st->olac_dec_offset);
+            celt_sig preemph[MAX_CHANNELS];
+            celt_sig tdac[MAX_CHANNELS*HALF_OVERLAP];
+            oaci_olac_set_channels(olac_dec, st->channels);
+            oaci_olac_to_celt_mem(olac_dec->dmem, &olac_dec->untdac_mem[0][0], st->channels, olac_dec->last_ctz,
+                                  preemph, tdac);
+            MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_SET_PREEMPHASIS(preemph)));
+            MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_SET_TDAC_MEM(tdac)));
+        }
     }
 
     /* SILK processing */

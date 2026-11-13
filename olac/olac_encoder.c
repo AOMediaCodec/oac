@@ -549,6 +549,13 @@ oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, uns
         tdac(sig, frame_size, st->tdac_mem[c]);
         shift = downshift_signal(sig, lsbs, frame_size, SIGNAL_BITS, IMAX(0, st->last_ctz - ctz));
         celt_assert(shift < 16);
+        /* The raw LSB planes of this channel take frame_size*shift bits by
+           themselves. This encoder never drops any, so when they no longer fit
+           neither does the frame, and the analysis below would be wasted. */
+        if (oaci_ec_tell(&enc) + 4 + frame_size*shift > 8*nbCompressedBytes) {
+            *st = bak;
+            return OAC_BUFFER_TOO_SMALL;
+        }
         oaci_ec_enc_bits(&enc, shift, 4);
         predict(&enc, residual, sig, frame_size, st->last_ctz, ctz);
         code_residual(&enc, residual, frame_size, (c==0) ? NULL : ref);

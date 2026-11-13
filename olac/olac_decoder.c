@@ -253,6 +253,11 @@ oac_int32 olac_decode(OlacDecoder *st, const unsigned char *data, int len, oac_i
         order = unquantize_coefs(&dec, rc);
         if (order < 0) return OAC_INVALID_PACKET;
         if (decode_residual(&dec, residual, frame_size, (c==0) ? NULL : ref)) return OAC_INVALID_PACKET;
+        /* Everything up to here has to be in the packet (oaci_ec_tell() can
+           be one bit above what a packet that just fits really holds). Only
+           the raw LSB planes that follow may be cut short, which is how LSBs
+           get chopped off a frame: the decoder then reads zeros past the end. */
+        if (oaci_ec_tell(&dec) > 8*len + 1) return OAC_INVALID_PACKET;
         syn_filter(sig, residual, frame_size, rc, order, st->last_ctz, ctz);
         decode_lsbs(&dec, sig, frame_size, shift);
         untdac(sig, frame_size, st->untdac_mem[c]);

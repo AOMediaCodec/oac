@@ -449,11 +449,11 @@ static void test_opportunistic(void) {
         OacDecoder *dec = oac_decoder_create(FS, 1, OAC_FORMAT_STANDARD, &err);
         int len, len_olac;
         oac_test_assert(enc && dec);
-        /* Silence is cheaper than any lossy target. */
+        /* Digital silence is left to CELT, which codes it in fewer bytes. */
         oac_test_assert(oac_encoder_ctl(enc, OAC_SET_BITRATE(64000)) == OAC_OK);
         for (f = 0; f < 3; f++) {
             len = oac_encode(enc, silence, frame_size, packet, MAX_PACKET);
-            oac_test_assert(len > 0 && len < 16 && oac_packet_is_lossless(packet, len) == 1);
+            oac_test_assert(len > 0 && len < 16 && oac_packet_is_lossless(packet, len) == 0);
             oac_test_assert(oac_decode(dec, packet, len, out, frame_size, 0) == frame_size);
         }
         /* The noise is not at 64 kb/s (160 bytes), however large the buffer... */
@@ -479,7 +479,7 @@ static void test_opportunistic(void) {
         oac_test_assert(oac_decode(dec, packet, len, out, frame_size, 0) == frame_size);
 
         /* After CELT codes the pitchy signal (with its prefilter), the first
-           silent frame has to be CELT too; the next one can be lossless. */
+           quiet frame has to be CELT too; the next one can be lossless. */
         oac_test_assert(oac_encoder_ctl(enc, OAC_SET_BITRATE(64000)) == OAC_OK);
         for (f = 0; f < 4; f++) {
             len = oac_encode(enc, pitchy, frame_size, packet, MAX_PACKET);
@@ -487,17 +487,20 @@ static void test_opportunistic(void) {
             oac_test_assert(oac_decode(dec, packet, len, out, frame_size, 0) == frame_size);
         }
         oac_test_assert(oac_encoder_ctl(enc, OAC_SET_BITRATE(OAC_BITRATE_MAX)) == OAC_OK);
-        len = oac_encode(enc, silence, frame_size, packet, MAX_PACKET);
+        NEW_NOISE();
+        len = oac_encode(enc, noise, frame_size, packet, MAX_PACKET);
         oac_test_assert(len > 0 && (fuzzing || oac_packet_is_lossless(packet, len) == 0));
         oac_test_assert(oac_decode(dec, packet, len, out, frame_size, 0) == frame_size);
-        len = oac_encode(enc, silence, frame_size, packet, MAX_PACKET);
+        NEW_NOISE();
+        len = oac_encode(enc, noise, frame_size, packet, MAX_PACKET);
         oac_test_assert(len > 0 && oac_packet_is_lossless(packet, len) == 1);
         oac_test_assert(oac_decode(dec, packet, len, out, frame_size, 0) == frame_size);
-        /* Once the high-pass filter's response to the pitchy signal has died
-           out, the output is silent as well. */
+        /* Digital silence goes back to CELT, and once the high-pass filter's
+           response to what came before has died out, the output is silent as
+           well. */
         for (f = 0; f < 50; f++) {
             len = oac_encode(enc, silence, frame_size, packet, MAX_PACKET);
-            oac_test_assert(len > 0 && oac_packet_is_lossless(packet, len) == 1);
+            oac_test_assert(len > 0 && oac_packet_is_lossless(packet, len) == 0);
             oac_test_assert(oac_decode(dec, packet, len, out, frame_size, 0) == frame_size);
         }
         for (i = 0; i < frame_size; i++)
@@ -528,6 +531,101 @@ static void test_opportunistic(void) {
     free(silence);
     free(out);
     free(packet);
+}
+
+/* Lossless with fallback: a silent frame that CELT has to code right after a
+   loud lossless frame still carries the last 2.5 ms of that frame, so CELT
+   must not take it for digital silence. */
+static void test_fallback_into_silence(void) {
+    OacEncoder *enc;
+    OacDecoder *dec;
+    unsigned char *packet = malloc(MAX_PACKET);
+    oac_int32 *in = calloc(4*MAX_FRAME, sizeof(*in));
+    oac_int32 *out = calloc(4*MAX_FRAME, sizeof(*out));
+    double sig = 0, noise = 0;
+    int err, f, i;
+    oac_test_assert(packet != NULL && in != NULL && out != NULL);
+
+    fprintf(stdout, "  Lossy fallback into silence\n");
+    enc = oac_encoder_create(FS, 1, OAC_FORMAT_STANDARD, OAC_APPLICATION_LOSSLESS, &err);
+    oac_test_assert(err == OAC_OK && enc != NULL);
+    dec = oac_decoder_create(FS, 1, OAC_FORMAT_STANDARD, &err);
+    oac_test_assert(err == OAC_OK && dec != NULL);
+    oac_test_assert(oac_encoder_ctl(enc, OAC_SET_LOSSY_FALLBACK(1)) == OAC_OK);
+    oac_test_assert(oac_encoder_ctl(enc, OAC_SET_BITRATE(96000)) == OAC_OK);
+    /* Frame 1 is loud, the others are digital silence. */
+    for (i = MAX_FRAME; i < 2*MAX_FRAME; i++) {
+        in[i] = (oac_int32)floor(.5 + 256*(9000*sin(2*M_PI*330.*i/FS) + 9000*sin(2*M_PI*1234.*i/FS)))
+              + (rand_int24()>>4);
+    }
+    for (f = 0; f < 4; f++) {
+        /* The buffer of frame 2 is too small for OLAC to code the end of
+           frame 1, so CELT does. */
+        int len = oac_encode24(enc, in + f*MAX_FRAME, MAX_FRAME, packet, f == 2 ? 240 : MAX_PACKET);
+        oac_test_assert(len > 0);
+        oac_test_assert(oac_packet_is_lossless(packet, len) == (f != 2));
+        oac_test_assert(oac_decode24(dec, packet, len, out + f*MAX_FRAME, MAX_FRAME, 0) == MAX_FRAME);
+    }
+    for (i = 2*MAX_FRAME - LOOKAHEAD; i < 2*MAX_FRAME; i++) {
+        double d = (double)out[i + LOOKAHEAD] - in[i];
+        sig += (double)in[i]*in[i];
+        noise += d*d;
+    }
+    /* CELT's own error there is around -28 dB; a dropped hand-over is 0 dB. */
+    if (!fuzzing)
+        oac_test_assert(noise < .01*sig);
+    oac_encoder_destroy(enc);
+    oac_decoder_destroy(dec);
+    free(packet);
+    free(in);
+    free(out);
+}
+
+/* A lossless packet that is too short to hold its residual is rejected instead
+   of being decoded as noise. One that only lacks raw LSBs (the last bits
+   written, which end up right after the first few bytes of the payload) still
+   decodes, to within those LSBs. */
+static void test_truncated_lossless_packet(void) {
+    OacEncoder *enc;
+    OacDecoder *dec, *dec_cut;
+    unsigned char *packet = malloc(MAX_PACKET);
+    oac_int32 *in = malloc(sizeof(*in)*MAX_FRAME);
+    oac_int32 *out = malloc(sizeof(*out)*MAX_FRAME);
+    oac_int32 *out_cut = malloc(sizeof(*out_cut)*MAX_FRAME);
+    int err, f, i;
+    oac_test_assert(packet != NULL && in != NULL && out != NULL && out_cut != NULL);
+
+    fprintf(stdout, "  Truncated lossless packets\n");
+    enc = oac_encoder_create(FS, 1, OAC_FORMAT_STANDARD, OAC_APPLICATION_LOSSLESS, &err);
+    oac_test_assert(err == OAC_OK && enc != NULL);
+    dec = oac_decoder_create(FS, 1, OAC_FORMAT_STANDARD, &err);
+    oac_test_assert(err == OAC_OK && dec != NULL);
+    dec_cut = oac_decoder_create(FS, 1, OAC_FORMAT_STANDARD, &err);
+    oac_test_assert(err == OAC_OK && dec_cut != NULL);
+    for (f = 0; f < 8; f++) {
+        int len;
+        for (i = 0; i < MAX_FRAME; i++)
+            in[i] = rand_int24();
+        len = oac_encode24(enc, in, MAX_FRAME, packet, MAX_PACKET);
+        oac_test_assert(len > 2000 && oac_packet_is_lossless(packet, len) == 1);
+        oac_test_assert(oac_decode24(dec, packet, len, out, MAX_FRAME, 0) == MAX_FRAME);
+        /* Full-scale noise has a dozen planes of raw LSBs, of 120 bytes
+           each: without 100 of those bytes, only the last plane suffers. */
+        memmove(packet + 9, packet + 109, len - 109);
+        oac_test_assert(oac_decode24(dec_cut, packet, len - 100, out_cut, MAX_FRAME, 0) == MAX_FRAME);
+        for (i = 0; i < MAX_FRAME; i++)
+            oac_test_assert(abs(out_cut[i] - out[i]) < 256);
+    }
+    /* The first bytes of that last packet cannot hold a residual of 11 bits
+       or more per sample. */
+    oac_test_assert(oac_decode24(dec_cut, packet, 8, out_cut, MAX_FRAME, 0) == OAC_INVALID_PACKET);
+    oac_encoder_destroy(enc);
+    oac_decoder_destroy(dec);
+    oac_decoder_destroy(dec_cut);
+    free(packet);
+    free(in);
+    free(out);
+    free(out_cut);
 }
 
 /* Decoder: OLAC frames decoded at a lower rate or with a different channel
@@ -838,8 +936,10 @@ int main(int argc, char **argv) {
 
     test_strict_lossless();
     test_lossy_fallback();
+    test_fallback_into_silence();
     test_opportunistic();
     test_decoder();
+    test_truncated_lossless_packet();
     test_channels();
     test_rates_and_multiframe();
     test_application();

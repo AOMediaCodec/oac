@@ -122,7 +122,8 @@ static oac_int32 olac_sqrt(oac_int32 x)
       return 32767;
    k = ((EC_ILOG(x)-1)>>1)-7;
    x = OLAC_PSHR32(x, 2*k);
-   n = x-32768;
+   /* The rounding above can bring x to 65536, which n cannot hold. */
+   n = IMIN(x-32768, 32767);
    rt = C[0] + OLAC_MUL16_16_Q15(n, C[1] + OLAC_MUL16_16_Q15(n, C[2] +
               OLAC_MUL16_16_Q15(n, C[3] + OLAC_MUL16_16_Q15(n, C[4] + OLAC_MUL16_16_Q15(n, (C[5]))))));
    rt = OLAC_PSHR32(rt,7-k);

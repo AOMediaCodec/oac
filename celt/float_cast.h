@@ -192,6 +192,16 @@ static OAC_INLINE oac_int32 FLOAT2INT24(float x) {
     x = MIN32(x, 16777216);
     return oaci_float2int(x);
 }
+
+/* Same scale as FLOAT2INT24(), over all 32 bits: a lossless packet can decode
+   to anything up to +/-256, and what does not fit saturates (2147483520 is
+   the largest float below 2^31). */
+static OAC_INLINE oac_int32 FLOAT2INT32(float x) {
+    x = x*(CELT_SIG_SCALE*256.f);
+    x = MAX32(x, -2147483648.f);
+    x = MIN32(x, 2147483520.f);
+    return oaci_float2int(x);
+}
 # ifdef FIXED_POINT
 static OAC_INLINE oac_int32 FLOAT2SIG(float x) {
     x = x*((oac_int32)32768<<SIG_SHIFT);

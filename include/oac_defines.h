@@ -261,9 +261,11 @@ extern "C" {
 /** Experts only: forces CELT encoding; don't allocate SILK state at all. Disables OAC_SET_APPLICATION. */
 #define OAC_APPLICATION_RESTRICTED_CELT     2053
 /** Lossless coding (48 kHz only, frames of at most 20 ms). The output is
- * bit-exact up to the input's precision (the integer APIs, or
- * OAC_SET_LSB_DEPTH for the float API) and 2.5 ms of look-ahead, at
- * whatever bit-rate that takes: OAC_SET_BITRATE is ignored and
+ * bit-exact up to the input's precision and 2.5 ms of look-ahead. That
+ * precision is the one of the API (16 bits for oac_encode(), 24 bits for
+ * oac_encode24() and oac_encode_float()), or OAC_SET_LSB_DEPTH when that is
+ * lower, for the integer APIs too. Input beyond +/-2.0 (25 bits) is clipped.
+ * This comes at whatever bit-rate it takes: OAC_SET_BITRATE is ignored and
  * oac_encode() returns OAC_BUFFER_TOO_SMALL (leaving the encoder state
  * untouched) when the packet does not fit the output buffer. See
  * OAC_SET_LOSSY_FALLBACK for a rate-controlled variant. */

@@ -139,6 +139,12 @@ struct OacCustomEncoder {
     int prefilter_period;
     oac_val16 prefilter_gain;
     int prefilter_tapset;
+    /* The overlap of the last frame holds prefiltered signal: its gain was not
+       zero, or it was no longer than the cross-fade from a gain that was. */
+    int prefilter_in_overlap;
+    /* Set by CELT_SET_TDAC_MEM until a frame has been coded: the band energies
+       of the previous frame are not known. */
+    int first_after_import;
 #ifdef RESYNTH
     int prefilter_period_old;
     oac_val16 prefilter_gain_old;
@@ -2135,7 +2141,8 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
 
     /* Last chance to catch any transient we might have missed in the
        time-domain analysis */
-    if (LM > 0 && oaci_ec_tell(enc) + 3 <= total_bits && !isTransient && st->complexity >= 5 && !st->lfe && !hybrid) {
+    if (LM > 0 && oaci_ec_tell(enc) + 3 <= total_bits && !isTransient && st->complexity >= 5 && !st->lfe && !hybrid
+        && !st->first_after_import) {
         if (oaci_patch_transient_decision(bandLogE, oldBandE, nbEBands, start, end, C)) {
             isTransient = 1;
             shortBlocks = M;
@@ -2573,9 +2580,13 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     }
 #endif
 
+    /* For a frame no longer than the cross-fade, what is left of the previous
+       gain reaches the overlap handed to the next frame. */
+    st->prefilter_in_overlap = gain1 != 0 || (N == mode->shortMdctSize && st->prefilter_gain != 0);
     st->prefilter_period = pitch_index;
     st->prefilter_gain = gain1;
     st->prefilter_tapset = prefilter_tapset;
+    st->first_after_import = 0;
 #ifdef RESYNTH
     if (LM != 0) {
         st->prefilter_period_old = st->prefilter_period;
@@ -2866,6 +2877,30 @@ int oac_custom_encoder_ctl(CELTEncoder * OAC_RESTRICT st, int request, ...) {
             st->prefilter_period = 0;
             st->prefilter_gain = 0;
             st->prefilter_tapset = 0;
+            st->prefilter_in_overlap = 0;
+            /* The imported overlap is part of the next frame, which is thus
+               not silent unless the overlap is as well. */
+            st->overlap_max = 0;
+            for (c = 0; c < st->channels * half_overlap; c++)
+                st->overlap_max = MAX32(st->overlap_max, ABS32(SIG2RES(value[c])));
+            st->first_after_import = 1;
+        }
+        break;
+        case CELT_SET_LOOKBACK_REQUEST:
+        {
+            const oac_res *value = va_arg(ap, const oac_res*);
+            int c;
+            int overlap = st->mode->overlap;
+            int max_period = QEXT_SCALE2(COMBFILTER_MAXPERIOD, st->qext_scale);
+            celt_sig *prefilter_mem = st->in_mem + st->channels * (overlap / 2);
+            if (!value) goto bad_arg;
+            celt_assert(st->upsample == 1);
+            for (c = 0; c < st->channels; c++) {
+                /* The first of the overlap+1 samples only primes the pre-emphasis. */
+                celt_sig mem = MULT16_32_Q15(st->mode->preemph[0], RES2SIG(value[c]));
+                oaci_celt_preemphasis(value + st->channels + c, prefilter_mem + (c + 1) * max_period - overlap,
+                                      overlap, st->channels, 1, st->mode->preemph, &mem, st->clip);
+            }
         }
         break;
         case CELT_GET_TDAC_MEM_REQUEST:
@@ -2883,7 +2918,7 @@ int oac_custom_encoder_ctl(CELTEncoder * OAC_RESTRICT st, int request, ...) {
         {
             oac_int32 *value = va_arg(ap, oac_int32*);
             if (!value) goto bad_arg;
-            *value = st->prefilter_gain != 0;
+            *value = st->prefilter_in_overlap;
         }
         break;
         case OAC_RESET_STATE:

@@ -660,7 +660,13 @@ int oac_packet_is_lossless(const unsigned char packet[], oac_int32 len) {
 #define OLAC_CLAMP_MEM(x) IMAX(-OLAC_MEM_MAX, IMIN(OLAC_MEM_MAX, (x)))
 
 static oac_int32 oaci_sig_to_olac(celt_sig x) {
-    oac_res r = SIG2RES(x);
+    oac_res r;
+#ifdef FIXED_POINT
+    /* SIG2RES() rounds with an add, which must not overflow on whatever a
+       corrupt packet left in CELT's memories. */
+    x = MAX32(-SIG_SAT, MIN32(SIG_SAT, x));
+#endif
+    r = SIG2RES(x);
     r = MAX32(-INT24TORES(OLAC_MEM_MAX), MIN32(INT24TORES(OLAC_MEM_MAX), r));
     return RES2INT24(r);
 }

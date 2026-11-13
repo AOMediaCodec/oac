@@ -1705,6 +1705,12 @@ int oac_custom_decoder_ctl(CELTDecoder * OAC_RESTRICT st, int request, ...) {
 #endif
             decode_buffer_size = QEXT_SCALE(DECODE_BUFFER_SIZE);
             if (!value) goto bad_arg;
+            /* After the pitch-based or neural PLC, the overlap still holds plain
+               time-domain samples: fold them now, as the next frame would have. */
+            if (st->prefilter_and_fold) {
+                oaci_prefilter_and_fold(st, 0);
+                st->prefilter_and_fold = 0;
+            }
             for (c = 0; c < st->channels; c++) {
                 celt_sig *decode_mem = st->_decode_mem + c * (decode_buffer_size + st->overlap);
                 OAC_COPY(value + c * half_overlap, decode_mem + decode_buffer_size, half_overlap);

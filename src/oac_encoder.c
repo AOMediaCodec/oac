@@ -153,6 +153,10 @@ struct OacEncoder {
     /* prev_mode is MODE_CELT_ONLY after an OLAC frame; this says the CELT
        memories are stale and must be refreshed from OLAC's before CELT runs. */
     int prev_olac;
+    /* The last 2.5 ms that OLAC or CELT coded, and one more sample to prime
+       the pre-emphasis: the history that CELT's analysis looks back on when
+       it takes over from OLAC. */
+    oac_res olac_lookback[MAX_CHANNELS*(2*HALF_OVERLAP + 1)];
     int prev_channels;
     int prev_framesize;
     int bandwidth;
@@ -302,7 +306,7 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
             silkEncSizeBytes = 0;
     }
     if (application != OAC_APPLICATION_RESTRICTED_SILK)
-        celtEncSizeBytes = oaci_celt_encoder_get_size(channels);
+        celtEncSizeBytes = oaci_align(oaci_celt_encoder_get_size(channels));
     olacEncSizeBytes = oaci_align(sizeof(OlacEncoder));
     base_size = oaci_align(sizeof(OacEncoder));
     /* delay_buffer is declared as [MAX_ENCODER_BUFFER*2] in OacEncoder, sized for stereo.
@@ -1954,10 +1958,14 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
    OLAC can represent what CELT would code (48 kHz, full-band, mono or stereo
    coded as is), not on the inactive frames of a DTX stream, and not right
    after a frame coded with CELT's comb prefilter, whose TDAC memory is that
-   of the prefiltered signal and cannot be handed over. */
-static int oaci_try_olac(const OacEncoder *st, CELTEncoder *celt_enc, int bandwidth, int activity) {
+   of the prefiltered signal and cannot be handed over. The attempt can cost
+   as much as coding the frame with CELT, hence only at the highest
+   complexities, and digital silence takes fewer bytes as a CELT frame. */
+static int oaci_try_olac(const OacEncoder *st, CELTEncoder *celt_enc, int bandwidth, int activity, int is_silence) {
     oac_int32 prefilter = 0;
     if (st->application == OAC_APPLICATION_VOIP || st->application == OAC_APPLICATION_RESTRICTED_SILK)
+        return 0;
+    if (st->silk_mode.complexity < 8 || is_silence)
         return 0;
     if (st->Fs != 48000 || bandwidth != OAC_BANDWIDTH_FULLBAND || st->format != OAC_FORMAT_STANDARD
         || st->channels > MAX_CHANNELS || st->stream_channels != st->channels)
@@ -1990,10 +1998,13 @@ static int oaci_olac_encode_frame(OacEncoder *st, CELTEncoder *celt_enc, const o
 
     ALLOC(pcm_int32, frame_size*st->channels, oac_int32);
     for (i = 0; i < frame_size*st->channels; i++) {
-        /* Round to the input's depth so that OLAC sees the zero LSBs even
-           after the high-pass filter or when coming from the float API. */
-        oac_int32 v = OLAC_PSHR32(IMAX(-8388608, IMIN(8388607, RES2INT24(pcm_buf[i]))), shift);
-        pcm_int32[i] = OLAC_SHL32(IMIN(v, (1<<(23 - shift)) - 1), shift);
+        /* Clip at +/-2.0 like CELT does, before the conversion (which what
+           lies beyond would overflow), then round to the input's depth so that
+           OLAC sees the zero LSBs even after the high-pass filter or when
+           coming from the float API. */
+        oac_res x = MAX32(MIN32(pcm_buf[i], INT24TORES(16777216)), -INT24TORES(16777216));
+        oac_int32 v = OLAC_PSHR32(RES2INT24(x), shift);
+        pcm_int32[i] = OLAC_SHL32(IMIN(v, (1<<(24 - shift)) - 1), shift);
     }
     if (!st->prev_olac) {
         /* First OLAC frame since CELT last ran: continue from CELT's overlap
@@ -2194,8 +2205,15 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
         celt_sig tdac[MAX_CHANNELS*HALF_OVERLAP];
         oaci_olac_to_celt_mem(olac_enc->pmem, &olac_enc->tdac_mem[0][0], st->channels, olac_enc->last_ctz,
                               preemph, tdac);
+        /* Going from OLAC to CELT is a CELT reset, here and in the decoder:
+           nothing CELT remembers from before the OLAC frames (band energies,
+           prefilter history) is used again. What survives is what OLAC hands
+           over, and the last 2.5 ms of input for the analysis to look back
+           on, which the decoder has too (its first CELT frame starts there). */
+        celt_encoder_ctl(celt_enc, OAC_RESET_STATE);
         celt_encoder_ctl(celt_enc, CELT_SET_PREEMPHASIS(preemph));
         celt_encoder_ctl(celt_enc, CELT_SET_TDAC_MEM(tdac));
+        celt_encoder_ctl(celt_enc, CELT_SET_LOOKBACK(st->olac_lookback));
     }
 
 #ifdef ENABLE_DRED
@@ -2628,7 +2646,8 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
         /* Code the frame losslessly in place of CELT when that is what the
            application asked for, or when it is cheaper than the lossy target. */
         if (olac_allowed && st->mode == MODE_CELT_ONLY && !redundancy
-            && (st->application == OAC_APPLICATION_LOSSLESS || oaci_try_olac(st, celt_enc, curr_bandwidth, activity))) {
+            && (st->application == OAC_APPLICATION_LOSSLESS
+                || oaci_try_olac(st, celt_enc, curr_bandwidth, activity, is_silence))) {
             int olac_max_bytes = max_data_bytes - toc_bytes;
             /* In the lossy applications the frame also has to fit the bit-rate
                (the output buffer already does in CBR). */
@@ -2708,6 +2727,14 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     else
         st->prev_mode = st->mode;
     st->prev_olac = olac;
+    if (st->channels <= MAX_CHANNELS) {
+        /* What CELT will look back on if it takes over from OLAC at the next
+           frame (see olac_lookback). */
+        int n = IMIN(2*HALF_OVERLAP + 1, frame_size);
+        OAC_MOVE(st->olac_lookback, st->olac_lookback + n*st->channels, (2*HALF_OVERLAP + 1 - n)*st->channels);
+        OAC_COPY(st->olac_lookback + (2*HALF_OVERLAP + 1 - n)*st->channels, pcm_buf + (frame_size - n)*st->channels,
+                 n*st->channels);
+    }
     st->prev_channels = st->stream_channels;
     st->prev_framesize = frame_size;
 
