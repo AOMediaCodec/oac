@@ -195,7 +195,10 @@ void test1d(int nfft, int isinverse, int arch) {
             out[nfft - k - 1] = out[nfft/2 + k];
         check_inv(in, out, nfft, isinverse);
     } else {
-        oaci_clt_mdct_forward(cfg, in, out, window, nfft/2, shift, 1, arch);
+        kiss_fft_scalar *mem = (kiss_fft_scalar*)calloc(nfft/4, sizeof(kiss_fft_scalar));
+        oaci_clt_mdct_forward(cfg, in, out, window, nfft/2, shift, 1, mem, arch);
+        oaci_clt_mdct_forward(cfg, in + nfft/2, out, window, nfft/2, shift, 1, mem, arch);
+        free(mem);
         check(in_copy, out, nfft, isinverse);
     }
     /*for (k=0;k<nfft;++k) printf("%d %d ", out[k].r, out[k].i);printf("\n");*/

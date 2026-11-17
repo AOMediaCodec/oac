@@ -1,0 +1,577 @@
+/*  Copyright (c) 2026, Alliance for Open Media
+    All rights reserved. */
+/*
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted (subject to the limitations in the
+    disclaimer below) provided that the following conditions are met:
+
+    - Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+    - Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+    - Neither the name of the Alliance for Open Media nor the names of
+    its contributors may be used to endorse or promote products derived
+    from this software without specific prior written permission.
+
+    NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE
+    GRANTED BY THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT
+    HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+    WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+    OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+    DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+    BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+    OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+    OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+    BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+    LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+    NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+#ifdef HAVE_CONFIG_H
+# include "config.h"
+#endif
+
+#include <math.h>
+#include <stdio.h>
+#include "olac.h"
+#include "os_support.h"
+#include "entenc.h"
+
+static void tdac(oac_int32 *pcm, int len, oac_int32 *mem) {
+    oac_int32 tmp[FRAME_SIZE];
+    int i;
+
+    /* 1. Output the left fold computed during the PREVIOUS frame */
+    for (i = 0; i < HALF_OVERLAP; i++) {
+        tmp[i] = mem[HALF_OVERLAP - i - 1];
+    }
+
+    /* 2. Shift the flat top */
+    for (i = HALF_OVERLAP; i < len - HALF_OVERLAP; i++) {
+        tmp[i] = pcm[i - HALF_OVERLAP];
+    }
+
+    /* 3. Process CURRENT overlap with stable lifting */
+    for (i = 0; i < HALF_OVERLAP; i++) {
+        oac_int32 a = pcm[len - i - 1];            /* Inner sample (y) */
+        oac_int32 b = pcm[len - OVERLAP_SIZE + i]; /* Outer sample (x) */
+
+        /* Forward stable lifting */
+        a += OLAC_MUL_P31(lift_p[i], b);
+        b += OLAC_MUL_P31(lift_q[i], a);
+        a += OLAC_MUL_P31(lift_p[i], b);
+
+        /* 'a' perfectly maps to the right fold for the current frame */
+        tmp[i + len - HALF_OVERLAP] = a;
+
+        /* 'b' maps to the left fold. Negate it to perfectly align
+           with the next frame's reverse-read logic. */
+        mem[i] = -b;
+    }
+
+    for (i = 0; i < len; i++) {
+        pcm[i] = tmp[i];
+    }
+}
+
+static void olac_preemphasis(oac_int32 *pcm, int len, oac_int32 *_mem) {
+    int i;
+    oac_int32 mem = *_mem;
+    for (i=0;i<len;i++) {
+        oac_int32 tmp = mem;
+        mem = pcm[i];
+        pcm[i] -= OLAC_MUL16_32_P15(PREEMPH_Q15, tmp);
+    }
+    *_mem = mem;
+}
+
+static void pred_filter(oac_int32 *out, const oac_int32 *in, int len, const oac_int32 *rc, int order, int last_ctz, int curr_ctz) {
+    oac_int32 aks[PRED_ORDER*(PRED_ORDER+1)/2];
+    oac_int16 aks16[PRED_ORDER*(PRED_ORDER+1)/2];
+    int i;
+    int shift;
+    oac_int16 mem[PRED_ORDER] = {0};
+    olac_aks_from_rc(aks, rc, order);
+    shift = aks_downshift(aks, aks16, order);
+    for (i=0;i<len;i++) {
+        int j;
+        int offset;
+        oac_int32 pred = 0;
+        if (i==HALF_OVERLAP && last_ctz != curr_ctz) {
+            if (last_ctz > curr_ctz) {
+                for (j=0;j<order;j++) mem[j] = OLAC_SHL32(mem[j], last_ctz-curr_ctz);
+            } else {
+                for (j=0;j<order;j++) mem[j] = OLAC_SHR32(mem[j], curr_ctz-last_ctz);
+            }
+        }
+        offset = order*(order-1)/2;
+        if (i < order) offset = i*(i-1)/2;
+        for (j=0;j<order;j++) {
+            pred = OLAC_MAC16_16(pred, mem[j], aks16[offset + j]);
+        }
+        out[i] = OLAC_SUB32_ovflw(in[i], OLAC_PSHR32_ovflw(pred, OLAC_COEF_SHIFT-shift));
+        for (j=order-2;j>=0;j--) {
+            mem[j+1] = mem[j];
+        }
+        mem[0] = in[i];
+    }
+}
+
+static int rc_map(int x, int p, int N) {
+    if (x >= p) {
+        if (x <= 2 * p) {
+            /* Inside symmetric window, right side (maps to even) */
+            return 2 * (x - p);
+        } else {
+            /* Outside symmetric window, tail on the right */
+            return x;
+        }
+    } else {
+        if (x >= 2 * p - N) {
+            /* Inside symmetric window, left side (maps to odd) */
+            return 2 * (p - x) - 1;
+        } else {
+            /* Outside symmetric window, tail on the left */
+            return N - x;
+        }
+    }
+}
+
+static void encode_unary(ec_enc *enc, int x);
+
+static void quantize_coefs(ec_enc *enc, float *float_rc, oac_int32 *rc, int order, float gain) {
+    int i;
+    int q0;
+    int res = 9./sqrt(1e-5+gain);
+    q0 = EC_ILOG((int)res);
+    q0 = IMIN(15, q0);
+    oaci_ec_enc_bits(enc, order, 6);
+    oaci_ec_enc_bits(enc, q0, 4);
+    res = 1<<q0;
+    for (i=0;i<order;i++) {
+        int q, m, s;
+        q = floor(.5+res*float_rc[i]);
+        m = rc_map(q+res, ((rc_center[i]+64)*res+32)>>6, 2*res);
+        s = EC_ILOG(IMAX(1, res*rc_scale[i]>>8));
+        encode_unary(enc, m>>s);
+        if (s > 0) oaci_ec_enc_bits(enc, m&((1<<s)-1), s);
+        rc[i] = (oac_int64)q*RC_SCALE/res;
+        res = OLAC_MUL16_16_P15(rc_factor(rc[i]), res);
+        if (res < 1) res = 1;
+    }
+}
+
+static int predict_impl(ec_enc *enc, oac_int32 *residual, float *float_rc, const oac_int32 *pcm, int len, int order, int start, int end, int last_ctz, int curr_ctz) {
+    int i;
+    float gain;
+    float dummy[PRED_ORDER];
+    float pcm_float[FRAME_SIZE];
+    oac_int32 rc[PRED_ORDER];
+    int optimal_order;
+    for (i=0;i<len;i++) pcm_float[i] = pcm[i];
+    if (last_ctz != curr_ctz) {
+        if (last_ctz > curr_ctz) {
+            for (i=0;i<HALF_OVERLAP;i++) pcm_float[i] *= 1<<(last_ctz-curr_ctz);
+        } else {
+            for (i=HALF_OVERLAP;i<len;i++) pcm_float[i] *= 1<<(curr_ctz-last_ctz);
+        }
+    }
+    gain = olac_burg_analysis(dummy, float_rc, &optimal_order, pcm_float+start, 3e-5, end-start, 1, order);
+    for (i=optimal_order;i<order;i++) float_rc[i] = 0;
+    order = optimal_order;
+
+    quantize_coefs(enc, float_rc, rc, order, gain);
+    pred_filter(residual, pcm, len, rc, order, last_ctz, curr_ctz);
+    return order;
+}
+
+
+static void predict(ec_enc *enc, oac_int32 *residual, const oac_int32 *pcm, int len, int last_ctz, int curr_ctz) {
+    float rc[PRED_ORDER];
+#if 0
+    ec_enc bak1, bak2;
+    bak1 = *enc;
+#endif
+    predict_impl(enc, residual, rc, pcm, len, PRED_ORDER, 0, len, last_ctz, curr_ctz);
+#if 0
+    /* FIXME: Copy the bytes too. */
+    bak2 = *enc;
+    *enc = bak1;
+    int res1[FRAME_SIZE], res2[FRAME_SIZE];
+    int i;
+    float cumul=0;
+    int split_pos=0;
+    float best=1e9;
+    predict_impl(enc, res1, rc, pcm, len, PRED_ORDER/2, 0, len/4, last_ctz, curr_ctz);
+    predict_impl(enc, res2, rc, pcm, len, PRED_ORDER/2, 3*len/4, len, last_ctz, curr_ctz);
+    for (i=0;i<len;i++) {
+        if (cumul<best) {
+            best = cumul;
+            split_pos = i;
+        }
+        cumul += (int)OLAC_ABS(res1[i]) - (int)OLAC_ABS(res2[i]);
+        //printf("%f ", cumul);
+    }
+    //printf("%d %f ", split_pos, best);
+    if (split_pos < PRED_ORDER) split_pos = PRED_ORDER;
+    if (split_pos > len-PRED_ORDER) split_pos = len-PRED_ORDER;
+    //printf("\n");
+    predict_impl(enc, res1, rc, pcm, len, PRED_ORDER/2, 0, split_pos, last_ctz, curr_ctz);
+    predict_impl(enc, res2, rc, pcm, len, PRED_ORDER/2, split_pos, len, last_ctz, curr_ctz);
+    split_pos = 0;
+    best = 1e9;
+    cumul=0;
+    for (i=0;i<len;i++) {
+        if (cumul<best) {
+            best = cumul;
+            split_pos = i;
+        }
+        cumul += (int)OLAC_ABS(res1[i]) - (int)OLAC_ABS(res2[i]);
+        //printf("%f ", cumul);
+    }
+    //printf("%d %f\n", split_pos, best);
+    if (split_pos < PRED_ORDER) split_pos = PRED_ORDER;
+    if (split_pos > len-PRED_ORDER) split_pos = len-PRED_ORDER;
+    *enc = bak1;
+    predict_impl(enc, res1, rc, pcm, len, PRED_ORDER/2, 0, split_pos, last_ctz, curr_ctz);
+    predict_impl(enc, res2, rc, pcm, len, PRED_ORDER/2, split_pos, len, last_ctz, curr_ctz);
+    for (i=split_pos;i<len;i++) {
+        res1[i] = res2[i];
+    }
+    cumul = 0;
+    for (i=0;i<len;i++) {
+        cumul += (int)OLAC_ABS(res1[i]) - (int)OLAC_ABS(residual[i]);
+    }
+    if (cumul < 0) {
+        for (i=0;i<len;i++) {
+            residual[i] = res1[i];
+        }
+    } else {
+        *enc = bak2;
+    }
+#endif
+}
+
+static oac_int32 res_max(oac_int32 *res, int frame_size) {
+    int i;
+    oac_int32 maxval=1;
+    for (i=0;i<frame_size;i++) {
+        if ((oac_int32)OLAC_ABS(res[i]) > maxval) maxval = OLAC_ABS(res[i]);
+    }
+    return maxval;
+}
+
+static void find_residual_params(const oac_int32 *residual, int len, int *s_ptr, int *t_ptr, int *split_ptr) {
+    int s, i;
+    oac_int32 res[FRAME_SIZE];
+    oac_int32 L[MAX_SHIFT+1] = {0};
+    oac_int32 R[MAX_SHIFT+1] = {0};
+    oac_int32 min_bits = 2000000000;
+    int max_shift, min_shift;
+    int best_s = 0, best_t = 0, best_split = 0;
+
+    for (i=0; i<len; i++) {
+        res[i] = 2*OLAC_ABS(residual[i]) - (residual[i]<0);
+    }
+
+    max_shift = EC_ILOG(res_max(res, len))-1;
+    max_shift = IMIN(MAX_SHIFT, IMAX(1, max_shift));
+    {
+        oac_int32 left=0, right=0;
+        oac_int32 lbest, rbest;
+        oac_int32 best;
+        int lpos, rpos;
+        for (i=0;i<IMIN(8,len);i++) {
+            left += res[i];
+            right += res[len-i-1];
+        }
+        rbest = right;
+        lbest = left;
+        rpos = 8;
+        lpos = 8;
+        for (i=8;i<len/2;i++) {
+            left += res[i];
+            right += res[len-i-1];
+            if (left*lpos < lbest*i) {
+                lbest = left;
+                lpos = i;
+            }
+            if (right*rpos < rbest*i) {
+                rbest = right;
+                rpos = i;
+            }
+        }
+        best = IMIN(lbest/lpos, rbest/rpos);
+        if (best == 0) min_shift = 0;
+        else min_shift = IMAX(1, EC_ILOG(best)-1);
+        min_shift = IMIN(min_shift, max_shift);
+    }
+    /* 1. Calculate bits and initial right-side totals (entire frame) */
+    for (s=min_shift; s<=max_shift; s++) {
+        for (i=0; i<len; i++) {
+            oac_int32 b;
+            int s2 = s - 1 + (i<4) + (i==0);
+            if (s > 0) {
+                b = (res[i]>>s2) + s2 + 1;
+                b = IMIN(b, 500000);
+            } else {
+                b = 500000*(res[i] != 0);
+            }
+            R[s] += b;
+        }
+    }
+
+    /* 2. Establish NO SPLIT baseline */
+    for (s=min_shift; s<=max_shift; s++) {
+        if (R[s] + 1 < min_bits) {
+            min_bits = R[s] + 1;
+            best_s = s;
+            best_t = s;
+            best_split = -1;
+        }
+    }
+
+    /* 3. Evaluate SPLITS dynamically */
+    for (i=0; i<len-1; i++) {
+        int min_L = 2000000000, local_s = 0;
+        int min_R = 2000000000, local_t = 0;
+        int split_bits;
+
+        /* Shift one element, and track the independent minimums */
+        for (s=min_shift; s<=max_shift; s++) {
+            oac_int32 b;
+            int s2 = s - 1 + (i<4) + (i==0);
+            if (s > 0) {
+                b = (res[i]>>s2) + s2 + 1;
+                b = IMIN(b, 500000);
+            } else {
+                b = 500000*(res[i] != 0);
+            }
+            L[s] += b;
+            R[s] -= b;
+
+            if (L[s] < min_L) {
+                min_L = L[s];
+                local_s = s;
+            }
+            if (R[s] < min_R) {
+                min_R = R[s];
+                local_t = s;
+            }
+        }
+
+        /* The penalty is now a constant 12 (or whatever your static overhead is) */
+        split_bits = min_L + min_R + 12;
+
+        if (split_bits < min_bits && (i+1)%8==0) {
+            min_bits = split_bits;
+            best_s = local_s;
+            best_t = local_t;
+            best_split = i+1;
+        }
+    }
+    /*printf("%d %d %d %d\n", IMIN(best_t, best_s), IMAX(best_s, best_t), max_shift, min_shift);*/
+
+    min_bits += OLAC_ABS(best_s-best_t);
+    *s_ptr = best_s;
+    *t_ptr = best_t;
+    *split_ptr = best_split;
+}
+
+static oac_int32 interleave(oac_int32 x) {
+    return 2*OLAC_ABS(x) - (x<0);
+}
+
+static void encode_unary(ec_enc *enc, int x) {
+    while (x>0) {
+        oaci_ec_enc_bits(enc, 1, 1);
+        x--;
+    }
+    oaci_ec_enc_bits(enc, 0, 1);
+}
+
+static void encode_golomb_rice(ec_enc *enc, oac_int32 x, int s) {
+    x = interleave(x);
+    encode_unary(enc, x>>s);
+    if (s > 0) oaci_ec_enc_bits(enc, x&((1<<s)-1), s);
+}
+
+static float compute_chan_pred_gain(const oac_int32 *residual, int len, const oac_int32 *ref) {
+    double xy=0, yy=0;
+    int i;
+    for (i=0;i<len;i++) {
+        xy += (double)residual[i]*ref[i];
+        yy += (double)ref[i]*ref[i];
+    }
+    return xy/(yy+1);
+}
+
+static void code_residual(ec_enc *enc, oac_int32 *residual, int len, oac_int32 *ref) {
+    int best_s, best_t;
+    int split_pos;
+    int i;
+    if (ref != NULL) {
+        int qgain;
+        float gain = compute_chan_pred_gain(residual, len, ref);
+        gain = MAX32(-2.f, MIN32(2.f, gain));
+        qgain = floor(.5 + gain*16.);
+        /* Optional fine-tuning of gain. */
+        if (0) {
+            int d;
+            oac_int64 best_error=1000000000000LL;
+            int best_d=0;
+            for (d=-2;d<=2;d++) {
+                oac_int64 error=0;
+                gain = (qgain+d)/16.;
+                for (i=0;i<len;i++) {
+                    error += OLAC_ABS(residual[i] - MUL(gain, ref[i]));
+                }
+                if (error < best_error) {
+                    best_error = error;
+                    best_d = d;
+                }
+            }
+            qgain += best_d;
+        }
+        encode_golomb_rice(enc, qgain-5, 3);
+        /* The next channel predicts from this channel's residual *before*
+           inter-channel prediction, which is what the decoder reconstructs. */
+        for (i=0;i<len;i++) {
+            oac_int32 r = residual[i];
+            residual[i] -= OLAC_PSHR64(qgain * (oac_int64)ref[i], 4);
+            ref[i] = r;
+        }
+    }
+    find_residual_params(residual, len, &best_s, &best_t, &split_pos);
+    oaci_ec_enc_uint(enc, best_s, MAX_SHIFT+1);
+    encode_unary(enc, interleave(best_t - best_s));
+    if (best_t != best_s) {
+        oaci_ec_enc_uint(enc, split_pos/8-1, len/8-1);
+    }
+    if (best_s == best_t) split_pos = len;
+    if (best_s > 0) {
+        for (i = 0; i < split_pos; i++) {
+            encode_golomb_rice(enc, residual[i], best_s - 1 + (i<4) + (i==0));
+        }
+    }
+    if (best_t > 0) {
+        for (i = split_pos; i < len; i++) {
+            encode_golomb_rice(enc, residual[i], best_t - 1 + (i<4) + (i==0));
+        }
+    }
+}
+
+/* Reduces the signal to max_bits by moving the LSBs to lsbs[]. The first
+   HALF_OVERLAP values are at the previous frame's scale: when the predictor
+   crosses into this frame it multiplies its memory by 2^ctz_diff, which has
+   to fit the same budget. */
+static int downshift_signal(oac_int32 *sig, oac_int32 *lsbs, int frame_size, int max_bits, int ctz_diff) {
+    int i, shift;
+    oac_int32 maxval=1, maxmem=0;
+    for (i=0;i<HALF_OVERLAP;i++) {
+        if ((oac_int32)OLAC_ABS(sig[i]) > maxmem) maxmem = OLAC_ABS(sig[i]);
+    }
+    for (;i<frame_size;i++) {
+        if ((oac_int32)OLAC_ABS(sig[i]) > maxval) maxval = OLAC_ABS(sig[i]);
+    }
+    shift = EC_ILOG(maxval) - max_bits;
+    if (maxmem > 0) shift = IMAX(shift, EC_ILOG(maxmem) + ctz_diff - max_bits);
+    if (shift < 0) shift=0;
+    for (i=0;i<frame_size;i++) {
+        lsbs[i] = sig[i] & ((1 << shift) - 1);
+        sig[i] = OLAC_SHR32(sig[i], shift);
+    }
+    return shift;
+}
+
+static int code_lsbs(ec_enc *enc, oac_int32 *lsbs, int frame_size, int shift) {
+    int s, i;
+    for (s=0;s<shift;s++) {
+        for (i=0;i<frame_size;i++) {
+            oaci_ec_enc_bits(enc, (lsbs[i] >> (shift - s - 1)) & 1, 1 );
+        }
+    }
+    return 0;
+}
+
+int olac_encoder_init(OlacEncoder *st, int channels, oac_int32 sampling_rate) {
+    st->nb_channels = channels;
+    st->sampling_rate = sampling_rate;
+    st->last_ctz = 0;
+    OAC_CLEAR(st->tdac_mem, channels);
+    OAC_CLEAR(st->pmem, channels);
+    OAC_CLEAR(st->mem_modulo, channels);
+    return OAC_OK;
+}
+
+oac_int32 olac_encode(OlacEncoder *st, const oac_int32 *pcm, int frame_size, unsigned char *data, int nbCompressedBytes) {
+    ec_enc enc;
+    int c, i;
+    oac_uint32 lsb_mask=0;
+    int ctz=0;
+    oac_int32 sig[FRAME_SIZE];
+    oac_int32 lsbs[FRAME_SIZE];
+    oac_int32 residual[FRAME_SIZE];
+    oac_int32 ref[FRAME_SIZE];
+    /* Restored on failure so the caller can retry with a bigger buffer or
+       code the same frame with a different codec. */
+    OlacEncoder bak = *st;
+    if (nbCompressedBytes < 2) return OAC_BUFFER_TOO_SMALL;
+    oaci_ec_enc_init(&enc, data, nbCompressedBytes);
+    for (i=0;i<frame_size*st->nb_channels;i++) lsb_mask |= pcm[i];
+    while ((lsb_mask & 1) == 0 && ctz < 24) {
+        ctz++;
+        lsb_mask >>= 1;
+    }
+    oaci_ec_enc_uint(&enc, ctz, 25);
+    for (c=0;c<st->nb_channels;c++) {
+        int shift;
+        for (i=0;i<frame_size;i++) {
+            sig[i] = OLAC_SHR32(pcm[i*st->nb_channels+c], ctz);
+        }
+        if (ctz > st->last_ctz) st->pmem[c] = OLAC_SHR32(st->pmem[c], ctz - st->last_ctz);
+        else if (ctz < st->last_ctz) st->pmem[c] = OLAC_SHL32(st->pmem[c], st->last_ctz - ctz);
+        oaci_ec_enc_uint(&enc, st->mem_modulo[c], PREEMPH_MOD);
+        /* The de-emphasis memory the decoder will need at the start of the next
+           frame, i.e. the sample preceding the next frame's overlap region: in
+           this frame if it is longer than the overlap, otherwise the sample
+           preceding this frame, which is pmem at this frame's scale. */
+        if (frame_size > OVERLAP_SIZE) {
+            st->mem_modulo[c] = MOD(sig[frame_size-OVERLAP_SIZE-1],PREEMPH_MOD);
+        } else {
+            st->mem_modulo[c] = MOD(st->pmem[c],PREEMPH_MOD);
+        }
+        olac_preemphasis(sig, frame_size, &st->pmem[c]);
+        tdac(sig, frame_size, st->tdac_mem[c]);
+        shift = downshift_signal(sig, lsbs, frame_size, SIGNAL_BITS, IMAX(0, st->last_ctz - ctz));
+        celt_assert(shift < 16);
+        /* The raw LSB planes of this channel take frame_size*shift bits by
+           themselves. This encoder never drops any, so when they no longer fit
+           neither does the frame, and the analysis below would be wasted. */
+        if (oaci_ec_tell(&enc) + 4 + frame_size*shift > 8*nbCompressedBytes) {
+            *st = bak;
+            return OAC_BUFFER_TOO_SMALL;
+        }
+        oaci_ec_enc_bits(&enc, shift, 4);
+        predict(&enc, residual, sig, frame_size, st->last_ctz, ctz);
+        code_residual(&enc, residual, frame_size, (c==0) ? NULL : ref);
+        code_lsbs(&enc, lsbs, frame_size, shift);
+        if (c==0) OAC_COPY(ref, residual, frame_size);
+    }
+    if (!enc.error) {
+        nbCompressedBytes = IMIN(nbCompressedBytes, (oaci_ec_tell(&enc)+7)>>3);
+        oaci_ec_enc_shrink(&enc, nbCompressedBytes);
+    }
+    oaci_ec_enc_done(&enc);
+    if (enc.error) {
+        *st = bak;
+        return OAC_BUFFER_TOO_SMALL;
+    }
+    st->last_ctz = ctz;
+    st->rng = enc.rng;
+    return nbCompressedBytes;
+}

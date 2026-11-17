@@ -4,6 +4,7 @@ oac_tests = [
   ['test_oac_decode', [], 120],
   ['test_oac_encode', 'oac_encode_regressions.c', 240],
   ['test_oac_extensions', [], 120],
+  ['test_oac_lossless'],
   ['test_oac_padding'],
   ['test_oac_projection'],
 ]

@@ -558,6 +558,9 @@ OAC_EXPORT int oac_decoder_init(
  * @param [in] decode_fec <tt>int</tt>: Flag (0 or 1) to request that any in-band forward error correction data be
  *  decoded. If no such data is available, the frame is decoded as if it were lost.
  * @returns Number of decoded samples per channel or @ref oac_errorcodes
+ * @retval OAC_INVALID_PACKET The packet is corrupt or of an unsupported type. That includes a lossless
+ *  packet whose payload does not decode: no audio is returned for it, and the decoder carries on
+ *  from the next packet as it would after a lost one.
  */
 OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decode(
     OacDecoder *st,
@@ -572,7 +575,8 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decode(
  * @param [in] data <tt>char*</tt>: Input payload. Use a NULL pointer to indicate packet loss
  * @param [in] len <tt>oac_int32</tt>: Number of bytes in payload*
  * @param [out] pcm <tt>oac_int32*</tt>: Output signal (interleaved if 2 channels) representing (or slightly exceeding) 24-bit values. length
- *  is frame_size*channels*sizeof(oac_int32)
+ *  is frame_size*channels*sizeof(oac_int32). Lossless packets are not limited to that range: they can
+ *  decode to any 32-bit value.
  * @param [in] frame_size Number of samples per channel of available space in \a pcm.
  *  If this is less than the maximum packet duration (120ms; 5760 for 48kHz), this function will
  *  not be capable of decoding some packets. In the case of PLC (data==NULL) or FEC (decode_fec=1),
@@ -582,6 +586,9 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decode(
  * @param [in] decode_fec <tt>int</tt>: Flag (0 or 1) to request that any in-band forward error correction data be
  *  decoded. If no such data is available, the frame is decoded as if it were lost.
  * @returns Number of decoded samples or @ref oac_errorcodes
+ * @retval OAC_INVALID_PACKET The packet is corrupt or of an unsupported type. That includes a lossless
+ *  packet whose payload does not decode: no audio is returned for it, and the decoder carries on
+ *  from the next packet as it would after a lost one.
  */
 OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decode24(
     OacDecoder *st,
@@ -606,6 +613,9 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decode24(
  * @param [in] decode_fec <tt>int</tt>: Flag (0 or 1) to request that any in-band forward error correction data be
  *  decoded. If no such data is available the frame is decoded as if it were lost.
  * @returns Number of decoded samples per channel or @ref oac_errorcodes
+ * @retval OAC_INVALID_PACKET The packet is corrupt or of an unsupported type. That includes a lossless
+ *  packet whose payload does not decode: no audio is returned for it, and the decoder carries on
+ *  from the next packet as it would after a lost one.
  */
 OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_decode_float(
     OacDecoder *st,
@@ -845,6 +855,16 @@ OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_get_nb_samples(const unsigned c
  * @retval OAC_INVALID_PACKET The compressed data passed is corrupted or of an unsupported type
  */
 OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_has_lbrr(const unsigned char packet[], oac_int32 len);
+
+/** Checks whether an Oac packet is coded losslessly (OLAC mode). Note that a
+ * lossy encoder may also produce such packets when they are cheaper than the
+ * lossy coding would be, so this only describes the packet's coding mode.
+ * @param [in] packet <tt>char*</tt>: Oac packet
+ * @param [in] len <tt>oac_int32</tt>: Length of packet
+ * @returns 1 if the packet is coded losslessly, 0 otherwise
+ * @retval OAC_INVALID_PACKET The compressed data passed is corrupted or of an unsupported type
+ */
+OAC_EXPORT OAC_WARN_UNUSED_RESULT int oac_packet_is_lossless(const unsigned char packet[], oac_int32 len);
 
 /** Gets the number of samples of an Oac packet.
  * @param [in] dec <tt>OacDecoder*</tt>: Decoder state

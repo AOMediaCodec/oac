@@ -1290,12 +1290,52 @@ int qext_dred_combination(void) {
 #endif
 
 
+/* The LFE stream of a 5.1 surround encoder was coded as narrowband while the
+   CELT ToC, whose narrowband configurations now belong to OLAC, said wideband:
+   the decoder read four more bands than were coded, and the final ranges of
+   the two sides never matched. */
+static int surround_lfe_bandwidth(void) {
+    OacMSEncoder *enc;
+    OacMSDecoder *dec;
+    int err, i, f;
+    unsigned char data[8000];
+    int streams, coupled_streams;
+    unsigned char mapping[6];
+    short *pcm = malloc(sizeof(*pcm)*960*6);
+    short *out = malloc(sizeof(*out)*960*6);
+    oac_test_assert(pcm != NULL && out != NULL);
+    enc = oac_multistream_surround_encoder_create(48000, 6, 1, &streams, &coupled_streams, mapping,
+                                                  OAC_APPLICATION_AUDIO, &err);
+    oac_test_assert(err == OAC_OK && enc != NULL);
+    dec = oac_multistream_decoder_create(48000, 6, streams, coupled_streams, mapping, &err);
+    oac_test_assert(err == OAC_OK && dec != NULL);
+    oac_multistream_encoder_ctl(enc, OAC_SET_BITRATE(192000));
+    for (f = 0; f < 10; f++) {
+        oac_uint32 enc_rng, dec_rng;
+        int len;
+        for (i = 0; i < 960*6; i++)
+            pcm[i] = (short)((i%6 == 3) ? 8000*sin(60*6.283185307*(f*960 + i/6)/48000.) : (fast_rand()&8191) - 4096);
+        len = oac_multistream_encode(enc, pcm, 960, data, sizeof(data));
+        oac_test_assert(len > 0);
+        oac_test_assert(oac_multistream_decode(dec, data, len, out, 960, 0) == 960);
+        oac_test_assert(oac_multistream_encoder_ctl(enc, OAC_GET_FINAL_RANGE(&enc_rng)) == OAC_OK);
+        oac_test_assert(oac_multistream_decoder_ctl(dec, OAC_GET_FINAL_RANGE(&dec_rng)) == OAC_OK);
+        oac_test_assert(enc_rng == dec_rng);
+    }
+    oac_multistream_encoder_destroy(enc);
+    oac_multistream_decoder_destroy(dec);
+    free(pcm);
+    free(out);
+    return 0;
+}
+
 void regression_test(void) {
     fprintf(stderr, "Running simple tests for bugs that have been fixed previously\n");
     celt_ec_internal_error();
     mscbr_encode_fail10();
     mscbr_encode_fail();
     surround_analysis_uninit();
+    surround_lfe_bandwidth();
     ec_enc_shrink_assert();
     ec_enc_shrink_assert2();
     silk_gain_assert();
