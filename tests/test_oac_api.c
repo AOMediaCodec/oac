@@ -1614,6 +1614,13 @@ oac_int32 test_enc_api(void) {
      "    OAC_SET_LOSSY_FALLBACK ...................... OK.\n",
      "    OAC_GET_LOSSY_FALLBACK ...................... OK.\n")
 
+    err = oac_encoder_ctl(enc, OAC_GET_DC_REJECT(null_int_ptr));
+    if (err != OAC_BAD_ARG) test_failed();
+    cfgs++;
+    CHECK_SETGET(OAC_SET_DC_REJECT(i), OAC_GET_DC_REJECT(&i), -1, 2, 0, 1,
+     "    OAC_SET_DC_REJECT ........................... OK.\n",
+     "    OAC_GET_DC_REJECT ........................... OK.\n")
+
     err = oac_encoder_ctl(enc, OAC_GET_EXPERT_FRAME_DURATION(null_int_ptr));
     if (err != OAC_BAD_ARG) test_failed();
     cfgs++;
