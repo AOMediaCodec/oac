@@ -209,7 +209,7 @@ oac_int32 oac_repacketizer_out_range_impl(OacRepacketizer *rp, int begin, int en
          &all_extensions[ext_count], &frame_ext_count, rp->padding_nb_frames[i]);
         if (ret < 0) {
             RESTORE_STACK;
-            return OAC_INTERNAL_ERROR;
+            return OAC_INVALID_PACKET;
         }
         /* renumber the extension frame numbers */
         for (j = 0; j < frame_ext_count; j++) {
