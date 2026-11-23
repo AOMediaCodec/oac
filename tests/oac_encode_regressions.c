@@ -1290,8 +1290,29 @@ int qext_dred_combination(void) {
 #endif
 
 
+static int frame_size_select_overflow(void) {
+    /* Opus GH-491: 200*new_size wraps to exactly equal Fs (8000) for this
+       frame_size, so every branch of frame_size_select()'s validity
+       check that used to rely on that multiplication was defeated,
+       letting an enormous frame_size straight through to a stack
+       allocation sized by it in oac_encode(). */
+    OacEncoder *enc;
+    int err;
+    unsigned char data[2000];
+    short pcm[2];
+    int ret;
+
+    enc = oac_encoder_create(8000, 1, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
+    oac_test_assert(err == OAC_OK);
+    ret = oac_encode(enc, pcm, 1073741864, data, sizeof(data));
+    oac_test_assert(ret == OAC_BAD_ARG);
+    oac_encoder_destroy(enc);
+    return 0;
+}
+
 void regression_test(void) {
     fprintf(stderr, "Running simple tests for bugs that have been fixed previously\n");
+    frame_size_select_overflow();
     celt_ec_internal_error();
     mscbr_encode_fail10();
     mscbr_encode_fail();
