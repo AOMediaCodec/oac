@@ -818,6 +818,9 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
             int extrapolation_offset;
             int extrapolation_len;
             int j;
+#ifdef FIXED_POINT
+            int shift1;
+#endif
 
             pitch_index = st->last_pitch_index;
             buf = decode_mem[c];
@@ -935,6 +938,13 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
             extrapolation_len = N + overlap;
             /* We also apply fading if this is not the first loss. */
             attenuation = MULT16_16_Q15(fade, decay);
+#ifdef FIXED_POINT
+            shift1 = IMAX(0, 2*oaci_celt_zlog2(oaci_celt_maxabs16(
+                  &sig[extrapolation_offset], pitch_index)) - 18);
+# ifdef ENABLE_QEXT
+            if (st->qext_scale == 2) shift1++;
+# endif
+#endif
             for (i = j = 0; i < extrapolation_len; i++, j++) {
                 oac_val16 tmp;
                 if (j >= pitch_index) {
@@ -947,7 +957,7 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
                 /* Compute the energy of the previously decoded signal whose
                    excitation we're copying. */
                 tmp = sig[extrapolation_offset + j];
-                S1 += SHR32(MULT16_16(tmp, tmp), 11);
+                S1 += SHR32(MULT16_16(tmp, tmp), shift1);
             }
             {
                 oac_val16 lpc_mem[CELT_LPC_ORDER];
@@ -971,9 +981,18 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
                attenuate. */
             {
                 oac_val32 S2 = 0;
+#ifdef FIXED_POINT
+                int shift2 = IMAX(0, 2*oaci_celt_zlog2(SROUND16(celt_maxabs32(
+                      buf + decode_buffer_size - N, extrapolation_len), SIG_SHIFT)) - 18);
+# ifdef ENABLE_QEXT
+                if (st->qext_scale == 2) shift2++;
+# endif
+                shift2 = IMAX(shift1, shift2);
+                S1 = SHR32(S1, shift2 - shift1);
+#endif
                 for (i = 0; i < extrapolation_len; i++) {
                     oac_val16 tmp = SROUND16(buf[decode_buffer_size - N + i], SIG_SHIFT);
-                    S2 += SHR32(MULT16_16(tmp, tmp), 11);
+                    S2 += SHR32(MULT16_16(tmp, tmp), shift2);
                 }
                 /* This checks for an "explosion" in the synthesis. */
 #ifdef FIXED_POINT
