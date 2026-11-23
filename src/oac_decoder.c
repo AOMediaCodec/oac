@@ -492,9 +492,10 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
                                 st->arch );
             if (silk_ret) {
                 if (lost_flag) {
-                    /* PLC failure should not be fatal */
-                    silk_frame_size = frame_size;
-                    for (i = 0; i < frame_size*st->channels; i++)
+                    /* PLC failure should not be fatal. Only fill what is left of
+                       the frame since pcm_ptr has already been advanced. */
+                    silk_frame_size = frame_size - decoded_samples;
+                    for (i = 0; i < silk_frame_size*st->channels; i++)
                         pcm_ptr[i] = 0;
                 } else {
                     RESTORE_STACK;
