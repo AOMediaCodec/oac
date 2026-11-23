@@ -1350,7 +1350,7 @@ int oac_dred_decoder_get_size(void) {
 int oaci_dred_decoder_load_model(OacDREDDecoder *dec, const unsigned char *data, int len) {
     WeightArray *list;
     int ret;
-    oaci_parse_weights(&list, data, len);
+    if (oaci_parse_weights(&list, data, len) < 0) return OAC_BAD_ARG;
     ret = oaci_init_rdovaedec(&dec->model, list);
     oac_free(list);
     if (ret == 0) dec->loaded = 1;
