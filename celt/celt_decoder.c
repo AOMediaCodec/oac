@@ -140,6 +140,7 @@ struct OacCustomDecoder {
     oac_uint32 rng;
     int error;
     int last_pitch_index;
+    oac_val16 plc_decay[OAC_MAX_CHANNELS];
     int loss_duration;
     int plc_duration;
     int last_frame_type;
@@ -794,7 +795,8 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
             st->last_pitch_index = pitch_index = oaci_celt_plc_pitch_search(st, decode_mem, C, st->arch);
         } else {
             pitch_index = st->last_pitch_index;
-            fade = QCONST16(.8f, 15);
+            if (st->plc_duration*mode->shortMdctSize >= pitch_index)
+                fade = QCONST16(.8f, 15);
         }
 #ifdef ENABLE_DEEP_PLC
         if (curr_neural && !last_neural) oaci_update_plc_state(lpcnet, decode_mem, &st->plc_preemphasis_mem, C);
@@ -869,7 +871,7 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
             /* Check if the waveform is decaying, and if so how fast.
                We do this to avoid adding energy when concealing in a segment
                with decaying energy. */
-            {
+            if (st->last_frame_type != FRAME_PLC_PERIODIC && !(last_neural && curr_neural)) {
                 oac_val32 E1 = 1, E2 = 1;
 #ifdef FIXED_POINT
                 int shift = IMAX(0, 2*oaci_celt_zlog2(oaci_celt_maxabs16(&exc[exc_length - 2*pitch_index],
@@ -886,7 +888,9 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
                     E2 += SHR32(MULT16_16(e, e), shift);
                 }
                 E1 = MIN32(E1, E2);
-                decay = oaci_celt_sqrt(oaci_frac_div32(SHR32(E1, 1), E2));
+                st->plc_decay[c] = decay = oaci_celt_sqrt(oaci_frac_div32(SHR32(E1, 1), E2));
+            } else {
+                decay = st->plc_decay[c];
             }
             /* Use a large integer multiple of the pitch period to avoid repeating
                a short sequence too many times, stopping before any >6 dB change. */
