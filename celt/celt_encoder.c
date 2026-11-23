@@ -1523,11 +1523,11 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
         if (offset)
             oaci_comb_filter(in + c*(N + overlap) + overlap, pre[c] + max_period,
                st->prefilter_period, st->prefilter_period, offset, -st->prefilter_gain, -st->prefilter_gain,
-               st->prefilter_tapset, st->prefilter_tapset, NULL, 0, st->arch);
+               st->prefilter_tapset, st->prefilter_tapset, NULL, 0, st->arch, qext_scale);
 
         oaci_comb_filter(in + c*(N + overlap) + overlap + offset, pre[c] + max_period + offset,
             st->prefilter_period, pitch_index, N - offset, -st->prefilter_gain, -gain1,
-            st->prefilter_tapset, prefilter_tapset, mode->window, overlap, st->arch);
+            st->prefilter_tapset, prefilter_tapset, mode->window, overlap, st->arch, qext_scale);
         for (i = 0; i < N; i++) after[c] += ABS32(SHR32(in[c*(N + overlap) + overlap + i], 12));
     } while (++c < CC);
 
@@ -1555,7 +1555,7 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
             OAC_COPY(in + c*(N + overlap) + overlap, pre[c] + max_period, N);
             oaci_comb_filter(in + c*(N + overlap) + overlap + offset, pre[c] + max_period + offset,
                      st->prefilter_period, pitch_index, overlap, -st->prefilter_gain, -0,
-                     st->prefilter_tapset, prefilter_tapset, mode->window, overlap, st->arch);
+                     st->prefilter_tapset, prefilter_tapset, mode->window, overlap, st->arch, qext_scale);
         } while (++c < CC);
         gain1 = 0;
         pf_on = 0;
@@ -2554,12 +2554,12 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
             st->prefilter_period_old = IMAX(st->prefilter_period_old, COMBFILTER_MINPERIOD);
             oaci_comb_filter(out_mem[c], out_mem[c], st->prefilter_period_old, st->prefilter_period, mode->shortMdctSize,
                st->prefilter_gain_old, st->prefilter_gain, st->prefilter_tapset_old, st->prefilter_tapset,
-               mode->window, overlap, st->arch);
+               mode->window, overlap, st->arch, qext_scale);
             if (LM != 0)
                 oaci_comb_filter(out_mem[c] + mode->shortMdctSize, out_mem[c] + mode->shortMdctSize, st->prefilter_period,
                 pitch_index, N - mode->shortMdctSize,
                   st->prefilter_gain, gain1, st->prefilter_tapset, prefilter_tapset,
-                  mode->window, overlap, st->arch);
+                  mode->window, overlap, st->arch, qext_scale);
         } while (++c < CC);
 
         /* We reuse freq[] as scratch space for the de-emphasis */

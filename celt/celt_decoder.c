@@ -555,9 +555,7 @@ static void oaci_prefilter_and_fold(CELTDecoder * OAC_RESTRICT st, int N) {
     celt_sig *decode_mem[OAC_MAX_CHANNELS];
     const OacCustomMode *mode;
     int decode_buffer_size;
-#ifdef ENABLE_QEXT
-    int qext_scale;
-#endif
+    int qext_scale = 1;
     VARDECL(oac_val32, etmp);
     SAVE_STACK
 #ifdef ENABLE_QEXT
@@ -579,7 +577,7 @@ static void oaci_prefilter_and_fold(CELTDecoder * OAC_RESTRICT st, int N) {
         oaci_comb_filter(etmp, decode_mem[c] + decode_buffer_size - N,
          st->postfilter_period_old, st->postfilter_period, overlap,
          -st->postfilter_gain_old, -st->postfilter_gain,
-         st->postfilter_tapset_old, st->postfilter_tapset, NULL, 0, st->arch);
+         st->postfilter_tapset_old, st->postfilter_tapset, NULL, 0, st->arch, qext_scale);
 
         /* Simulate TDAC on the concealed audio so that it blends with the
            MDCT of the next frame. */
@@ -670,9 +668,7 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
     const oac_int16 *eBands;
     int decode_buffer_size;
     int max_period;
-#ifdef ENABLE_QEXT
-    int qext_scale;
-#endif
+    int qext_scale = 1;
     SAVE_STACK;
 #ifdef ENABLE_QEXT
     qext_scale = st->qext_scale;
@@ -763,12 +759,12 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
             st->postfilter_period_old = IMAX(st->postfilter_period_old, COMBFILTER_MINPERIOD);
             oaci_comb_filter(out_syn[c], out_syn[c], st->postfilter_period_old, st->postfilter_period, mode->shortMdctSize,
                st->postfilter_gain_old, st->postfilter_gain, st->postfilter_tapset_old, st->postfilter_tapset,
-               mode->window, overlap, st->arch);
+               mode->window, overlap, st->arch, qext_scale);
             if (LM != 0)
                 oaci_comb_filter(out_syn[c] + mode->shortMdctSize, out_syn[c] + mode->shortMdctSize, st->postfilter_period,
                 st->postfilter_period, N - mode->shortMdctSize,
                   st->postfilter_gain, st->postfilter_gain, st->postfilter_tapset, st->postfilter_tapset,
-                  mode->window, overlap, st->arch);
+                  mode->window, overlap, st->arch, qext_scale);
 
         } while (++c < C);
         st->postfilter_period_old = st->postfilter_period;
@@ -1109,9 +1105,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     celt_glog max_background_increase;
     int decode_buffer_size;
     int max_channels;
-#ifdef ENABLE_QEXT
-    int qext_scale;
-#endif
+    int qext_scale = 1;
     ALLOC_STACK;
 #ifdef ENABLE_QEXT
     qext_scale = st->qext_scale;
@@ -1418,12 +1412,12 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
         st->postfilter_period_old = IMAX(st->postfilter_period_old, COMBFILTER_MINPERIOD);
         oaci_comb_filter(out_syn[c], out_syn[c], st->postfilter_period_old, st->postfilter_period, mode->shortMdctSize,
             st->postfilter_gain_old, st->postfilter_gain, st->postfilter_tapset_old, st->postfilter_tapset,
-            mode->window, overlap, st->arch);
+            mode->window, overlap, st->arch, qext_scale);
         if (LM != 0)
             oaci_comb_filter(out_syn[c] + mode->shortMdctSize, out_syn[c] + mode->shortMdctSize, st->postfilter_period,
             postfilter_pitch, N - mode->shortMdctSize,
                st->postfilter_gain, postfilter_gain, st->postfilter_tapset, postfilter_tapset,
-               mode->window, overlap, st->arch);
+               mode->window, overlap, st->arch, qext_scale);
 
     } while (++c < CC);
     st->postfilter_period_old = st->postfilter_period;
