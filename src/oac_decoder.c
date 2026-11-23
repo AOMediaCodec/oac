@@ -1393,7 +1393,7 @@ int oac_dred_decoder_ctl(OacDREDDecoder *dred_dec, int request, ...) {
             if (len < 0 || data == NULL) {
                 goto bad_arg;
             }
-            return oaci_dred_decoder_load_model(dred_dec, data, len);
+            ret = oaci_dred_decoder_load_model(dred_dec, data, len);
         }
         break;
 # endif
