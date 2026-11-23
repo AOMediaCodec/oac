@@ -1209,7 +1209,9 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
             if (len < 0 || data == NULL) {
                 goto bad_arg;
             }
+#ifdef ENABLE_DEEP_PLC
             ret = oaci_lpcnet_plc_load_model(&st->lpcnet, data, len);
+#endif
             if (oaci_silk_LoadOSCEModels(silk_dec, data, len) != 0 || ret != 0)
                 ret = OAC_BAD_ARG;
         }
