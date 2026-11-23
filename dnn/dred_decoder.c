@@ -79,6 +79,9 @@ void oaci_dred_decode_latents(ec_dec *dec, float *x, const oac_uint8 *scale, con
         int q;
         if (r[i] == 0 || p0[i] == 255) q = 0;
         else q = oaci_ec_laplace_decode_p0(dec, p0[i]<<7, r[i]<<7);
+        /* The encoder never produces values anywhere near this range. Bound
+           what a malicious packet can inject into the decoder network. */
+        q = IMAX(-1024, IMIN(1024, q));
         x[i] = q*256.f/(scale[i] == 0 ? 1 : scale[i]);
     }
 }
