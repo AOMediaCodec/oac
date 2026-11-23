@@ -490,7 +490,7 @@ void test_oac_custom(const int num_encoders, const int num_setting_changes) {
 
     /* Parameters to fuzz. Some values are duplicated to increase their probability of being tested. */
     int sampling_rates[] = {
-#ifdef CUSTOM_MODEES
+#ifdef CUSTOM_MODES
         8000, 12000, 16000, 24000,
 #endif
         48000,
