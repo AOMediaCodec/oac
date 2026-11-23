@@ -637,7 +637,8 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
             MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_SET_START_BAND(0)));
             oaci_celt_decode_with_ec(celt_dec, silence, 2, pcm, F2_5, NULL, celt_accum);
         }
-        st->rangeFinal = dec.rng;
+        /* The range decoder is not initialised when concealing (data == NULL). */
+        st->rangeFinal = data != NULL ? dec.rng : 0;
     }
 
     {
