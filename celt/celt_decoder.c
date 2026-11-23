@@ -612,8 +612,11 @@ void oaci_update_plc_state(LPCNetPLCState *lpcnet, celt_sig *decode_mem[OAC_MAX_
     int i;
     int tmp_read_post, tmp_fec_skip;
     int offset;
-    celt_sig buf48k[DECODE_BUFFER_SIZE];
-    oac_int16 buf16k[PLC_UPDATE_SAMPLES];
+    VARDECL(celt_sig, buf48k);
+    VARDECL(oac_int16, buf16k);
+    SAVE_STACK;
+    ALLOC(buf48k, DECODE_BUFFER_SIZE, celt_sig);
+    ALLOC(buf16k, PLC_UPDATE_SAMPLES, oac_int16);
     if (CC == 2) {
         for (i = 0; i < DECODE_BUFFER_SIZE; i++) {
             buf48k[i] = .5*(decode_mem[0][i] + decode_mem[1][i]);
@@ -642,6 +645,7 @@ void oaci_update_plc_state(LPCNetPLCState *lpcnet, celt_sig *decode_mem[OAC_MAX_
     }
     lpcnet->fec_read_pos = tmp_read_post;
     lpcnet->fec_skip = tmp_fec_skip;
+    RESTORE_STACK;
 }
 #endif
 
