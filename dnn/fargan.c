@@ -73,6 +73,13 @@
 
 #define FARGAN_FEATURES (NB_FEATURES)
 
+static int oaci_fargan_period(const float *features) {
+    int period;
+    period = (int)floor(.5 + 256./pow(2.f, ((1./60.)*((features[NB_BANDS] + 1.5)*60))));
+    /* Keep the period within the range the pitch buffer supports. */
+    return IMAX(PITCH_MIN_PERIOD, IMIN(PITCH_MAX_PERIOD, period));
+}
+
 static void oaci_compute_fargan_cond(FARGANState *st, float *cond, const float *features, int period) {
     FARGAN *model;
     float dense_in[NB_FEATURES + COND_NET_PEMBED_OUT_SIZE];
@@ -191,7 +198,7 @@ void oaci_fargan_cont(FARGANState *st, const float *pcm0, const float *features0
     for (i = 0; i < 5; i++) {
         const float *features = &features0[i*NB_FEATURES];
         st->last_period = period;
-        period = (int)floor(.5 + 256./pow(2.f, ((1./60.)*((features[NB_BANDS] + 1.5)*60))));
+        period = oaci_fargan_period(features);
         oaci_compute_fargan_cond(st, cond, features, period);
     }
 
@@ -240,7 +247,7 @@ static void oaci_fargan_synthesize_impl(FARGANState *st, float *pcm, const float
     int period;
     celt_assert(st->cont_initialized);
 
-    period = (int)floor(.5 + 256./pow(2.f, ((1./60.)*((features[NB_BANDS] + 1.5)*60))));
+    period = oaci_fargan_period(features);
     oaci_compute_fargan_cond(st, cond, features, period);
     for (subframe = 0; subframe < FARGAN_NB_SUBFRAMES; subframe++) {
         float *sub_cond;
