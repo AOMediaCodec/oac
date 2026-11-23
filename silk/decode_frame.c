@@ -142,6 +142,7 @@ oac_int oaci_silk_decode_frame(
         /* Run SILK enhancer                                    */
         /********************************************************/
         oaci_osce_enhance_frame( osce_model, psDec, psDecCtrl, pOut, oaci_ec_tell(psRangeDec) - ec_start, arch );
+        silk_memcpy( psDec->sPLC.prev_osce_out, &pOut[ L - MAX_LPC_ORDER ], MAX_LPC_ORDER*sizeof(oac_int16));
 #endif
 
         /********************************************************/

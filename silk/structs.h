@@ -301,6 +301,9 @@ typedef struct {
     oac_int nb_subfr;
     oac_int subfr_length;
     oac_int enable_deep_plc;
+#ifdef ENABLE_OSCE
+    oac_int16 prev_osce_out[ MAX_LPC_ORDER ];
+#endif
 } silk_PLC_struct;
 
 /* Struct for CNG */
