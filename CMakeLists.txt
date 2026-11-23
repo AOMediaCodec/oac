@@ -423,7 +423,7 @@ endif()
 
 if (OAC_OSCE)
   add_sources_group(oac lpcnet ${osce_headers} ${osce_sources})
-  target_compile_definitions(oac PRIVATE ENABLE_OSCE)
+  target_compile_definitions(oac PRIVATE ENABLE_OSCE ENABLE_OSCE_BWE)
 endif()
 
 if(NOT OAC_DISABLE_INTRINSICS)
