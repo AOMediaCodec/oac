@@ -306,6 +306,7 @@ static void oaci_dred_encode_latents(ec_enc *enc, const float *x, const oac_uint
 static int oaci_dred_voice_active(const unsigned char *activity_mem, int offset) {
     int i;
     for (i = 0; i < 16; i++) {
+        if (8*offset + i >= DRED_MAX_FRAMES*4) break;
         if (activity_mem[8*offset + i] == 1) return 1;
     }
     return 0;
@@ -379,7 +380,7 @@ int oaci_dred_encode_silk_frame(DREDEnc *enc, unsigned char *buf, int max_chunks
         return 0;
     }
     ec_bak = ec_encoder;
-    for (i = 0; i < IMIN(2*max_chunks, enc->latents_buffer_fill - latent_offset - 1); i += 2) {
+    for (i = 0; i < IMIN(2*max_chunks, enc->latents_buffer_fill - latent_offset); i += 2) {
         int active;
         q_level = oaci_compute_quantizer(q0, dQ, qmax, i/2);
         offset = q_level*DRED_LATENT_DIM;
