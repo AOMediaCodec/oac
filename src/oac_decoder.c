@@ -691,7 +691,8 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
         for (i = 0; i < frame_size*st->channels; i++) {
             oac_val32 x;
             x = MULT32_32_Q16(pcm[i], gain);
-            pcm[i] = SATURATE(x, 32767);
+            /* Same headroom as the rest of the fixed-point pipeline. */
+            pcm[i] = SATURATE(x, SIG_SAT>>(SIG_SHIFT - RES_SHIFT));
         }
     }
 
