@@ -104,7 +104,7 @@ static OAC_INLINE oac_int32 oaci_float2int(float x) {
 
 #elif (defined(_MSC_VER) && _MSC_VER >= 1400) && (defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 1))
 
-# include <xmmintrin.h>
+# include <intrin.h>
 static OAC_INLINE oac_int32 oaci_float2int(float value) {
     /* _mm_load_ss will generate same code as _mm_set_ss
     ** in _MSC_VER >= 1914 /02 so keep __mm_load__ss
