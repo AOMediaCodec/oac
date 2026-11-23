@@ -1509,11 +1509,9 @@ int oac_dred_parse(OacDREDDecoder *dred_dec, OacDRED *dred, const unsigned char 
     if (payload_len < 0)
         return payload_len;
     if (payload != NULL) {
-        int offset;
-        int min_feature_frames;
-        offset = 100*max_dred_samples/sampling_rate;
-        min_feature_frames = IMIN(2 + offset, 2*DRED_NUM_REDUNDANCY_FRAMES);
-        oaci_dred_ec_decode(dred, payload, payload_len, min_feature_frames, dred_frame_offset);
+        int max_dred_features;
+        max_dred_features = (100*max_dred_samples + sampling_rate - 1)/sampling_rate;
+        oaci_dred_ec_decode(dred, payload, payload_len, max_dred_features, dred_frame_offset);
         if (!defer_processing)
             oac_dred_process(dred_dec, dred, dred);
         if (dred_end) *dred_end = IMAX(0, -dred->dred_offset*sampling_rate/400);

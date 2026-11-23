@@ -83,7 +83,7 @@ void oaci_dred_decode_latents(ec_dec *dec, float *x, const oac_uint8 *scale, con
     }
 }
 
-int oaci_dred_ec_decode(OacDRED *dec, const oac_uint8 *bytes, int num_bytes, int min_feature_frames, int dred_frame_offset) {
+int oaci_dred_ec_decode(OacDRED *dec, const oac_uint8 *bytes, int num_bytes, int max_dred_features, int dred_frame_offset) {
     ec_dec ec;
     int q_level;
     int i;
@@ -93,6 +93,7 @@ int oaci_dred_ec_decode(OacDRED *dec, const oac_uint8 *bytes, int num_bytes, int
     int qmax;
     int state_qoffset;
     int extra_offset;
+    int min_feature_frames;
 
     /* since features are decoded in quadruples, it makes no sense to go with an uneven number of redundancy frames */
     celt_assert(DRED_NUM_REDUNDANCY_FRAMES%2 == 0);
@@ -105,6 +106,12 @@ int oaci_dred_ec_decode(OacDRED *dec, const oac_uint8 *bytes, int num_bytes, int
     else extra_offset = 0;
     /* Compute total offset, including DRED position in a multiframe packet. */
     dec->dred_offset = 16 - oaci_ec_dec_uint(&ec, 32) - extra_offset + dred_frame_offset;
+
+    /* Dynamically compute the required frames to cover the requested duration + offset.
+       dred_offset is in 2.5ms units, max_dred_features is in 10ms units. */
+    min_feature_frames = (4*max_dred_features + dec->dred_offset + 3)/4;
+    min_feature_frames = IMAX(0, min_feature_frames);
+
     /*printf("%d %d %d\n", dred_offset, q0, dQ);*/
     qmax = 15;
     if (q0 < 14 && dQ > 0) {
