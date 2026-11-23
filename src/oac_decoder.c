@@ -1543,6 +1543,7 @@ int oac_dred_process(OacDREDDecoder *dred_dec, const OacDRED *src, OacDRED *dst)
         OAC_COPY(dst, src, 1);
     if (dst->process_stage == 2)
         return OAC_OK;
+    celt_assert(dst->nb_latents >= 0 && dst->nb_latents <= DRED_NUM_REDUNDANCY_FRAMES/2);
     oaci_DRED_rdovae_decode_all(&dred_dec->model, dst->fec_features, dst->state, dst->latents, dst->nb_latents,
     dred_dec->arch);
     dst->process_stage = 2;
