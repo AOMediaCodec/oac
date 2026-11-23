@@ -165,7 +165,7 @@ void oaci_filter_df2t(const float *in, float *out, int len, float b0, const floa
 static void oaci_dred_convert_to_16k(DREDEnc *enc, const float *in, int in_len, float *out, int out_len) {
     float oaci_downmix[MAX_DOWNMIX_BUFFER];
     int i;
-    int up;
+    int up = 0;
     celt_assert(enc->channels*in_len <= MAX_DOWNMIX_BUFFER);
     celt_assert(in_len*(oac_int32)16000 == out_len*enc->Fs);
     switch (enc->Fs) {
