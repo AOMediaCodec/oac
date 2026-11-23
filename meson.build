@@ -75,9 +75,6 @@ oac_conf.set('PACKAGE_TARNAME', '"oac"')
 oac_conf.set('PACKAGE_URL', '""')
 oac_conf.set('PACKAGE_VERSION', '"@0@"'.format(oac_version))
 
-# FIXME: optional Ne10 dependency
-have_arm_ne10 = false
-
 libm = cc.find_library('m', required : false)
 
 oac_conf.set('HAVE_LRINTF', cc.has_function('lrintf', prefix: '#include <math.h>', dependencies: libm))

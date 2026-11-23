@@ -138,10 +138,6 @@ typedef struct kiss_fft_state {
     arch_fft_state *arch_fft;
 } kiss_fft_state;
 
-#if defined(HAVE_ARM_NE10)
-# include "arm/fft_arm.h"
-#endif
-
 /*typedef struct kiss_fft_state* kiss_fft_cfg;*/
 
 /**
@@ -194,45 +190,19 @@ void oac_fft_free_arch_c(kiss_fft_state *st);
 int oac_fft_alloc_arch_c(kiss_fft_state *st);
 
 #if !defined(OVERRIDE_OAC_FFT)
-/* Is run-time CPU detection enabled on this platform? */
-# if defined(OAC_HAVE_RTCD) && (defined(HAVE_ARM_NE10))
 
-extern int (*const OAC_FFT_ALLOC_ARCH_IMPL[OAC_ARCHMASK + 1])(
- kiss_fft_state *st);
-
-#  define oac_fft_alloc_arch(_st, arch) \
-        ((*OAC_FFT_ALLOC_ARCH_IMPL[(arch)&OAC_ARCHMASK])(_st))
-
-extern void (*const OAC_FFT_FREE_ARCH_IMPL[OAC_ARCHMASK + 1])(
- kiss_fft_state *st);
-#  define oac_fft_free_arch(_st, arch) \
-        ((*OAC_FFT_FREE_ARCH_IMPL[(arch)&OAC_ARCHMASK])(_st))
-
-extern void (*const OAC_FFT[OAC_ARCHMASK + 1])(const kiss_fft_state *cfg,
- const kiss_fft_cpx *fin, kiss_fft_cpx *fout);
-#  define oac_fft(_cfg, _fin, _fout, arch) \
-        ((*OAC_FFT[(arch)&OAC_ARCHMASK])(_cfg, _fin, _fout))
-
-extern void (*const OAC_IFFT[OAC_ARCHMASK + 1])(const kiss_fft_state *cfg,
- const kiss_fft_cpx *fin, kiss_fft_cpx *fout);
-#  define oac_ifft(_cfg, _fin, _fout, arch) \
-        ((*OAC_IFFT[(arch)&OAC_ARCHMASK])(_cfg, _fin, _fout))
-
-# else /* else for if defined(OAC_HAVE_RTCD) && (defined(HAVE_ARM_NE10)) */
-
-#  define oac_fft_alloc_arch(_st, arch) \
+# define oac_fft_alloc_arch(_st, arch) \
         ((void)(arch), oac_fft_alloc_arch_c(_st))
 
-#  define oac_fft_free_arch(_st, arch) \
+# define oac_fft_free_arch(_st, arch) \
         ((void)(arch), oac_fft_free_arch_c(_st))
 
-#  define oac_fft(_cfg, _fin, _fout, arch) \
+# define oac_fft(_cfg, _fin, _fout, arch) \
         ((void)(arch), oac_fft_c(_cfg, _fin, _fout))
 
-#  define oac_ifft(_cfg, _fin, _fout, arch) \
+# define oac_ifft(_cfg, _fin, _fout, arch) \
         ((void)(arch), oac_ifft_c(_cfg, _fin, _fout))
 
-# endif /* end if defined(OAC_HAVE_RTCD) && (defined(HAVE_ARM_NE10)) */
 #endif /* end if !defined(OVERRIDE_OAC_FFT) */
 
 #endif
