@@ -369,7 +369,7 @@ static OAC_INLINE float oaci_celt_exp2(float x) {
 # define celt_exp2_db oaci_celt_exp2
 # define oaci_celt_log2_db oaci_celt_log2
 
-# define oaci_celt_sin(x) oaci_celt_cos_norm2((0.5f*PI)*(x) - 1.0f)
+# define oaci_celt_sin(x) oaci_celt_cos_norm2((2.f/PI)*(x) - 1.0f)
 # define celt_log(x) (oaci_celt_log2(x)*0.6931471805599453f)
 # define celt_exp(x) (oaci_celt_exp2((x)*1.4426950408889634f))
 
