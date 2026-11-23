@@ -1310,9 +1310,45 @@ static int frame_size_select_overflow(void) {
     return 0;
 }
 
+static int multiframe_large_buffer(void) {
+    /* The size of a 120-ms packet used to be derived from the caller's
+       buffer rather than from the CBR byte budget. With a large buffer,
+       CBR and OAC_BITRATE_MAX, the packet was padded past the largest
+       size its six frames can add up to. */
+    OacEncoder *enc;
+    int err, i;
+    static unsigned char data[200000];
+    static short pcm[5760*2];
+    int max_frame;
+    int ret;
+
+    for (i = 0; i < 5760*2; ++i)
+        pcm[i] = (short)(8000*sin(i*.01) + 3000*sin(i*.0037));
+    /* A 20-ms CBR frame at OAC_BITRATE_MAX is as large as a frame can get. */
+    enc = oac_encoder_create(48000, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
+    oac_test_assert(err == OAC_OK);
+    oac_encoder_ctl(enc, OAC_SET_VBR(0));
+    oac_encoder_ctl(enc, OAC_SET_BITRATE(OAC_BITRATE_MAX));
+    max_frame = oac_encode(enc, pcm, 960, data, sizeof(data));
+    oac_test_assert(max_frame > 0);
+    oac_encoder_destroy(enc);
+
+    enc = oac_encoder_create(48000, 2, OAC_FORMAT_STANDARD, OAC_APPLICATION_AUDIO, &err);
+    oac_test_assert(err == OAC_OK);
+    ret = oac_encode(enc, pcm, 5760, data, sizeof(data));
+    oac_test_assert(ret > 0 && ret <= 6*max_frame);
+    oac_encoder_ctl(enc, OAC_SET_VBR(0));
+    oac_encoder_ctl(enc, OAC_SET_BITRATE(OAC_BITRATE_MAX));
+    ret = oac_encode(enc, pcm, 5760, data, sizeof(data));
+    oac_test_assert(ret > 0 && ret <= 6*max_frame);
+    oac_encoder_destroy(enc);
+    return 0;
+}
+
 void regression_test(void) {
     fprintf(stderr, "Running simple tests for bugs that have been fixed previously\n");
     frame_size_select_overflow();
+    multiframe_large_buffer();
     celt_ec_internal_error();
     mscbr_encode_fail10();
     mscbr_encode_fail();

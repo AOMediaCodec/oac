@@ -1794,12 +1794,10 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         }
 #endif
 
-        if (st->use_vbr || st->user_bitrate_bps == OAC_BITRATE_MAX)
-            repacketize_len = out_data_bytes;
-        else {
-            celt_assert(cbr_bytes >= 0);
-            repacketize_len = IMIN(cbr_bytes, out_data_bytes);
-        }
+        /* In CBR mode, max_data_bytes already accounts for the bitrate, so
+           there is no need to go back to the size of the caller's buffer
+           here. The packet size cap is applied just below. */
+        repacketize_len = max_data_bytes;
         {
             oac_int32 max_frame_bytes = oaci_max_frame_bytes(enc_frame_size, st->Fs, st->channels);
             int toc_bytes_multi = oaci_toc_bytes(nb_frames, st->format, st->channels);
