@@ -181,7 +181,9 @@ typedef oac_val32 celt_glog;
 typedef oac_val32 oac_res;
 # define RES_SHIFT 8
 # define SIG2RES(a)      PSHR32(a, SIG_SHIFT - RES_SHIFT)
-# define RES2INT16(a)    SAT16(PSHR32(a, RES_SHIFT))
+/* Same result as SAT16(PSHR32(a, RES_SHIFT)), without the rounding add that
+   overflows near INT32_MAX: a lossless packet can decode to any 32-bit value. */
+# define RES2INT16(a)    SAT16(SHR32(ADD32(SHR32(a, 1), 1<<(RES_SHIFT-2)), RES_SHIFT-1))
 # define RES2INT24(a)    (a)
 # define RES2FLOAT(a)    ((1.f/32768.f/256.f)*(a))
 # define INT16TORES(a)   SHL32(EXTEND32(a), RES_SHIFT)
@@ -378,7 +380,7 @@ static OAC_INLINE int oaci_celt_isnan(float x) {
 
 # define SIG2RES(a)      ((1/CELT_SIG_SCALE)*(a))
 # define RES2INT16(a)    FLOAT2INT16(a)
-# define RES2INT24(a)    oaci_float2int(32768.f*256.f*(a))
+# define RES2INT24(a)    FLOAT2INT32(a)
 # define RES2FLOAT(a)    (a)
 # define INT16TORES(a)   ((a)*(1/CELT_SIG_SCALE))
 # define INT24TORES(a)   ((1.f/32768.f/256.f)*(a))

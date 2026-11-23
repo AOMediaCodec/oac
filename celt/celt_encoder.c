@@ -139,6 +139,12 @@ struct OacCustomEncoder {
     int prefilter_period;
     oac_val16 prefilter_gain;
     int prefilter_tapset;
+    /* The overlap of the last frame holds prefiltered signal: its gain was not
+       zero, or it was no longer than the cross-fade from a gain that was. */
+    int prefilter_in_overlap;
+    /* Set by CELT_SET_TDAC_MEM until a frame has been coded: the band energies
+       of the previous frame are not known. */
+    int first_after_import;
 #ifdef RESYNTH
     int prefilter_period_old;
     oac_val16 prefilter_gain_old;
@@ -172,7 +178,7 @@ struct OacCustomEncoder {
 # endif
 #endif
 
-    celt_sig in_mem[1]; /* Size = channels*mode->overlap */
+    celt_sig in_mem[1]; /* Size = channels*(mode->overlap/2) */
     /* celt_sig prefilter_mem[],  Size = channels*COMBFILTER_MAXPERIOD */
     /* celt_glog oldBandE[],     Size = channels*mode->nbEBands */
     /* celt_glog oldLogE[],      Size = channels*mode->nbEBands */
@@ -198,7 +204,7 @@ OAC_CUSTOM_NOSTATIC int oac_custom_encoder_get_size(const CELTMode *mode, int ch
     } else qext_scale = 1;
 #endif
     size = sizeof(struct CELTEncoder)
-           + (channels*mode->overlap - 1)*sizeof(celt_sig) /* celt_sig in_mem[channels*mode->overlap]; */
+           + (channels*(mode->overlap/2) - 1)*sizeof(celt_sig) /* celt_sig in_mem[channels*(mode->overlap/2)]; */
            + channels*QEXT_SCALE(COMBFILTER_MAXPERIOD)*sizeof(celt_sig) /* celt_sig prefilter_mem[channels*COMBFILTER_MAXPERIOD]; */
            + 4*channels*mode->nbEBands*sizeof(celt_glog); /* celt_glog oldBandE[channels*mode->nbEBands]; */
                                                           /* celt_glog oldLogE[channels*mode->nbEBands]; */
@@ -528,7 +534,7 @@ static int oaci_patch_transient_decision(celt_glog *newE, celt_glog *oldE, int n
 /** Apply window and compute the MDCT for all sub-frames and
     all channels in a frame */
 static void oaci_compute_mdcts(const CELTMode *mode, int shortBlocks, celt_sig * OAC_RESTRICT in,
-                          celt_sig * OAC_RESTRICT out, int C, int CC, int LM, int upsample,
+                          celt_sig * OAC_RESTRICT out, celt_sig *in_mem, int C, int CC, int LM, int upsample,
                           int arch) {
     const int overlap = mode->overlap;
     int N;
@@ -547,8 +553,9 @@ static void oaci_compute_mdcts(const CELTMode *mode, int shortBlocks, celt_sig *
     c = 0; do {
         for (b = 0; b < B; b++) {
             /* Interleaving the sub-frames while doing the MDCTs */
-            oaci_clt_mdct_forward(&mode->mdct, in + c*(B*N + overlap) + b*N,
+            oaci_clt_mdct_forward(&mode->mdct, in + c*((mode->shortMdctSize<<LM) + overlap) + overlap + b*N,
                           &out[b + c*N*B], mode->window, overlap, shift, B,
+                          in_mem + c*(overlap/2),
                           arch);
         }
     } while (++c < CC);
@@ -1518,7 +1525,6 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
         int i;
         int offset = mode->shortMdctSize - overlap;
         st->prefilter_period = IMAX(st->prefilter_period, COMBFILTER_MINPERIOD);
-        OAC_COPY(in + c*(N + overlap), st->in_mem + c*(overlap), overlap);
         for (i = 0; i < N; i++) before[c] += ABS32(SHR32(in[c*(N + overlap) + overlap + i], 12));
         if (offset)
             oaci_comb_filter(in + c*(N + overlap) + overlap, pre[c] + max_period,
@@ -1563,8 +1569,6 @@ static int oaci_run_prefilter(CELTEncoder *st, celt_sig *in, celt_sig *prefilter
     }
 
     c = 0; do {
-        OAC_COPY(st->in_mem + c*(overlap), in + c*(N + overlap) + N, overlap);
-
         if (N > max_period) {
             OAC_COPY(prefilter_mem + c*max_period, pre[c] + N, max_period);
         } else {
@@ -1763,6 +1767,7 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     oac_val16 tone_freq = -1;
     oac_val32 toneishness = 0;
     VARDECL(celt_glog, surround_dynalloc);
+    VARDECL(celt_sig, in_mem_bak);
     oac_int32 packet_size_cap;
     int qext_scale = 1;
     ALLOC_STACK;
@@ -1795,8 +1800,8 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     qext_scale = st->qext_scale;
 #endif
 
-    prefilter_mem = st->in_mem + CC*(overlap);
-    oldBandE = (celt_glog*)(st->in_mem + CC*(overlap + QEXT_SCALE(COMBFILTER_MAXPERIOD)));
+    prefilter_mem = st->in_mem + CC*(overlap/2);
+    oldBandE = (celt_glog*)(st->in_mem + CC*(overlap/2 + QEXT_SCALE(COMBFILTER_MAXPERIOD)));
     oldLogE = oldBandE + CC*nbEBands;
     oldLogE2 = oldLogE + CC*nbEBands;
     energyError = oldLogE2 + CC*nbEBands;
@@ -2007,20 +2012,23 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     ALLOC(freq, CC*N, celt_sig); /**< Interleaved signal MDCTs */
     ALLOC(bandE, nbEBands*CC, celt_ener);
     ALLOC(bandLogE, nbEBands*CC, celt_glog);
+    ALLOC(in_mem_bak, CC*(overlap/2), celt_sig);
+    OAC_COPY(in_mem_bak, st->in_mem, CC*(overlap/2));
 
     secondMdct = shortBlocks && st->complexity >= 8;
     ALLOC(bandLogE2, C*nbEBands, celt_glog);
     if (secondMdct) {
-        oaci_compute_mdcts(mode, 0, in, freq, C, CC, LM, st->upsample, st->arch);
+        oaci_compute_mdcts(mode, 0, in, freq, st->in_mem, C, CC, LM, st->upsample, st->arch);
         oaci_compute_band_energies(mode, freq, bandE, effEnd, C, LM, st->arch);
         oaci_amp2Log2(mode, effEnd, end, bandE, bandLogE2, C);
         for (c = 0; c < C; c++) {
             for (i = 0; i < end; i++)
                 bandLogE2[nbEBands*c + i] += HALF32(SHL32(LM, DB_SHIFT));
         }
+        OAC_COPY(st->in_mem, in_mem_bak, CC*(overlap/2));
     }
 
-    oaci_compute_mdcts(mode, shortBlocks, in, freq, C, CC, LM, st->upsample, st->arch);
+    oaci_compute_mdcts(mode, shortBlocks, in, freq, st->in_mem, C, CC, LM, st->upsample, st->arch);
     /* This should catch any NaN in the CELT input. Since we're not supposed to see any (they're filtered
        at the Oac layer), just abort. */
     celt_assert(!oaci_celt_isnan(freq[0]) && (C == 1 || !oaci_celt_isnan(freq[N])));
@@ -2133,11 +2141,13 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
 
     /* Last chance to catch any transient we might have missed in the
        time-domain analysis */
-    if (LM > 0 && oaci_ec_tell(enc) + 3 <= total_bits && !isTransient && st->complexity >= 5 && !st->lfe && !hybrid) {
+    if (LM > 0 && oaci_ec_tell(enc) + 3 <= total_bits && !isTransient && st->complexity >= 5 && !st->lfe && !hybrid
+        && !st->first_after_import) {
         if (oaci_patch_transient_decision(bandLogE, oldBandE, nbEBands, start, end, C)) {
             isTransient = 1;
             shortBlocks = M;
-            oaci_compute_mdcts(mode, shortBlocks, in, freq, C, CC, LM, st->upsample, st->arch);
+            OAC_COPY(st->in_mem, in_mem_bak, CC*(overlap/2));
+            oaci_compute_mdcts(mode, shortBlocks, in, freq, st->in_mem, C, CC, LM, st->upsample, st->arch);
             oaci_compute_band_energies(mode, freq, bandE, effEnd, C, LM, st->arch);
             oaci_amp2Log2(mode, effEnd, end, bandE, bandLogE, C);
             /* Compensate for the scaling of short vs long mdcts */
@@ -2570,9 +2580,13 @@ int oaci_celt_encode_with_ec(CELTEncoder * OAC_RESTRICT st, const oac_res * pcm,
     }
 #endif
 
+    /* For a frame no longer than the cross-fade, what is left of the previous
+       gain reaches the overlap handed to the next frame. */
+    st->prefilter_in_overlap = gain1 != 0 || (N == mode->shortMdctSize && st->prefilter_gain != 0);
     st->prefilter_period = pitch_index;
     st->prefilter_gain = gain1;
     st->prefilter_tapset = prefilter_tapset;
+    st->first_after_import = 0;
 #ifdef RESYNTH
     if (LM != 0) {
         st->prefilter_period_old = st->prefilter_period;
@@ -2832,11 +2846,86 @@ int oac_custom_encoder_ctl(CELTEncoder * OAC_RESTRICT st, int request, ...) {
             *value = st->disable_inv;
         }
         break;
+        case CELT_SET_PREEMPHASIS_REQUEST:
+        {
+            const celt_sig *value = va_arg(ap, const celt_sig*);
+            int c;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++)
+                st->preemph_memE[c] = value[c];
+        }
+        break;
+        case CELT_GET_PREEMPHASIS_REQUEST:
+        {
+            celt_sig *value = va_arg(ap, celt_sig*);
+            int c;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++)
+                value[c] = st->preemph_memE[c];
+        }
+        break;
+        case CELT_SET_TDAC_MEM_REQUEST:
+        {
+            const celt_sig *value = va_arg(ap, const celt_sig*);
+            int c;
+            int half_overlap = st->mode->overlap / 2;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++) {
+                OAC_COPY(st->in_mem + c * half_overlap, value + c * half_overlap, half_overlap);
+            }
+            OAC_CLEAR(st->in_mem + st->channels * half_overlap, st->channels * QEXT_SCALE2(COMBFILTER_MAXPERIOD, st->qext_scale));
+            st->prefilter_period = 0;
+            st->prefilter_gain = 0;
+            st->prefilter_tapset = 0;
+            st->prefilter_in_overlap = 0;
+            /* The imported overlap is part of the next frame, which is thus
+               not silent unless the overlap is as well. */
+            st->overlap_max = 0;
+            for (c = 0; c < st->channels * half_overlap; c++)
+                st->overlap_max = MAX32(st->overlap_max, ABS32(SIG2RES(value[c])));
+            st->first_after_import = 1;
+        }
+        break;
+        case CELT_SET_LOOKBACK_REQUEST:
+        {
+            const oac_res *value = va_arg(ap, const oac_res*);
+            int c;
+            int overlap = st->mode->overlap;
+            int max_period = QEXT_SCALE2(COMBFILTER_MAXPERIOD, st->qext_scale);
+            celt_sig *prefilter_mem = st->in_mem + st->channels * (overlap / 2);
+            if (!value) goto bad_arg;
+            celt_assert(st->upsample == 1);
+            for (c = 0; c < st->channels; c++) {
+                /* The first of the overlap+1 samples only primes the pre-emphasis. */
+                celt_sig mem = MULT16_32_Q15(st->mode->preemph[0], RES2SIG(value[c]));
+                oaci_celt_preemphasis(value + st->channels + c, prefilter_mem + (c + 1) * max_period - overlap,
+                                      overlap, st->channels, 1, st->mode->preemph, &mem, st->clip);
+            }
+        }
+        break;
+        case CELT_GET_TDAC_MEM_REQUEST:
+        {
+            celt_sig *value = va_arg(ap, celt_sig*);
+            int c;
+            int half_overlap = st->mode->overlap / 2;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++) {
+                OAC_COPY(value + c * half_overlap, st->in_mem + c * half_overlap, half_overlap);
+            }
+        }
+        break;
+        case CELT_GET_PREFILTER_ACTIVE_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value) goto bad_arg;
+            *value = st->prefilter_in_overlap;
+        }
+        break;
         case OAC_RESET_STATE:
         {
             int i;
             celt_glog *oldBandE, *oldLogE, *oldLogE2;
-            oldBandE = (celt_glog*)(st->in_mem + st->channels*(st->mode->overlap + QEXT_SCALE2(COMBFILTER_MAXPERIOD,
+            oldBandE = (celt_glog*)(st->in_mem + st->channels*(st->mode->overlap/2 + QEXT_SCALE2(COMBFILTER_MAXPERIOD,
             st->qext_scale)));
             oldLogE = oldBandE + st->channels*st->mode->nbEBands;
             oldLogE2 = oldLogE + st->channels*st->mode->nbEBands;

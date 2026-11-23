@@ -73,6 +73,7 @@
 #include "arch.h"
 #include "pitch.h"
 #include "oac_private.h"
+#include "olac.h"
 #include "os_support.h"
 #include "cpu_support.h"
 #include "analysis.h"
@@ -109,6 +110,7 @@ typedef struct {
 struct OacEncoder {
     int celt_enc_offset;
     int silk_enc_offset;
+    int olac_enc_offset;
     silk_EncControlStruct silk_mode;
 #ifdef ENABLE_DRED
     DREDEnc dred_encoder;
@@ -135,6 +137,7 @@ struct OacEncoder {
     int arch;
     int use_dtx;                          /* general DTX for both SILK and CELT */
     int fec_config;
+    int lossy_fallback;
 #ifndef DISABLE_FLOAT_API
     TonalityAnalysisState analysis;
 #endif
@@ -147,6 +150,13 @@ struct OacEncoder {
     oac_val32 hp_mem[2*OAC_MAX_CHANNELS];
     int mode;
     int prev_mode;
+    /* prev_mode is MODE_CELT_ONLY after an OLAC frame; this says the CELT
+       memories are stale and must be refreshed from OLAC's before CELT runs. */
+    int prev_olac;
+    /* The last 2.5 ms that OLAC or CELT coded, and one more sample to prime
+       the pre-emphasis: the history that CELT's analysis looks back on when
+       it takes over from OLAC. */
+    oac_res olac_lookback[MAX_CHANNELS*(2*HALF_OVERLAP + 1)];
     int prev_channels;
     int prev_framesize;
     int bandwidth;
@@ -231,11 +241,16 @@ int oac_encoder_get_size(int channels, int format) {
         return ret;
 }
 
+/* OLAC only runs at 48 kHz, on mono and stereo (see oaci_validate_config()). */
+static int oaci_lossless_supported(oac_int32 Fs, int channels, int format) {
+    return Fs == 48000 && format == OAC_FORMAT_STANDARD && channels <= MAX_CHANNELS;
+}
+
 int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int application) {
     void *silk_enc = NULL;
     CELTEncoder *celt_enc = NULL;
     int err;
-    int ret, silkEncSizeBytes, celtEncSizeBytes = 0;
+    int ret, silkEncSizeBytes, celtEncSizeBytes = 0, olacEncSizeBytes = 0;
     int tot_size;
     int base_size;
     int skip_silk = 0;
@@ -261,7 +276,10 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
     if (application != OAC_APPLICATION_VOIP && application != OAC_APPLICATION_AUDIO
         && application != OAC_APPLICATION_RESTRICTED_LOWDELAY
         && application != OAC_APPLICATION_RESTRICTED_SILK
-        && application != OAC_APPLICATION_RESTRICTED_CELT)
+        && application != OAC_APPLICATION_RESTRICTED_CELT
+        && application != OAC_APPLICATION_LOSSLESS)
+        return OAC_BAD_ARG;
+    if (application == OAC_APPLICATION_LOSSLESS && !oaci_lossless_supported(Fs, channels, format))
         return OAC_BAD_ARG;
     /* SILK only ever codes one or two channels, and ambisonics is always coded
        with CELT (see the MODE_CELT_ONLY override in oac_encode_native()) at
@@ -288,7 +306,8 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
             silkEncSizeBytes = 0;
     }
     if (application != OAC_APPLICATION_RESTRICTED_SILK)
-        celtEncSizeBytes = oaci_celt_encoder_get_size(channels);
+        celtEncSizeBytes = oaci_align(oaci_celt_encoder_get_size(channels));
+    olacEncSizeBytes = oaci_align(sizeof(OlacEncoder));
     base_size = oaci_align(sizeof(OacEncoder));
     /* delay_buffer is declared as [MAX_ENCODER_BUFFER*2] in OacEncoder, sized for stereo.
        Subtract unused portions: full buffer for restricted modes or >2 channels,
@@ -297,13 +316,14 @@ int oac_encoder_init(OacEncoder* st, oac_int32 Fs, int channels, int format, int
         base_size = oaci_align(base_size - MAX_ENCODER_BUFFER*2*sizeof(oac_res));
     } else if (channels == 1)
         base_size = oaci_align(base_size - MAX_ENCODER_BUFFER*sizeof(oac_res));
-    tot_size = base_size + silkEncSizeBytes + celtEncSizeBytes;
+    tot_size = base_size + silkEncSizeBytes + celtEncSizeBytes + olacEncSizeBytes;
     if (st == NULL) {
         return tot_size;
     }
     OAC_CLEAR((char*)st, tot_size);
     st->silk_enc_offset = base_size;
     st->celt_enc_offset = st->silk_enc_offset + silkEncSizeBytes;
+    st->olac_enc_offset = st->celt_enc_offset + celtEncSizeBytes;
 
     st->stream_channels = st->channels = channels;
     st->format = format;
@@ -409,13 +429,16 @@ static unsigned char oaci_gen_toc(int mode, int framerate, int bandwidth) {
         framerate <<= 1;
         period++;
     }
-    if (mode == MODE_SILK_ONLY) {
+    if (mode == MODE_OLAC) {
+        toc = 0x80;
+        toc |= period<<3;
+    } else if (mode == MODE_SILK_ONLY) {
         toc = (bandwidth - OAC_BANDWIDTH_NARROWBAND)<<5;
         toc |= (period - 2)<<3;
     } else if (mode == MODE_CELT_ONLY) {
         int tmp = bandwidth - OAC_BANDWIDTH_MEDIUMBAND;
-        if (tmp < 0)
-            tmp = 0;
+        if (tmp < 1)
+            tmp = 1;
         toc = 0x80;
         toc |= tmp<<5;
         toc |= period<<3;
@@ -675,7 +698,9 @@ OacEncoder *oac_encoder_create(oac_int32 Fs, int channels, int format, int appli
         || (application != OAC_APPLICATION_VOIP && application != OAC_APPLICATION_AUDIO
             && application != OAC_APPLICATION_RESTRICTED_LOWDELAY
             && application != OAC_APPLICATION_RESTRICTED_SILK
-            && application != OAC_APPLICATION_RESTRICTED_CELT)
+            && application != OAC_APPLICATION_RESTRICTED_CELT
+            && application != OAC_APPLICATION_LOSSLESS)
+        || (application == OAC_APPLICATION_LOSSLESS && !oaci_lossless_supported(Fs, channels, format))
         /* Repeated from oac_encoder_init() so the caller gets OAC_BAD_ARG from
            the argument check rather than from the size probe below. The probe
            now propagates its own error too, so this is belt and braces. */
@@ -778,16 +803,20 @@ static oac_int32 oaci_user_bitrate_to_bitrate(OacEncoder *st, int frame_size, in
     oac_int32 max_bitrate, user_bitrate;
     if (!frame_size) frame_size = st->Fs/400;
     max_bitrate = oaci_bits_to_bitrate(max_data_bytes*8, st->Fs, frame_size);
-    if (st->user_bitrate_bps == OAC_AUTO)
+    user_bitrate = st->user_bitrate_bps;
+    /* Lossless coding needs as much rate as the signal takes, so by default
+       (and always without lossy fallback) the bit-rate setting is ignored. */
+    if (st->application == OAC_APPLICATION_LOSSLESS && (user_bitrate == OAC_AUTO || !st->lossy_fallback))
+        user_bitrate = OAC_BITRATE_MAX;
+    if (user_bitrate == OAC_AUTO)
         user_bitrate = 60*st->Fs/frame_size + st->Fs*st->channels;
-    else if (st->user_bitrate_bps == OAC_BITRATE_MAX) {
+    else if (user_bitrate == OAC_BITRATE_MAX) {
         /* As much rate as this configuration could ever need, i.e. the lossless
            bound. This scales with sampling rate, frame size and channel count,
            and only reaches OAC_SIZE_MAX for a 20 ms, 256-channel, 96 kHz frame. */
         user_bitrate = oaci_bits_to_bitrate(
             oaci_max_frame_bytes(frame_size, st->Fs, st->channels)*8, st->Fs, frame_size);
-    } else
-        user_bitrate = st->user_bitrate_bps;
+    }
     return IMIN(user_bitrate, max_bitrate);
 }
 
@@ -1205,7 +1234,7 @@ static int oaci_compute_redundancy_bytes(oac_int32 max_data_bytes, oac_int32 bit
 
 static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     unsigned char *data, oac_int32 max_data_bytes,
-    int float_api, int first_frame,
+    int float_api, int lsb_depth, int first_frame,
 #ifdef ENABLE_DRED
     oac_int32 dred_bitrate_bps,
 #endif
@@ -1213,7 +1242,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     AnalysisInfo *analysis_info,
 #endif
     int is_silence, int redundancy, int celt_to_silk, int prefill,
-    oac_int32 equiv_rate, int to_celt);
+    oac_int32 equiv_rate, int to_celt, int olac_allowed);
 
 oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
                             unsigned char *data, oac_int32 out_data_bytes, int lsb_depth,
@@ -1253,6 +1282,12 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
 
     st->rangeFinal = 0;
     if (frame_size <= 0 || max_data_bytes <= 0) {
+        RESTORE_STACK;
+        return OAC_BAD_ARG;
+    }
+    /* Lossless frames are not split into multi-frame packets (yet): all the
+       sub-frames would have to fit, or all be coded with CELT. */
+    if (st->application == OAC_APPLICATION_LOSSLESS && frame_size > st->Fs/50) {
         RESTORE_STACK;
         return OAC_BAD_ARG;
     }
@@ -1367,6 +1402,13 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     dred_bitrate_bps = oaci_compute_dred_bitrate(st, st->bitrate_bps, frame_size);
     st->bitrate_bps -= dred_bitrate_bps;
 #endif
+    /* Without lossy fallback the only acceptable output is the lossless frame,
+       so a buffer that cannot hold anything is an error, not a 'PLC' frame. */
+    if (st->application == OAC_APPLICATION_LOSSLESS && !st->lossy_fallback
+        && max_data_bytes < oaci_toc_bytes(1, st->format, st->channels) + 2) {
+        RESTORE_STACK;
+        return OAC_BUFFER_TOO_SMALL;
+    }
     if (max_data_bytes < oaci_toc_bytes(1, st->format, st->channels) + 2
         || st->bitrate_bps < 3*frame_rate*8
         || (frame_rate < 50 && (max_data_bytes*(oac_int32)frame_rate < 300 || st->bitrate_bps < 2400))) {
@@ -1417,8 +1459,8 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
 
         if (tocmode == MODE_SILK_ONLY && bw > OAC_BANDWIDTH_WIDEBAND)
             bw = OAC_BANDWIDTH_WIDEBAND;
-        else if (tocmode == MODE_CELT_ONLY && bw == OAC_BANDWIDTH_MEDIUMBAND)
-            bw = OAC_BANDWIDTH_NARROWBAND;
+        else if (tocmode == MODE_CELT_ONLY && bw < OAC_BANDWIDTH_WIDEBAND)
+            bw = OAC_BANDWIDTH_WIDEBAND;
         else if (tocmode == MODE_HYBRID && bw <= OAC_BANDWIDTH_SUPERWIDEBAND)
             bw = OAC_BANDWIDTH_SUPERWIDEBAND;
 
@@ -1489,6 +1531,8 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         }
 #endif
     }
+    if (st->application == OAC_APPLICATION_LOSSLESS)
+        st->stream_channels = st->channels;
     /* Update equivalent rate for channels decision. */
     equiv_rate = oaci_compute_equiv_rate(st->bitrate_bps, st->stream_channels, st->Fs/frame_size,
           st->use_vbr, 0, st->silk_mode.complexity, st->silk_mode.packetLossPercentage);
@@ -1505,7 +1549,8 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     if (st->application == OAC_APPLICATION_RESTRICTED_SILK) {
         st->mode = MODE_SILK_ONLY;
     } else if (st->application == OAC_APPLICATION_RESTRICTED_LOWDELAY
-               || st->application == OAC_APPLICATION_RESTRICTED_CELT) {
+               || st->application == OAC_APPLICATION_RESTRICTED_CELT
+               || st->application == OAC_APPLICATION_LOSSLESS) {
         st->mode = MODE_CELT_ONLY;
     } else if (st->user_forced_mode == OAC_AUTO) {
 #ifdef FUZZING
@@ -1708,16 +1753,22 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
     if (st->application != OAC_APPLICATION_RESTRICTED_SILK)
         celt_encoder_ctl(celt_enc, OAC_SET_LSB_DEPTH(lsb_depth));
 
-    /* CELT mode doesn't support mediumband, use wideband instead */
-    if (st->mode == MODE_CELT_ONLY && st->bandwidth == OAC_BANDWIDTH_MEDIUMBAND)
+    /* CELT mode doesn't support narrowband/mediumband in OAC, use wideband instead */
+    if (st->mode == MODE_CELT_ONLY && st->bandwidth < OAC_BANDWIDTH_WIDEBAND)
         st->bandwidth = OAC_BANDWIDTH_WIDEBAND;
+    /* Wideband is the narrowest bandwidth a CELT ToC can signal, so an LFE
+       stream has to be coded as such for the decoder to read the same number
+       of bands; its allocation leaves the upper bands empty anyway. */
     if (st->lfe)
-        st->bandwidth = OAC_BANDWIDTH_NARROWBAND;
+        st->bandwidth = OAC_BANDWIDTH_WIDEBAND;
 
     curr_bandwidth = st->bandwidth;
 
     if (st->application == OAC_APPLICATION_RESTRICTED_SILK && curr_bandwidth > OAC_BANDWIDTH_WIDEBAND)
         st->bandwidth = curr_bandwidth = OAC_BANDWIDTH_WIDEBAND;
+    /* Lossless coding is always full-band, and so is its lossy fallback. */
+    if (st->application == OAC_APPLICATION_LOSSLESS)
+        st->bandwidth = curr_bandwidth = OAC_BANDWIDTH_FULLBAND;
     /* Chooses the appropriate mode for speech
      * NEVER* switch to/from CELT-only mode here as this will invalidate some assumptions */
     if (st->mode == MODE_SILK_ONLY && curr_bandwidth > OAC_BANDWIDTH_WIDEBAND)
@@ -1852,7 +1903,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
             lsb_depth);
 
             tmp_len = oac_encode_frame_native(st, pcm + i*(st->channels*enc_frame_size), enc_frame_size, curr_data,
-            curr_max, float_api, first_frame,
+            curr_max, float_api, lsb_depth, first_frame,
 #ifdef ENABLE_DRED
                     dred_bitrate_bps,
 #endif
@@ -1860,7 +1911,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
                     &analysis_info,
 #endif
                     is_silence, frame_redundancy, celt_to_silk, prefill,
-                    equiv_rate, frame_to_celt
+                    equiv_rate, frame_to_celt, 0
                 );
             if (tmp_len < 0) {
                 RESTORE_STACK;
@@ -1887,7 +1938,7 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         RESTORE_STACK;
         return ret;
     } else {
-        ret = oac_encode_frame_native(st, pcm, frame_size, data, max_data_bytes, float_api, 1,
+        ret = oac_encode_frame_native(st, pcm, frame_size, data, max_data_bytes, float_api, lsb_depth, 1,
 #ifdef ENABLE_DRED
                 dred_bitrate_bps,
 #endif
@@ -1895,16 +1946,89 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
                 &analysis_info,
 #endif
                 is_silence, redundancy, celt_to_silk, prefill,
-                equiv_rate, to_celt
+                equiv_rate, to_celt, 1
             );
         RESTORE_STACK;
         return ret;
     }
 }
 
+/* Whether a lossy application should try coding this CELT frame losslessly,
+   which is worth it whenever that is cheaper than the lossy target. Only when
+   OLAC can represent what CELT would code (48 kHz, full-band, mono or stereo
+   coded as is), not on the inactive frames of a DTX stream, and not right
+   after a frame coded with CELT's comb prefilter, whose TDAC memory is that
+   of the prefiltered signal and cannot be handed over. The attempt can cost
+   as much as coding the frame with CELT, hence only at the highest
+   complexities, and digital silence takes fewer bytes as a CELT frame. */
+static int oaci_try_olac(const OacEncoder *st, CELTEncoder *celt_enc, int bandwidth, int activity, int is_silence) {
+    oac_int32 prefilter = 0;
+    if (st->application == OAC_APPLICATION_VOIP || st->application == OAC_APPLICATION_RESTRICTED_SILK)
+        return 0;
+    if (st->silk_mode.complexity < 8 || is_silence)
+        return 0;
+    if (st->Fs != 48000 || bandwidth != OAC_BANDWIDTH_FULLBAND || st->format != OAC_FORMAT_STANDARD
+        || st->channels > MAX_CHANNELS || st->stream_channels != st->channels)
+        return 0;
+    /* With DTX, the inactive frames (including the periodic refreshes) have to
+       be CELT frames: the decoder's comfort noise is generated from the band
+       energies of the last CELT frame it decoded. */
+    if (st->use_dtx && !activity)
+        return 0;
+#ifdef ENABLE_DRED
+    if (st->dred_duration > 0)
+        return 0;
+#endif
+    if (!st->prev_olac)
+        celt_encoder_ctl(celt_enc, CELT_GET_PREFILTER_ACTIVE(&prefilter));
+    return !prefilter;
+}
+
+/* Codes a frame with OLAC in place of CELT. Returns the payload size (without
+   the ToC), or OAC_BUFFER_TOO_SMALL if it does not fit in max_bytes, in which
+   case the OLAC state is left as it was. */
+static int oaci_olac_encode_frame(OacEncoder *st, CELTEncoder *celt_enc, const oac_res *pcm_buf,
+                                  int frame_size, int lsb_depth, unsigned char *data, int max_bytes) {
+    OlacEncoder *olac_enc = (OlacEncoder*)((char*)st + st->olac_enc_offset);
+    int shift = 24 - lsb_depth;
+    int ret;
+    int i;
+    VARDECL(oac_int32, pcm_int32);
+    SAVE_STACK;
+
+    ALLOC(pcm_int32, frame_size*st->channels, oac_int32);
+    for (i = 0; i < frame_size*st->channels; i++) {
+        /* Clip at +/-2.0 like CELT does, before the conversion (which what
+           lies beyond would overflow), then round to the input's depth so that
+           OLAC sees the zero LSBs even after the high-pass filter or when
+           coming from the float API. */
+        oac_res x = MAX32(MIN32(pcm_buf[i], INT24TORES(16777216)), -INT24TORES(16777216));
+        oac_int32 v = OLAC_PSHR32(RES2INT24(x), shift);
+        pcm_int32[i] = OLAC_SHL32(IMIN(v, (1<<(24 - shift)) - 1), shift);
+    }
+    if (!st->prev_olac) {
+        /* First OLAC frame since CELT last ran: continue from CELT's overlap
+           and pre-emphasis memories so that the switch is seamless. */
+        celt_sig preemph[MAX_CHANNELS];
+        celt_sig tdac[MAX_CHANNELS*HALF_OVERLAP];
+        int c;
+        celt_encoder_ctl(celt_enc, CELT_GET_PREEMPHASIS(preemph));
+        celt_encoder_ctl(celt_enc, CELT_GET_TDAC_MEM(tdac));
+        olac_encoder_init(olac_enc, st->channels, st->Fs);
+        oaci_celt_to_olac_mem(preemph, tdac, st->channels, olac_enc->pmem, &olac_enc->tdac_mem[0][0]);
+        for (c = 0; c < st->channels; c++)
+            olac_enc->mem_modulo[c] = MOD(olac_enc->pmem[c], PREEMPH_MOD);
+    }
+    ret = olac_encode(olac_enc, pcm_int32, frame_size, data, max_bytes);
+    if (ret > 0)
+        st->rangeFinal = olac_enc->rng;
+    RESTORE_STACK;
+    return ret;
+}
+
 static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int frame_size,
                                          unsigned char *data, oac_int32 orig_max_data_bytes,
-                                         int float_api, int first_frame,
+                                         int float_api, int lsb_depth, int first_frame,
 #ifdef ENABLE_DRED
                                          oac_int32 dred_bitrate_bps,
 #endif
@@ -1912,7 +2036,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
                                          AnalysisInfo *analysis_info,
 #endif
                                          int is_silence, int redundancy, int celt_to_silk, int prefill,
-                                         oac_int32 equiv_rate, int to_celt) {
+                                         oac_int32 equiv_rate, int to_celt, int olac_allowed) {
     void *silk_enc = NULL;
     CELTEncoder *celt_enc = NULL;
     const CELTMode *celt_mode = NULL;
@@ -1934,6 +2058,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     int hp_freq_smth1;
     oac_val16 HB_gain;
     int apply_padding;
+    int olac = 0;
     int frame_rate;
     int curr_bandwidth;
     int delay_compensation;
@@ -1953,7 +2078,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     }
     curr_bandwidth = st->bandwidth;
     if (st->application == OAC_APPLICATION_RESTRICTED_LOWDELAY || st->application == OAC_APPLICATION_RESTRICTED_CELT
-        || st->application == OAC_APPLICATION_RESTRICTED_SILK)
+        || st->application == OAC_APPLICATION_RESTRICTED_SILK || st->application == OAC_APPLICATION_LOSSLESS)
         delay_compensation = 0;
     else
         /* Zero for ambisonics and for anything above two channels; see
@@ -2050,6 +2175,9 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
             }
         }
 #endif
+    } else if (st->application == OAC_APPLICATION_LOSSLESS) {
+        /* Any filtering would defeat the purpose. */
+        OAC_COPY(&pcm_buf[total_buffer*st->channels], pcm, frame_size*st->channels);
     } else {
         oaci_dc_reject(pcm, 3, &pcm_buf[total_buffer*st->channels], st->hp_mem, frame_size, st->channels, st->Fs);
     }
@@ -2068,6 +2196,25 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
 #else
     (void)float_api;
 #endif
+
+    if (st->prev_olac) {
+        /* Resume CELT from where OLAC left off, before it codes anything
+           (including the CELT->SILK redundancy below). */
+        OlacEncoder *olac_enc = (OlacEncoder*)((char*)st + st->olac_enc_offset);
+        celt_sig preemph[MAX_CHANNELS];
+        celt_sig tdac[MAX_CHANNELS*HALF_OVERLAP];
+        oaci_olac_to_celt_mem(olac_enc->pmem, &olac_enc->tdac_mem[0][0], st->channels, olac_enc->last_ctz,
+                              preemph, tdac);
+        /* Going from OLAC to CELT is a CELT reset, here and in the decoder:
+           nothing CELT remembers from before the OLAC frames (band energies,
+           prefilter history) is used again. What survives is what OLAC hands
+           over, and the last 2.5 ms of input for the analysis to look back
+           on, which the decoder has too (its first CELT frame starts there). */
+        celt_encoder_ctl(celt_enc, OAC_RESET_STATE);
+        celt_encoder_ctl(celt_enc, CELT_SET_PREEMPHASIS(preemph));
+        celt_encoder_ctl(celt_enc, CELT_SET_TDAC_MEM(tdac));
+        celt_encoder_ctl(celt_enc, CELT_SET_LOOKBACK(st->olac_lookback));
+    }
 
 #ifdef ENABLE_DRED
     /* Compute the DRED features. Needs to be before SILK because of DTX. */
@@ -2318,8 +2465,11 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     if (st->mode != MODE_SILK_ONLY) {
         oac_val32 celt_pred = 2;
         /* We may still decide to disable prediction later */
-        if (st->silk_mode.reducedDependency)
+        if (st->silk_mode.reducedDependency || st->prev_olac)
             celt_pred = 0;
+        /* No comb prefilter, so that we can always switch back to OLAC. */
+        else if (st->application == OAC_APPLICATION_LOSSLESS)
+            celt_pred = 1;
         celt_encoder_ctl(celt_enc, CELT_SET_PREDICTION(celt_pred));
     }
 
@@ -2348,7 +2498,9 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     }
     st->prev_HB_gain = HB_gain;
     if (st->mode != MODE_HYBRID || st->stream_channels == 1) {
-        if (equiv_rate > 32000)
+        /* Never narrow the stereo image of a lossless frame, whatever the
+           equivalent rate of a small buffer or of the fallback's bit-rate. */
+        if (st->application == OAC_APPLICATION_LOSSLESS || equiv_rate > 32000)
             st->silk_mode.stereoWidth_Q14 = 16384;
         else if (equiv_rate < 16000)
             st->silk_mode.stereoWidth_Q14 = 0;
@@ -2491,8 +2643,25 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
             oaci_celt_encode_with_ec(celt_enc, tmp_prefill, st->Fs/400, dummy, 2, NULL);
             celt_encoder_ctl(celt_enc, CELT_SET_PREDICTION(0));
         }
+        /* Code the frame losslessly in place of CELT when that is what the
+           application asked for, or when it is cheaper than the lossy target. */
+        if (olac_allowed && st->mode == MODE_CELT_ONLY && !redundancy
+            && (st->application == OAC_APPLICATION_LOSSLESS
+                || oaci_try_olac(st, celt_enc, curr_bandwidth, activity, is_silence))) {
+            int olac_max_bytes = max_data_bytes - toc_bytes;
+            /* In the lossy applications the frame also has to fit the bit-rate
+               (the output buffer already does in CBR). */
+            if (st->application != OAC_APPLICATION_LOSSLESS)
+                olac_max_bytes = IMIN(olac_max_bytes, (oaci_bitrate_to_bits(st->bitrate_bps, st->Fs, frame_size) + 4)/8 - toc_bytes);
+            ret = oaci_olac_encode_frame(st, celt_enc, pcm_buf, frame_size, lsb_depth, data, olac_max_bytes);
+            olac = ret > 0;
+            if (!olac && st->application == OAC_APPLICATION_LOSSLESS && !st->lossy_fallback) {
+                RESTORE_STACK;
+                return OAC_BUFFER_TOO_SMALL;
+            }
+        }
         /* If false, we already busted the budget and we'll end up with a "PLC frame" */
-        if (oaci_ec_tell(&enc) <= 8*nb_compr_bytes) {
+        if (!olac && oaci_ec_tell(&enc) <= 8*nb_compr_bytes) {
             ret = oaci_celt_encode_with_ec(celt_enc, pcm_buf, frame_size, NULL, nb_compr_bytes, &enc);
             if (ret < 0) {
                 RESTORE_STACK;
@@ -2504,7 +2673,8 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
                 nb_compr_bytes = ret + redundancy_bytes;
             }
         }
-        celt_encoder_ctl(celt_enc, OAC_GET_FINAL_RANGE(&st->rangeFinal));
+        if (!olac)
+            celt_encoder_ctl(celt_enc, OAC_GET_FINAL_RANGE(&st->rangeFinal));
     } else {
         st->rangeFinal = enc.rng;
     }
@@ -2545,7 +2715,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
     /* Signalling the mode and the framing in the first one to three bytes */
     data -= toc_bytes;
     {
-        unsigned char base_toc = oaci_gen_toc(st->mode, st->Fs/frame_size, curr_bandwidth);
+        unsigned char base_toc = oaci_gen_toc(olac ? MODE_OLAC : st->mode, st->Fs/frame_size, curr_bandwidth);
         oaci_write_toc(base_toc, 1, 0, 0, st->format, st->stream_channels,
                        oaci_toc_samples_per_frame(base_toc, 400), data);
     }
@@ -2556,13 +2726,22 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
         st->prev_mode = MODE_CELT_ONLY;
     else
         st->prev_mode = st->mode;
+    st->prev_olac = olac;
+    if (st->channels <= MAX_CHANNELS) {
+        /* What CELT will look back on if it takes over from OLAC at the next
+           frame (see olac_lookback). */
+        int n = IMIN(2*HALF_OVERLAP + 1, frame_size);
+        OAC_MOVE(st->olac_lookback, st->olac_lookback + n*st->channels, (2*HALF_OVERLAP + 1 - n)*st->channels);
+        OAC_COPY(st->olac_lookback + (2*HALF_OVERLAP + 1 - n)*st->channels, pcm_buf + (frame_size - n)*st->channels,
+                 n*st->channels);
+    }
     st->prev_channels = st->stream_channels;
     st->prev_framesize = frame_size;
 
     st->first = 0;
 
-    /* DTX decision */
-    if (st->use_dtx && !st->silk_mode.useDTX) {
+    /* DTX decision (never for lossless, since a DTX frame is not lossless) */
+    if (st->use_dtx && !st->silk_mode.useDTX && st->application != OAC_APPLICATION_LOSSLESS) {
         if (oaci_decide_dtx_mode(activity, &st->nb_no_activity_ms_Q1, 2*1000*frame_size/st->Fs)) {
             st->rangeFinal = 0;
             RESTORE_STACK;
@@ -2765,7 +2944,8 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
                 break;
             }
             if ((value != OAC_APPLICATION_VOIP && value != OAC_APPLICATION_AUDIO
-                 && value != OAC_APPLICATION_RESTRICTED_LOWDELAY)
+                 && value != OAC_APPLICATION_RESTRICTED_LOWDELAY && value != OAC_APPLICATION_LOSSLESS)
+                || (value == OAC_APPLICATION_LOSSLESS && !oaci_lossless_supported(st->Fs, st->channels, st->format))
                 || (!st->first && st->application != value)) {
                 ret = OAC_BAD_ARG;
                 break;
@@ -3034,7 +3214,8 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
             }
             *value = st->Fs/400;
             if (st->application != OAC_APPLICATION_RESTRICTED_LOWDELAY
-                && st->application != OAC_APPLICATION_RESTRICTED_CELT)
+                && st->application != OAC_APPLICATION_RESTRICTED_CELT
+                && st->application != OAC_APPLICATION_LOSSLESS)
                 *value += st->delay_compensation;
         }
         break;
@@ -3119,6 +3300,23 @@ int oac_encoder_ctl(OacEncoder *st, int request, ...) {
             if (!value)
                 goto bad_arg;
             *value = st->silk_mode.reducedDependency;
+        }
+        break;
+        case OAC_SET_LOSSY_FALLBACK_REQUEST:
+        {
+            oac_int32 value = va_arg(ap, oac_int32);
+            if (value < 0 || value > 1) {
+                goto bad_arg;
+            }
+            st->lossy_fallback = value;
+        }
+        break;
+        case OAC_GET_LOSSY_FALLBACK_REQUEST:
+        {
+            oac_int32 *value = va_arg(ap, oac_int32*);
+            if (!value)
+                goto bad_arg;
+            *value = st->lossy_fallback;
         }
         break;
         case OAC_SET_PHASE_INVERSION_DISABLED_REQUEST:

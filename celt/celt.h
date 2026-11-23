@@ -127,6 +127,10 @@ typedef struct {
 
 #define celt_check_glog_ptr(ptr) ((ptr) + ((ptr) - (celt_glog*)(ptr)))
 
+#define celt_check_sig_ptr(ptr) ((ptr) + ((ptr) - (celt_sig*)(ptr)))
+#define celt_check_const_sig_ptr(ptr) ((ptr) + ((ptr) - (const celt_sig*)(ptr)))
+#define celt_check_const_res_ptr(ptr) ((ptr) + ((ptr) - (const oac_res*)(ptr)))
+
 /* Encoder/decoder Requests */
 
 
@@ -178,6 +182,34 @@ typedef struct {
 
 #define CELT_SET_SILK_INFO_REQUEST    10028
 #define CELT_SET_SILK_INFO(x) CELT_SET_SILK_INFO_REQUEST, celt_check_silkinfo_ptr(x)
+
+#define CELT_SET_PREEMPHASIS_REQUEST    10030
+#define CELT_SET_PREEMPHASIS(x) CELT_SET_PREEMPHASIS_REQUEST, celt_check_const_sig_ptr(x)
+
+#define CELT_GET_PREEMPHASIS_REQUEST    10031
+#define CELT_GET_PREEMPHASIS(x) CELT_GET_PREEMPHASIS_REQUEST, celt_check_sig_ptr(x)
+
+#define CELT_SET_TDAC_MEM_REQUEST       10032
+#define CELT_SET_TDAC_MEM(x) CELT_SET_TDAC_MEM_REQUEST, celt_check_const_sig_ptr(x)
+
+#define CELT_GET_TDAC_MEM_REQUEST       10033
+#define CELT_GET_TDAC_MEM(x) CELT_GET_TDAC_MEM_REQUEST, celt_check_sig_ptr(x)
+
+/* Encoder only: whether the overlap of the last encoded frame holds
+   prefiltered signal, because the frame used the comb prefilter or, being no
+   longer than the cross-fade (2.5 ms), was still fading it out. Only the
+   decoder's postfilter can undo that, so such a TDAC memory cannot be handed
+   to another codec. */
+#define CELT_GET_PREFILTER_ACTIVE_REQUEST 10035
+#define CELT_GET_PREFILTER_ACTIVE(x) CELT_GET_PREFILTER_ACTIVE_REQUEST, oac_check_int_ptr(x)
+
+/* Encoder only, after CELT_SET_TDAC_MEM: the overlap+1 samples (interleaved)
+   that precede the next frame. They become the 2.5 ms of history that the
+   transient and tone analysis look back on, which are also the first 2.5 ms
+   of the prefilter's history: the decoder's post-filter has them too, as its
+   first frame starts that much earlier. */
+#define CELT_SET_LOOKBACK_REQUEST       10036
+#define CELT_SET_LOOKBACK(x) CELT_SET_LOOKBACK_REQUEST, celt_check_const_res_ptr(x)
 
 /* Highest bit-rate the frame length signalling can represent: a full
    OAC_SIZE_MAX payload every 20 ms. Only used to saturate the bits<->bit-rate

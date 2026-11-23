@@ -716,6 +716,10 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
         int end;
         int effEnd;
         celt_glog decay;
+        /* Nothing has been decoded since the state was last reset or imported
+           with CELT_SET_TDAC_MEM, so the band energies are meaningless: just let
+           the overlap memory decay to zero instead of filling with noise. */
+        int silence = st->last_frame_type == FRAME_NONE;
         end = st->end;
         effEnd = IMAX(start, IMIN(end, mode->effEBands));
 
@@ -752,7 +756,7 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
         }
         st->rng = seed;
 
-        oaci_celt_synthesis(mode, X, out_syn, oldBandE, start, effEnd, C, C, 0, LM, st->downsample, 0, st->arch);
+        oaci_celt_synthesis(mode, X, out_syn, oldBandE, start, effEnd, C, C, 0, LM, st->downsample, silence, st->arch);
 
         c = 0; do {
             st->postfilter_period = IMAX(st->postfilter_period, COMBFILTER_MINPERIOD);
@@ -1049,7 +1053,10 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
         st->skip_plc = 0;
     }
 #endif
-    st->last_frame_type = curr_frame_type;
+    /* Stay in the "nothing decoded yet" state across consecutive lost frames
+       so that they all come out silent (see the FRAME_PLC_NOISE branch). */
+    if (!(curr_frame_type == FRAME_PLC_NOISE && st->last_frame_type == FRAME_NONE))
+        st->last_frame_type = curr_frame_type;
     RESTORE_STACK;
 }
 
@@ -1638,6 +1645,76 @@ int oac_custom_decoder_ctl(CELTDecoder * OAC_RESTRICT st, int request, ...) {
             if (value == NULL)
                 goto bad_arg;
             *value = st->overlap/st->downsample;
+        }
+        break;
+        case CELT_SET_PREEMPHASIS_REQUEST:
+        {
+            const celt_sig *value = va_arg(ap, const celt_sig*);
+            int c;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++)
+                st->preemph_memD[c] = value[c];
+        }
+        break;
+        case CELT_GET_PREEMPHASIS_REQUEST:
+        {
+            celt_sig *value = va_arg(ap, celt_sig*);
+            int c;
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++)
+                value[c] = st->preemph_memD[c];
+        }
+        break;
+        case CELT_SET_TDAC_MEM_REQUEST:
+        {
+            const celt_sig *value = va_arg(ap, const celt_sig*);
+            int c;
+            int half_overlap = st->overlap / 2;
+            int decode_buffer_size;
+#ifdef ENABLE_QEXT
+            int qext_scale = st->qext_scale;
+#endif
+            decode_buffer_size = QEXT_SCALE(DECODE_BUFFER_SIZE);
+            if (!value) goto bad_arg;
+            for (c = 0; c < st->channels; c++) {
+                celt_sig *decode_mem = st->_decode_mem + c * (decode_buffer_size + st->overlap);
+                OAC_COPY(decode_mem + decode_buffer_size, value + c * half_overlap, half_overlap);
+            }
+            st->postfilter_period = 0;
+            st->postfilter_gain = 0;
+            st->postfilter_tapset = 0;
+            st->postfilter_period_old = 0;
+            st->postfilter_gain_old = 0;
+            st->postfilter_tapset_old = 0;
+            /* The rest of the decode buffer is stale: a lost frame must not
+               run the pitch PLC on it (see oaci_celt_decode_lost()). */
+            st->prefilter_and_fold = 0;
+            st->skip_plc = 1;
+            st->loss_duration = 0;
+            st->last_frame_type = FRAME_NONE;
+        }
+        break;
+        case CELT_GET_TDAC_MEM_REQUEST:
+        {
+            celt_sig *value = va_arg(ap, celt_sig*);
+            int c;
+            int half_overlap = st->overlap / 2;
+            int decode_buffer_size;
+#ifdef ENABLE_QEXT
+            int qext_scale = st->qext_scale;
+#endif
+            decode_buffer_size = QEXT_SCALE(DECODE_BUFFER_SIZE);
+            if (!value) goto bad_arg;
+            /* After the pitch-based or neural PLC, the overlap still holds plain
+               time-domain samples: fold them now, as the next frame would have. */
+            if (st->prefilter_and_fold) {
+                oaci_prefilter_and_fold(st, 0);
+                st->prefilter_and_fold = 0;
+            }
+            for (c = 0; c < st->channels; c++) {
+                celt_sig *decode_mem = st->_decode_mem + c * (decode_buffer_size + st->overlap);
+                OAC_COPY(value + c * half_overlap, decode_mem + decode_buffer_size, half_overlap);
+            }
         }
         break;
         case OAC_RESET_STATE:
