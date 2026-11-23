@@ -1100,6 +1100,10 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
 #endif
             st->stream_channels = st->channels;
             st->frame_size = st->Fs/400;
+#ifdef ENABLE_OSCE_BWE
+            /* DecControl is not part of the cleared area */
+            st->DecControl.prev_osce_extended_mode = OSCE_MODE_CELT_ONLY;
+#endif
         }
         break;
         case OAC_GET_SAMPLE_RATE_REQUEST:
