@@ -271,7 +271,7 @@ void oaci_dred_compute_latents(DREDEnc *enc, const float *pcm, int frame_size, i
             }
         }
 
-        pcm += process_size;
+        pcm += process_size*enc->channels;
         frame_size16k -= process_size16k;
     }
 }
