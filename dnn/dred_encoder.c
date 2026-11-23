@@ -195,9 +195,9 @@ static void oaci_dred_convert_to_16k(DREDEnc *enc, const float *in, int in_len, 
     celt_assert(up*in_len <= MAX_DOWNMIX_BUFFER);
     OAC_CLEAR(oaci_downmix, up*in_len);
     if (enc->channels == 1) {
-        for (i = 0; i < in_len; i++)oaci_downmix[up*i] = FLOAT2INT16(up*in[i]) + VERY_SMALL;
+        for (i = 0; i < in_len; i++)oaci_downmix[up*i] = up*(float)FLOAT2INT16(in[i]) + VERY_SMALL;
     } else {
-        for (i = 0; i < in_len; i++)oaci_downmix[up*i] = FLOAT2INT16(.5*up*(in[2*i] + in[2*i + 1])) + VERY_SMALL;
+        for (i = 0; i < in_len; i++)oaci_downmix[up*i] = up*(float)FLOAT2INT16(.5*(in[2*i] + in[2*i + 1])) + VERY_SMALL;
     }
     if (enc->Fs == 16000) {
         OAC_COPY(out, oaci_downmix, out_len);
