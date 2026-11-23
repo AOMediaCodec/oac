@@ -1480,6 +1480,7 @@ OacDRED *oac_dred_alloc(int *error) {
             *error = OAC_ALLOC_FAIL;
         return NULL;
     }
+    OAC_CLEAR(dec, 1);
     return dec;
 #else
     if (error)
