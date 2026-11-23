@@ -728,6 +728,100 @@ void test_oac_repacketizer_out_range_impl(void) {
     oac_test_assert(second_count == 2);
 }
 
+static oac_int32 build_multiframe_ext_packet(unsigned char *pkt, int nb_frames,
+ const unsigned char *ext_bytes, oac_int32 ext_len) {
+    /* Hybrid, 20 ms frames, mono, CBR */
+    const unsigned char base_toc = 15<<3;
+    oac_int32 pos;
+    oac_int32 rem;
+    int i;
+    pos = oaci_write_toc(base_toc, nb_frames, 0, ext_len > 0, OAC_FORMAT_STANDARD, 1,
+     oaci_toc_samples_per_frame(base_toc, 400), pkt);
+    if (ext_len > 0) {
+        rem = ext_len;
+        while (rem >= 254) {
+            pkt[pos++] = 255;
+            rem -= 254;
+        }
+        pkt[pos++] = (unsigned char)rem;
+    }
+    /* One byte of frame data per frame. */
+    for (i = 0; i < nb_frames; i++) pkt[pos++] = 0;
+    if (ext_len > 0) {
+        memcpy(pkt + pos, ext_bytes, ext_len);
+        pos += ext_len;
+    }
+    return pos;
+}
+
+void test_repacketizer_out_range_slice(void) {
+    /* 3-frame packet with two RTEs in frame 0:
+       RTE #1 (0x05): id=3(0B), id=32("ab"/"cd"/"ef"), id=4(0B)
+       RTE #2 (0x04): id=5("X"/"Y"/"Z"), id=33("1"/"22"/"333" with L=0), id=6(0B) */
+    static const unsigned char two_rte[] = {
+        0x06, (32<<1)|1, 2, 'a', 'b', 0x08, 0x05, 2, 'c', 'd', 2, 'e', 'f',
+        0x0B, 'X', (33<<1)|1, 1, '1', 0x0C, 0x04, 'Y', 2, '2', '2', 'Z', '3', '3', '3'
+    };
+    static const unsigned char f0_only[] = { 0x06 };
+    unsigned char pkt[128], sub_pkt[128];
+    OacRepacketizer rp;
+    oac_int32 pkt_len, out_len, pad_len;
+    const unsigned char *pad_ptr;
+    oac_int32 sz[OAC_MAX_FRAMES_PER_PACKET];
+    int begin, end;
+
+    pkt_len = build_multiframe_ext_packet(pkt, 3, two_rte, sizeof(two_rte));
+    oac_repacketizer_init(&rp);
+    expect_true(oac_repacketizer_cat(&rp, pkt, pkt_len) == OAC_OK, "cat a");
+    expect_true(oac_repacketizer_cat(&rp, pkt, pkt_len) == OAC_OK, "cat b");
+
+    for (begin = 0; begin < 6; begin++) {
+        for (end = begin + 1; end <= 6; end++) {
+            oac_int32 nb_frame_exts[48], nb_parsed = 48;
+            oac_extension_data parsed[48];
+            int f, nf = end - begin;
+
+            out_len = oac_repacketizer_out_range(&rp, begin, end, sub_pkt,
+             sizeof(sub_pkt));
+            if (oaci_frames_to_F(rp.dur_index, nf) < 0) {
+                /* The ToC cannot express this frame count (five 20 ms frames). */
+                expect_true(out_len == OAC_BAD_ARG, "expected out_range to reject the frame count");
+                continue;
+            }
+            expect_true(out_len > 0, "expected out_range to succeed");
+            expect_true(oac_packet_parse_impl(sub_pkt, out_len, 0, NULL, NULL,
+             sz, NULL, NULL, &pad_ptr, &pad_len) == nf, "expected nf frames");
+            expect_true(oac_packet_extensions_count_ext(pad_ptr, pad_len,
+             nb_frame_exts, nf) == 6*nf, "expected 6*nf extensions");
+            expect_true(oac_packet_extensions_parse_ext(pad_ptr, pad_len,
+             parsed, &nb_parsed, nb_frame_exts, nf) == OAC_OK, "parse_ext");
+            for (f = 0; f < nf; f++) {
+                int s = (begin + f)%3;
+                expect_true(parsed[6*f].id == 3 && parsed[6*f].len == 0
+                 && parsed[6*f + 1].id == 32 && parsed[6*f + 1].len == 2
+                 && parsed[6*f + 1].data[0] == 'a' + 2*s
+                 && parsed[6*f + 2].id == 4 && parsed[6*f + 2].len == 0
+                 && parsed[6*f + 3].id == 5 && parsed[6*f + 3].data[0] == 'X' + s
+                 && parsed[6*f + 4].id == 33 && parsed[6*f + 4].len == s + 1
+                 && parsed[6*f + 4].data[0] == '1' + s
+                 && parsed[6*f + 5].id == 6 && parsed[6*f + 5].len == 0,
+                 "expected exact within-frame order across sliced RTEs");
+            }
+        }
+    }
+
+    /* Slicing out an extension-free trailing frame from a multi-frame packet
+       with frame-0 extensions should emit no padding. */
+    pkt_len = build_multiframe_ext_packet(pkt, 2, f0_only, sizeof(f0_only));
+    oac_repacketizer_init(&rp);
+    expect_true(oac_repacketizer_cat(&rp, pkt, pkt_len) == OAC_OK, "cat 2f");
+    out_len = oac_repacketizer_out_range(&rp, 1, 2, sub_pkt, sizeof(sub_pkt));
+    expect_true(out_len == 2
+     && oac_packet_parse_impl(sub_pkt, out_len, 0, NULL, NULL, sz, NULL, NULL,
+     &pad_ptr, &pad_len) == 1 && pad_len == 0,
+     "expected unpadded single-frame packet when sliced range has no extensions");
+}
+
 int main(int argc, char **argv) {
     int env_used;
     char *env_seed;
@@ -753,6 +847,7 @@ int main(int argc, char **argv) {
     test_extensions_repeating();
     test_random_extensions_parse();
     test_oac_repacketizer_out_range_impl();
+    test_repacketizer_out_range_slice();
     fprintf(stderr, "Tests completed successfully.\n");
     return 0;
 }
