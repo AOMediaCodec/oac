@@ -1210,7 +1210,8 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
                 goto bad_arg;
             }
             ret = oaci_lpcnet_plc_load_model(&st->lpcnet, data, len);
-            ret = oaci_silk_LoadOSCEModels(silk_dec, data, len) || ret;
+            if (oaci_silk_LoadOSCEModels(silk_dec, data, len) != 0 || ret != 0)
+                ret = OAC_BAD_ARG;
         }
         break;
 #endif
