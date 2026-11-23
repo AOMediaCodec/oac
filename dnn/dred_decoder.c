@@ -152,7 +152,6 @@ int oaci_dred_ec_decode(OacDRED *dec, const oac_uint8 *bytes, int num_bytes, int
           DRED_LATENT_DIM
             );
         dec->latents[(i/2)*(DRED_LATENT_DIM + 1) + DRED_LATENT_DIM] = q_level*.125 - 1;
-        offset = 2*i*DRED_NUM_FEATURES;
     }
     dec->process_stage = 1;
     dec->nb_latents = i/2;
