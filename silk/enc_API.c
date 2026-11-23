@@ -358,8 +358,10 @@ oac_int oaci_silk_Encode(                                   /* O    Returns erro
             ret += oaci_silk_resampler( &psEnc->state_Fxx[ 0 ].sCmn.resampler_state,
                 &psEnc->state_Fxx[ 0 ].sCmn.inputBuf[ psEnc->state_Fxx[ 0 ].sCmn.inputBufIx + 2 ], buf,
             nSamplesFromInput );
-            /* On the first mono frame, average the results for the two resampler states  */
-            if (psEnc->nPrevChannelsInternal == 2 && psEnc->state_Fxx[ 0 ].sCmn.nFramesEncoded == 0) {
+            /* On the first mono frame, average the results for the two resampler states, unless
+               the internal rate just changed and the second resampler still runs at the old one. */
+            if (psEnc->nPrevChannelsInternal == 2 && psEnc->state_Fxx[ 0 ].sCmn.nFramesEncoded == 0
+                && psEnc->state_Fxx[ 1 ].sCmn.fs_kHz == psEnc->state_Fxx[ 0 ].sCmn.fs_kHz) {
                 ret += oaci_silk_resampler( &psEnc->state_Fxx[ 1 ].sCmn.resampler_state,
                    &psEnc->state_Fxx[ 1 ].sCmn.inputBuf[ psEnc->state_Fxx[ 1 ].sCmn.inputBufIx + 2 ], buf,
                 nSamplesFromInput );
