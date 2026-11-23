@@ -87,7 +87,7 @@ static void oaci_DRED_rdovae_init_encoder(RDOVAEEncState *enc_state) {
 int oaci_dred_encoder_load_model(DREDEnc* enc, const void *data, int len) {
     WeightArray *list;
     int ret;
-    oaci_parse_weights(&list, data, len);
+    if (oaci_parse_weights(&list, data, len) < 0) return OAC_BAD_ARG;
     ret = oaci_init_rdovaeenc(&enc->model, list);
     oac_free(list);
     if (ret == 0) {

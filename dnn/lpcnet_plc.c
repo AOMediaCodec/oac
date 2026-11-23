@@ -108,7 +108,7 @@ int oaci_lpcnet_plc_init(LPCNetPLCState *st) {
 int oaci_lpcnet_plc_load_model(LPCNetPLCState *st, const void *data, int len) {
     WeightArray *list;
     int ret;
-    oaci_parse_weights(&list, data, len);
+    if (oaci_parse_weights(&list, data, len) < 0) return OAC_BAD_ARG;
     ret = oaci_init_plcmodel(&st->model, list);
     oac_free(list);
     if (ret == 0) {

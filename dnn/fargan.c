@@ -227,7 +227,7 @@ void oaci_fargan_init(FARGANState *st) {
 int oaci_fargan_load_model(FARGANState *st, const void *data, int len) {
     WeightArray *list;
     int ret;
-    oaci_parse_weights(&list, data, len);
+    if (oaci_parse_weights(&list, data, len) < 0) return -1;
     ret = oaci_init_fargan(&st->model, list);
     oac_free(list);
     if (ret == 0) return 0;
