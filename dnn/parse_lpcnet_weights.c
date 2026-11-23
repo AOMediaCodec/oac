@@ -96,8 +96,15 @@ int oaci_parse_weights(WeightArray **list, const void *data, int len) {
         if (ret > 0) {
             if (nb_arrays + 1 >= capacity) {
                 /* Make sure there's room for the ending NULL element too. */
+                WeightArray *new_list;
                 capacity = capacity*3/2;
-                *list = (WeightArray*)oac_realloc(*list, capacity*sizeof(WeightArray));
+                new_list = (WeightArray*)oac_realloc(*list, capacity*sizeof(WeightArray));
+                if (new_list == NULL) {
+                    oac_free(*list);
+                    *list = NULL;
+                    return -1;
+                }
+                *list = new_list;
             }
             (*list)[nb_arrays++] = array;
         } else {
