@@ -726,6 +726,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     if ((decode_fec || len == 0 || data == NULL) && frame_size%(st->Fs/400) != 0)
         return OAC_BAD_ARG;
 #ifdef ENABLE_DRED
+    if (dred != NULL && dred->process_stage != 2)
+        return OAC_BAD_ARG;
     if (dred != NULL && dred->process_stage == 2) {
         int F10;
         int features_per_frame;
@@ -1562,7 +1564,6 @@ int oac_decoder_dred_decode(OacDecoder *st, const OacDRED *dred, oac_int32 dred_
     VARDECL(float, out);
     int ret, i;
     ALLOC_STACK;
-
     if (frame_size <= 0) {
         RESTORE_STACK;
         return OAC_BAD_ARG;
