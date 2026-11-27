@@ -75,9 +75,6 @@ oac_conf.set('PACKAGE_TARNAME', '"oac"')
 oac_conf.set('PACKAGE_URL', '""')
 oac_conf.set('PACKAGE_VERSION', '"@0@"'.format(oac_version))
 
-# FIXME: optional Ne10 dependency
-have_arm_ne10 = false
-
 libm = cc.find_library('m', required : false)
 
 oac_conf.set('HAVE_LRINTF', cc.has_function('lrintf', prefix: '#include <math.h>', dependencies: libm))
@@ -176,6 +173,12 @@ foreach opt : feat
   endif
   set_variable('opt_' + opt[0].underscorify(), opt_foo)
 endforeach
+
+# DRED requires deep PLC
+if opt_dred.enabled()
+  oac_conf.set('ENABLE_DEEP_PLC', 1)
+  opt_deep_plc = opt_dred
+endif
 
 opt_asm = get_option('asm')
 opt_rtcd = get_option('rtcd')

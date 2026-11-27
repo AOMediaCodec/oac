@@ -35,7 +35,7 @@
    Written by Viswanath Puttagunta */
 /**
    @file fft_arm.h
-   @brief ARM Neon Intrinsic optimizations for fft using NE10 library
+   @brief ARM-specific FFT backend hooks for CELT
  */
 
 /*
@@ -68,37 +68,5 @@
 #define FFT_ARM_H
 
 #include "kiss_fft.h"
-
-#if defined(HAVE_ARM_NE10)
-
-int oac_fft_alloc_arm_neon(kiss_fft_state *st);
-void oac_fft_free_arm_neon(kiss_fft_state *st);
-
-void oac_fft_neon(const kiss_fft_state *st,
-    const kiss_fft_cpx *fin,
-    kiss_fft_cpx *fout);
-
-void oac_ifft_neon(const kiss_fft_state *st,
-    const kiss_fft_cpx *fin,
-    kiss_fft_cpx *fout);
-
-# if !defined(OAC_HAVE_RTCD)
-#  define OVERRIDE_OAC_FFT (1)
-
-#  define oac_fft_alloc_arch(_st, arch) \
-        ((void)(arch), oac_fft_alloc_arm_neon(_st))
-
-#  define oac_fft_free_arch(_st, arch) \
-        ((void)(arch), oac_fft_free_arm_neon(_st))
-
-#  define oac_fft(_st, _fin, _fout, arch) \
-        ((void)(arch), oac_fft_neon(_st, _fin, _fout))
-
-#  define oac_ifft(_st, _fin, _fout, arch) \
-        ((void)(arch), oac_ifft_neon(_st, _fin, _fout))
-
-# endif /* OAC_HAVE_RTCD */
-
-#endif /* HAVE_ARM_NE10 */
 
 #endif

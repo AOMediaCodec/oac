@@ -1448,7 +1448,7 @@ int oaci_osce_load_models(OSCEModel *model, const void *data, int len) {
 
     if (data != NULL  && len) {
         /* init from buffer */
-        oaci_parse_weights(&list, data, len);
+        if (oaci_parse_weights(&list, data, len) < 0) return -1;
 
 #ifndef DISABLE_LACE
         if (ret == 0) {
@@ -1469,7 +1469,7 @@ int oaci_osce_load_models(OSCEModel *model, const void *data, int len) {
         }
 # endif
 #endif /* ENABLE_OSCE_BWE */
-        free(list);
+        oac_free(list);
     } else {
 #ifdef USE_WEIGHTS_FILE
         return -1;

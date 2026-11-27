@@ -108,8 +108,9 @@ void oaci_silk_burg_modified_sse4_1(
 
     celt_assert( subfr_length*nb_subfr <= MAX_FRAME_SIZE );
 
-    /* Compute autocorrelations, added over subframes */
-    C0_64 = oaci_silk_inner_prod16( x, x, subfr_length*nb_subfr, arch );
+    /* Compute autocorrelations, added over subframes.
+       Make sure the noise corresponds to at least a unit pulse. */
+    C0_64 = oaci_silk_inner_prod16( x, x, subfr_length*nb_subfr, arch ) + 1;
     lz = silk_CLZ64(C0_64);
     rshifts = 32 + 1 + N_BITS_HEAD_ROOM - lz;
     if (rshifts > MAX_RSHIFTS) rshifts = MAX_RSHIFTS;

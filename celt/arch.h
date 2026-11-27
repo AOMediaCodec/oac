@@ -185,7 +185,8 @@ typedef oac_val32 oac_res;
 # define RES2INT24(a)    (a)
 # define RES2FLOAT(a)    ((1.f/32768.f/256.f)*(a))
 # define INT16TORES(a)   SHL32(EXTEND32(a), RES_SHIFT)
-# define INT24TORES(a)   (a)
+/* Allow 2x full scale, like FLOAT2INT24(), and keep RES2SIG() from overflowing. */
+# define INT24TORES(a)   SATURATE(a, 16777216)
 # define ADD_RES(a, b)   ADD32(a, b)
 # define FLOAT2RES(a)    FLOAT2INT24(a)
 # define RES2SIG(a)      SHL32((a), SIG_SHIFT - RES_SHIFT)
@@ -194,7 +195,7 @@ typedef oac_val32 oac_res;
 
 # define RES2VAL16(a)    RES2INT16(a)
 # define INT16TOSIG(a)   SHL32(EXTEND32(a), SIG_SHIFT)
-# define INT24TOSIG(a)   SHL32(a, SIG_SHIFT - 8)
+# define INT24TOSIG(a)   SHL32(SATURATE(a, 16777216), SIG_SHIFT - 8)
 
 # define NORM_SHIFT 24
 typedef oac_val32 celt_coef;
@@ -378,7 +379,7 @@ static OAC_INLINE int oaci_celt_isnan(float x) {
 
 # define SIG2RES(a)      ((1/CELT_SIG_SCALE)*(a))
 # define RES2INT16(a)    FLOAT2INT16(a)
-# define RES2INT24(a)    oaci_float2int(32768.f*256.f*(a))
+# define RES2INT24(a)    FLOAT2INT24(a)
 # define RES2FLOAT(a)    (a)
 # define INT16TORES(a)   ((a)*(1/CELT_SIG_SCALE))
 # define INT24TORES(a)   ((1.f/32768.f/256.f)*(a))

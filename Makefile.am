@@ -10,7 +10,7 @@ lib_LTLIBRARIES = liboac.la
 DIST_SUBDIRS = doc
 
 AM_CPPFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/celt -I$(top_srcdir)/silk \
-              -I$(top_srcdir)/silk/float -I$(top_srcdir)/silk/fixed $(NE10_CFLAGS) \
+              -I$(top_srcdir)/silk/float -I$(top_srcdir)/silk/fixed \
               -I$(top_srcdir)/dnn
 
 include celt_sources.mk
@@ -19,6 +19,9 @@ include silk_sources.mk
 include oac_sources.mk
 
 LPCNET_SOURCES =
+if ENABLE_DNN
+LPCNET_SOURCES += $(DNN_SOURCES)
+endif
 if ENABLE_DEEP_PLC
 LPCNET_SOURCES += $(DEEP_PLC_SOURCES)
 endif
@@ -56,7 +59,7 @@ if CPU_X86
 if HAVE_RTCD
 CELT_SOURCES += $(CELT_SOURCES_X86_RTCD)
 SILK_SOURCES += $(SILK_SOURCES_X86_RTCD)
-if ENABLE_DEEP_PLC
+if ENABLE_DNN
 LPCNET_SOURCES += $(DNN_SOURCES_X86_RTCD)
 endif
 endif
@@ -65,20 +68,20 @@ CELT_SOURCES += $(CELT_SOURCES_SSE)
 endif
 if HAVE_SSE2
 CELT_SOURCES += $(CELT_SOURCES_SSE2)
-if ENABLE_DEEP_PLC
+if ENABLE_DNN
 LPCNET_SOURCES += $(DNN_SOURCES_SSE2)
 endif
 endif
 if HAVE_SSE4_1
 CELT_SOURCES += $(CELT_SOURCES_SSE4_1)
-if ENABLE_DEEP_PLC
+if ENABLE_DNN
 LPCNET_SOURCES += $(DNN_SOURCES_SSE4_1)
 endif
 endif
 if HAVE_AVX2
 SILK_SOURCES += $(SILK_SOURCES_AVX2)
 CELT_SOURCES += $(CELT_SOURCES_AVX2)
-if ENABLE_DEEP_PLC
+if ENABLE_DNN
 LPCNET_SOURCES += $(DNN_SOURCES_AVX2)
 endif
 endif
@@ -88,12 +91,12 @@ if CPU_ARM
 if HAVE_RTCD
 CELT_SOURCES += $(CELT_SOURCES_ARM_RTCD)
 SILK_SOURCES += $(SILK_SOURCES_ARM_RTCD)
-if ENABLE_DEEP_PLC
+if ENABLE_DNN
 LPCNET_SOURCES += $(DNN_SOURCES_ARM_RTCD)
 endif
 endif
 
-if ENABLE_DEEP_PLC
+if ENABLE_DNN
 if HAVE_ARM_DOTPROD
 LPCNET_SOURCES += $(DNN_SOURCES_DOTPROD)
 endif
@@ -105,10 +108,6 @@ endif
 if HAVE_ARM_NEON_INTR
 CELT_SOURCES += $(CELT_SOURCES_ARM_NEON_INTR)
 SILK_SOURCES += $(SILK_SOURCES_ARM_NEON_INTR)
-endif
-
-if HAVE_ARM_NE10
-CELT_SOURCES += $(CELT_SOURCES_ARM_NE10)
 endif
 
 if OAC_ARM_EXTERNAL_ASM
@@ -129,6 +128,9 @@ include silk_headers.mk
 include oac_headers.mk
 
 LPCNET_HEAD =
+if ENABLE_DNN
+LPCNET_HEAD += $(DNN_HEAD)
+endif
 if ENABLE_DEEP_PLC
 LPCNET_HEAD += $(DEEP_PLC_HEAD)
 endif
@@ -144,7 +146,7 @@ endif
 
 liboac_la_SOURCES = $(CELT_SOURCES) $(SILK_SOURCES) $(LPCNET_SOURCES) $(OAC_SOURCES)
 liboac_la_LDFLAGS = -no-undefined -version-info @OAC_LT_CURRENT@:@OAC_LT_REVISION@:@OAC_LT_AGE@
-liboac_la_LIBADD = $(NE10_LIBS) $(LIBM)
+liboac_la_LIBADD = $(LIBM)
 if OAC_ARM_EXTERNAL_ASM
 liboac_la_LIBADD += libarmasm.la
 endif
@@ -198,11 +200,11 @@ if ENABLE_LOSSGEN
 oac_demo_SOURCES += $(LOSSGEN_SOURCES)
 endif
 
-oac_demo_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+oac_demo_LDADD = liboac.la $(LIBM)
 
 repacketizer_demo_SOURCES = src/repacketizer_demo.c
 
-repacketizer_demo_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+repacketizer_demo_LDADD = liboac.la $(LIBM)
 
 oac_compare_SOURCES = src/oac_compare.c
 oac_compare_LDADD = $(LIBM)
@@ -211,23 +213,23 @@ trivial_example_SOURCES = doc/trivial_example.c
 trivial_example_LDADD = liboac.la $(LIBM)
 
 tests_test_oac_api_SOURCES = tests/test_oac_api.c tests/test_oac_common.h
-tests_test_oac_api_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+tests_test_oac_api_LDADD = liboac.la $(LIBM)
 
 tests_test_oac_encode_SOURCES = tests/test_oac_encode.c tests/oac_encode_regressions.c tests/test_oac_common.h
-tests_test_oac_encode_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+tests_test_oac_encode_LDADD = liboac.la $(LIBM)
 
 tests_test_oac_decode_SOURCES = tests/test_oac_decode.c tests/test_oac_common.h
-tests_test_oac_decode_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+tests_test_oac_decode_LDADD = liboac.la $(LIBM)
 
 tests_test_oac_padding_SOURCES = tests/test_oac_padding.c tests/test_oac_common.h
-tests_test_oac_padding_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+tests_test_oac_padding_LDADD = liboac.la $(LIBM)
 
 tests_test_oac_dred_SOURCES = tests/test_oac_dred.c tests/test_oac_common.h
-tests_test_oac_dred_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+tests_test_oac_dred_LDADD = liboac.la $(LIBM)
 
 if CUSTOM_MODES
 tests_test_oac_custom_SOURCES = tests/test_oac_custom.c tests/test_oac_common.h
-tests_test_oac_custom_LDADD = liboac.la $(NE10_LIBS) $(LIBM)
+tests_test_oac_custom_LDADD = liboac.la $(LIBM)
 endif
 
 CELT_OBJ = $(CELT_SOURCES:.c=.lo)
@@ -236,19 +238,19 @@ LPCNET_OBJ = $(LPCNET_SOURCES:.c=.lo)
 OAC_OBJ = $(OAC_SOURCES:.c=.lo)
 
 tests_test_oac_extensions_SOURCES = tests/test_oac_extensions.c tests/test_oac_common.h
-tests_test_oac_extensions_LDADD = $(OAC_OBJ) $(SILK_OBJ) $(LPCNET_OBJ) $(CELT_OBJ) $(NE10_LIBS) $(LIBM)
+tests_test_oac_extensions_LDADD = $(OAC_OBJ) $(SILK_OBJ) $(LPCNET_OBJ) $(CELT_OBJ) $(LIBM)
 if OAC_ARM_EXTERNAL_ASM
 tests_test_oac_extensions_LDADD += libarmasm.la
 endif
 
 tests_test_oac_projection_SOURCES = tests/test_oac_projection.c tests/test_oac_common.h
-tests_test_oac_projection_LDADD = $(OAC_OBJ) $(SILK_OBJ) $(LPCNET_OBJ) $(CELT_OBJ) $(NE10_LIBS) $(LIBM)
+tests_test_oac_projection_LDADD = $(OAC_OBJ) $(SILK_OBJ) $(LPCNET_OBJ) $(CELT_OBJ) $(LIBM)
 if OAC_ARM_EXTERNAL_ASM
 tests_test_oac_projection_LDADD += libarmasm.la
 endif
 
 silk_tests_test_unit_LPC_inv_pred_gain_SOURCES = silk/tests/test_unit_LPC_inv_pred_gain.c
-silk_tests_test_unit_LPC_inv_pred_gain_LDADD = $(SILK_OBJ) $(LPCNET_OBJ) $(CELT_OBJ) $(NE10_LIBS) $(LIBM)
+silk_tests_test_unit_LPC_inv_pred_gain_LDADD = $(SILK_OBJ) $(LPCNET_OBJ) $(CELT_OBJ) $(LIBM)
 if OAC_ARM_EXTERNAL_ASM
 silk_tests_test_unit_LPC_inv_pred_gain_LDADD += libarmasm.la
 endif
@@ -257,7 +259,7 @@ celt_tests_test_unit_cwrs32_SOURCES = celt/tests/test_unit_cwrs32.c
 celt_tests_test_unit_cwrs32_LDADD = $(LIBM)
 
 celt_tests_test_unit_dft_SOURCES = celt/tests/test_unit_dft.c
-celt_tests_test_unit_dft_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(NE10_LIBS) $(LIBM)
+celt_tests_test_unit_dft_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(LIBM)
 if OAC_ARM_EXTERNAL_ASM
 celt_tests_test_unit_dft_LDADD += libarmasm.la
 endif
@@ -272,19 +274,19 @@ celt_tests_test_unit_laplace_SOURCES = celt/tests/test_unit_laplace.c
 celt_tests_test_unit_laplace_LDADD = $(LIBM)
 
 celt_tests_test_unit_mathops_SOURCES = celt/tests/test_unit_mathops.c
-celt_tests_test_unit_mathops_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(NE10_LIBS) $(LIBM)
+celt_tests_test_unit_mathops_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(LIBM)
 if OAC_ARM_EXTERNAL_ASM
 celt_tests_test_unit_mathops_LDADD += libarmasm.la
 endif
 
 celt_tests_test_unit_mdct_SOURCES = celt/tests/test_unit_mdct.c
-celt_tests_test_unit_mdct_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(NE10_LIBS) $(LIBM)
+celt_tests_test_unit_mdct_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(LIBM)
 if OAC_ARM_EXTERNAL_ASM
 celt_tests_test_unit_mdct_LDADD += libarmasm.la
 endif
 
 celt_tests_test_unit_rotation_SOURCES = celt/tests/test_unit_rotation.c
-celt_tests_test_unit_rotation_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(NE10_LIBS) $(LIBM)
+celt_tests_test_unit_rotation_LDADD = $(CELT_OBJ) $(LPCNET_OBJ) $(LIBM)
 if OAC_ARM_EXTERNAL_ASM
 celt_tests_test_unit_rotation_LDADD += libarmasm.la
 endif
@@ -380,6 +382,7 @@ EXTRA_DIST = oac.pc.in \
              tests/meson.build \
              doc/meson.build \
              tests/run_vectors.sh \
+             tests/dred_vectors.sh \
              celt/mini_kfft.c \
              celt/arm/meson.build \
              celt/arm/arm2gnu.pl \
@@ -509,7 +512,7 @@ ARM_NEON_INTR_OBJ = $(CELT_SOURCES_ARM_NEON_INTR:.c=.lo) \
                     $(DNN_SOURCES_NEON:.c=.lo) \
                     $(SILK_SOURCES_FIXED_ARM_NEON_INTR:.c=.lo)
 $(ARM_NEON_INTR_OBJ): CFLAGS += \
- $(OAC_ARM_NEON_INTR_CFLAGS)  $(NE10_CFLAGS)
+ $(OAC_ARM_NEON_INTR_CFLAGS)
 endif
 
 if HAVE_ARM_DOTPROD

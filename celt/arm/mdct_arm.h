@@ -34,8 +34,8 @@
 /* Copyright (c) 2015 Xiph.Org Foundation
    Written by Viswanath Puttagunta */
 /**
-   @file arm_mdct.h
-   @brief ARM Neon Intrinsic optimizations for mdct using NE10 library
+   @file mdct_arm.h
+   @brief ARM-specific MDCT backend hooks for CELT
  */
 
 /*
@@ -67,26 +67,5 @@
 #define MDCT_ARM_H
 
 #include "mdct.h"
-
-#if defined(HAVE_ARM_NE10)
-/** Compute a forward MDCT and scale by 4/N, trashes the input array */
-void oaci_clt_mdct_forward_neon(const mdct_lookup *l, kiss_fft_scalar *in,
-    kiss_fft_scalar * OAC_RESTRICT out,
-    const oac_val16 *window, int overlap,
-    int shift, int stride, int arch);
-
-void oaci_clt_mdct_backward_neon(const mdct_lookup *l, kiss_fft_scalar *in,
-    kiss_fft_scalar * OAC_RESTRICT out,
-    const oac_val16 *window, int overlap,
-    int shift, int stride, int arch);
-
-# if !defined(OAC_HAVE_RTCD)
-#  define OVERRIDE_OAC_MDCT (1)
-#  define oaci_clt_mdct_forward(_l, _in, _out, _window, _int, _shift, _stride, _arch) \
-        oaci_clt_mdct_forward_neon(_l, _in, _out, _window, _int, _shift, _stride, _arch)
-#  define oaci_clt_mdct_backward(_l, _in, _out, _window, _int, _shift, _stride, _arch) \
-        oaci_clt_mdct_backward_neon(_l, _in, _out, _window, _int, _shift, _stride, _arch)
-# endif /* OAC_HAVE_RTCD */
-#endif /* HAVE_ARM_NE10 */
 
 #endif

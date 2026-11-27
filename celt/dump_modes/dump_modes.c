@@ -99,10 +99,6 @@ void dump_modes(FILE *file, CELTMode **modes, int nb_modes) {
     fprintf(file, "\n   It contains static definitions for some pre-defined modes. */\n");
     fprintf(file, "#include \"modes.h\"\n");
     fprintf(file, "#include \"rate.h\"\n");
-    fprintf(file, "\n#ifdef HAVE_ARM_NE10\n");
-    fprintf(file, "# define OVERRIDE_FFT 1\n");
-    fprintf(file, "# include \"%s\"\n", ARM_NE10_ARCH_FILE_NAME);
-    fprintf(file, "#endif\n");
 
     fprintf(file, "\n");
 

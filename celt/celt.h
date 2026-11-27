@@ -295,7 +295,7 @@ void oaci_celt_preemphasis(const oac_res * OAC_RESTRICT pcmp, celt_sig * OAC_RES
 
 void oaci_comb_filter(oac_val32 *y, oac_val32 *x, int T0, int T1, int N,
     oac_val16 g0, oac_val16 g1, int tapset0, int tapset1,
-    const celt_coef *window, int overlap, int arch);
+    const celt_coef *window, int overlap, int arch, int qext_scale);
 
 void oaci_init_caps(const CELTMode *m, int *cap, int LM, int C);
 

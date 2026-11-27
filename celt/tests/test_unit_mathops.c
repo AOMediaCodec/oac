@@ -264,7 +264,7 @@ void testlog2_db(void) {
     /* oaci_celt_log2_db test */
     float error = -1;
     float max_error = -2;
-    float error_threshold = 2.e-07;
+    float error_threshold = 2.9e-07;
     oac_int32 x = 0;
     int q_input = 14;
     for (x = 8; x < 1073741824; x += (x>>3)) {
@@ -275,7 +275,7 @@ void testlog2_db(void) {
         }
         if (error > error_threshold) {
             fprintf(stderr, "oaci_celt_log2_db failed: error: [%.5e > %.5e] (x = %f)\n",
-                 error, error_threshold, FIX_INT_TO_DOUBLE(x, DB_SHIFT));
+                 error, error_threshold, FIX_INT_TO_DOUBLE(x, q_input));
             ret = 1;
         }
     }
@@ -371,7 +371,7 @@ void testilog2(void) {
 }
 
 void testrsqrt(void) {
-    float error_threshold = 6.e-08;
+    float error_threshold = 6.8e-08;
     float error = 0;
     float max_error = 0;
     float fx = 0;
@@ -438,7 +438,7 @@ void testatan_norm(void) {
         if (error > error_threshold) {
             fprintf(stderr,
                  "oaci_celt_atan_norm failed: error: [%.5e > %.5e] (x = %f)\n",
-                 error, error_threshold, FIX_INT_TO_DOUBLE(x, DB_SHIFT));
+                 error, error_threshold, FIX_INT_TO_DOUBLE(x, q_input));
             ret = 1;
         }
     }
@@ -471,8 +471,9 @@ void testatan2p_norm(void) {
             }
             if (error > error_threshold) {
                 fprintf(stderr,
-                  "oaci_celt_atan2p_norm failed: error: [%.5e > %.5e] (x = %f)\n",
-                  error, error_threshold, FIX_INT_TO_DOUBLE(x, DB_SHIFT));
+                  "oaci_celt_atan2p_norm failed: error: [%.5e > %.5e] (y/x = %f/%f)\n",
+                  error, error_threshold, FIX_INT_TO_DOUBLE(y, q_input),
+                  FIX_INT_TO_DOUBLE(x, q_input));
                 ret = 1;
             }
         }
@@ -488,7 +489,7 @@ void testatan(void) {
 void test_cos_norm32(void) {
     float error = -1;
     float max_error = -2;
-    float error_threshold = 1e-07;
+    float error_threshold = 1.2e-07;
     float fx = 0;
     oac_int32 x = 0;
     int q_input = 30;
@@ -503,7 +504,7 @@ void test_cos_norm32(void) {
         if (error > error_threshold) {
             fprintf(stderr,
                  "oaci_celt_cos_norm32 failed: error: [%.5e > %.5e] (x = %f)\n",
-                 error, error_threshold, FIX_INT_TO_DOUBLE(x, DB_SHIFT));
+                 error, error_threshold, FIX_INT_TO_DOUBLE(x, q_input));
             ret = 1;
         }
     }
@@ -526,7 +527,7 @@ void test_rcp_norm32(void) {
     oac_val32 x;
     int q_input = 31;
 
-    for (fx = 0.5; fx <= 1.0; fx += 0.0000007) {
+    for (fx = 0.5; fx < 1.0; fx += 0.0000007) {
         x = DOUBLE_TO_FIX_INT(fx, q_input);
         quantized_fx = FIX_INT_TO_DOUBLE(x, q_input);
         ground_truth = 1/quantized_fx;

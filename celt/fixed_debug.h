@@ -267,7 +267,7 @@ static OAC_INLINE int SHL32_(oac_int64 a, int shift, char *file, int line) {
 #define SHR64(a, shift) (celt_mips++, (a)>>(shift))
 
 #define ROUND16(x, a) (celt_mips--, EXTRACT16(PSHR32((x), (a))))
-#define SROUND16(x, a) (celt_mips--, EXTRACT16(SATURATE(PSHR32(x, a), 32767)));
+#define SROUND16(x, a) (celt_mips--, EXTRACT16(SATURATE(PSHR32(x, a), 32767)))
 
 #define HALF16(x)  (SHR16(x, 1))
 #define HALF32(x)  (SHR32(x, 1))

@@ -873,6 +873,13 @@ oac_int32 oaci_frame_size_select(int application, oac_int32 frame_size, int vari
         return -1;
     if (new_size > frame_size)
         return -1;
+    /* Every legal duration below is at most 6*Fs/50 (120 ms), so a caller
+       passing a frame_size large enough to overflow the multiplications
+       that follow can only be trying to smuggle through an out-of-range
+       value: new_size can't legitimately reach here already bigger than
+       Fs itself, so reject it before the overflow-prone checks run. */
+    if (new_size > Fs)
+        return -1;
     if (400*new_size != Fs   && 200*new_size != Fs   && 100*new_size != Fs
         && 50*new_size != Fs   &&  25*new_size != Fs   &&  50*new_size != 3*Fs
         && 50*new_size != 4*Fs &&  50*new_size != 6*Fs)
@@ -1724,6 +1731,19 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         st->mode = MODE_HYBRID;
     if (st->mode == MODE_HYBRID && curr_bandwidth <= OAC_BANDWIDTH_WIDEBAND)
         st->mode = MODE_SILK_ONLY;
+    /* At very low bitrates, the hybrid rate split can leave CELT with less than
+       its minimum bitrate (500 b/s), in which case CELT's OAC_SET_BITRATE
+       would fail and CELT would run uncontrolled. Use SILK-only instead. */
+    if (st->mode == MODE_HYBRID) {
+        oac_int32 silk_rate;
+        silk_rate = oaci_compute_silk_rate_for_hybrid(st->bitrate_bps, curr_bandwidth,
+              st->Fs == 50*frame_size, st->use_vbr, st->silk_mode.LBRR_coded,
+              st->stream_channels);
+        if (st->bitrate_bps - silk_rate <= 500) {
+            st->mode = MODE_SILK_ONLY;
+            st->bandwidth = curr_bandwidth = OAC_BANDWIDTH_WIDEBAND;
+        }
+    }
 
     /* Can't support higher than >60 ms frames, and >20 ms when in Hybrid or CELT-only modes */
     if ((frame_size > st->Fs/50 && (st->mode != MODE_SILK_ONLY)) || frame_size > 3*st->Fs/50) {
@@ -1774,12 +1794,10 @@ oac_int32 oac_encode_native(OacEncoder *st, const oac_res *pcm, int frame_size,
         }
 #endif
 
-        if (st->use_vbr || st->user_bitrate_bps == OAC_BITRATE_MAX)
-            repacketize_len = out_data_bytes;
-        else {
-            celt_assert(cbr_bytes >= 0);
-            repacketize_len = IMIN(cbr_bytes, out_data_bytes);
-        }
+        /* In CBR mode, max_data_bytes already accounts for the bitrate, so
+           there is no need to go back to the size of the caller's buffer
+           here. The packet size cap is applied just below. */
+        repacketize_len = max_data_bytes;
         {
             oac_int32 max_frame_bytes = oaci_max_frame_bytes(enc_frame_size, st->Fs, st->channels);
             int toc_bytes_multi = oaci_toc_bytes(nb_frames, st->format, st->channels);
@@ -2461,7 +2479,8 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
         celt_encoder_ctl(celt_enc, OAC_SET_VBR(st->use_vbr));
         if (st->mode == MODE_HYBRID) {
             if (st->use_vbr) {
-                celt_encoder_ctl(celt_enc, OAC_SET_BITRATE(st->bitrate_bps - st->silk_mode.bitRate));
+                /* Never go below the minimum rate CELT accepts (the ctl would fail). */
+                celt_encoder_ctl(celt_enc, OAC_SET_BITRATE(IMAX(501, st->bitrate_bps - st->silk_mode.bitRate)));
                 celt_encoder_ctl(celt_enc, OAC_SET_VBR_CONSTRAINT(0));
             }
         } else {
@@ -2478,7 +2497,7 @@ static oac_int32 oac_encode_frame_native(OacEncoder *st, const oac_res *pcm, int
             celt_encoder_ctl(celt_enc, OAC_SET_VBR(1));
             celt_encoder_ctl(celt_enc, OAC_SET_VBR_CONSTRAINT(0));
             if (st->mode == MODE_HYBRID) {
-                celt_bitrate -= st->silk_mode.bitRate;
+                celt_bitrate = IMAX(501, celt_bitrate - st->silk_mode.bitRate);
             }
             celt_encoder_ctl(celt_enc, OAC_SET_BITRATE(celt_bitrate));
         }

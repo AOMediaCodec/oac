@@ -492,9 +492,10 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
                                 st->arch );
             if (silk_ret) {
                 if (lost_flag) {
-                    /* PLC failure should not be fatal */
-                    silk_frame_size = frame_size;
-                    for (i = 0; i < frame_size*st->channels; i++)
+                    /* PLC failure should not be fatal. Only fill what is left of
+                       the frame since pcm_ptr has already been advanced. */
+                    silk_frame_size = frame_size - decoded_samples;
+                    for (i = 0; i < silk_frame_size*st->channels; i++)
                         pcm_ptr[i] = 0;
                 } else {
                     RESTORE_STACK;
@@ -508,6 +509,15 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
             OAC_COPY(pcm, pcm_silk, frame_size*st->channels);
         }
     }
+#ifdef ENABLE_OSCE_BWE
+    else {
+        /* CELT-only frames never enter the SILK section above, so the extended
+           mode would otherwise retain a stale value (e.g. OSCE_MODE_SILK_BBWE
+           from a preceding WB SILK frame), which incorrectly skips the CELT
+           decode below and desyncs the range decoder. */
+        st->DecControl.osce_extended_mode = OSCE_MODE_CELT_ONLY;
+    }
+#endif
 
     start_band = 0;
     if (!decode_fec && mode != MODE_CELT_ONLY && data != NULL
@@ -627,7 +637,8 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
             MUST_SUCCEED(celt_decoder_ctl(celt_dec, CELT_SET_START_BAND(0)));
             oaci_celt_decode_with_ec(celt_dec, silence, 2, pcm, F2_5, NULL, celt_accum);
         }
-        st->rangeFinal = dec.rng;
+        /* The range decoder is not initialised when concealing (data == NULL). */
+        st->rangeFinal = data != NULL ? dec.rng : 0;
     }
 
     {
@@ -682,7 +693,8 @@ static int oac_decode_frame(OacDecoder *st, const unsigned char *data,
         for (i = 0; i < frame_size*st->channels; i++) {
             oac_val32 x;
             x = MULT32_32_Q16(pcm[i], gain);
-            pcm[i] = SATURATE(x, 32767);
+            /* Same headroom as the rest of the fixed-point pipeline. */
+            pcm[i] = SATURATE(x, SIG_SAT>>(SIG_SHIFT - RES_SHIFT));
         }
     }
 
@@ -726,6 +738,8 @@ int oac_decode_native(OacDecoder *st, const unsigned char *data,
     if ((decode_fec || len == 0 || data == NULL) && frame_size%(st->Fs/400) != 0)
         return OAC_BAD_ARG;
 #ifdef ENABLE_DRED
+    if (dred != NULL && dred->process_stage != 2)
+        return OAC_BAD_ARG;
     if (dred != NULL && dred->process_stage == 2) {
         int F10;
         int features_per_frame;
@@ -1088,6 +1102,10 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
 #endif
             st->stream_channels = st->channels;
             st->frame_size = st->Fs/400;
+#ifdef ENABLE_OSCE_BWE
+            /* DecControl is not part of the cleared area */
+            st->DecControl.prev_osce_extended_mode = OSCE_MODE_CELT_ONLY;
+#endif
         }
         break;
         case OAC_GET_SAMPLE_RATE_REQUEST:
@@ -1191,8 +1209,11 @@ int oac_decoder_ctl(OacDecoder *st, int request, ...) {
             if (len < 0 || data == NULL) {
                 goto bad_arg;
             }
+#ifdef ENABLE_DEEP_PLC
             ret = oaci_lpcnet_plc_load_model(&st->lpcnet, data, len);
-            ret = oaci_silk_LoadOSCEModels(silk_dec, data, len) || ret;
+#endif
+            if (oaci_silk_LoadOSCEModels(silk_dec, data, len) != 0 || ret != 0)
+                ret = OAC_BAD_ARG;
         }
         break;
 #endif
@@ -1332,7 +1353,7 @@ int oac_dred_decoder_get_size(void) {
 int oaci_dred_decoder_load_model(OacDREDDecoder *dec, const unsigned char *data, int len) {
     WeightArray *list;
     int ret;
-    oaci_parse_weights(&list, data, len);
+    if (oaci_parse_weights(&list, data, len) < 0) return OAC_BAD_ARG;
     ret = oaci_init_rdovaedec(&dec->model, list);
     oac_free(list);
     if (ret == 0) dec->loaded = 1;
@@ -1393,7 +1414,7 @@ int oac_dred_decoder_ctl(OacDREDDecoder *dred_dec, int request, ...) {
             if (len < 0 || data == NULL) {
                 goto bad_arg;
             }
-            return oaci_dred_decoder_load_model(dred_dec, data, len);
+            ret = oaci_dred_decoder_load_model(dred_dec, data, len);
         }
         break;
 # endif
@@ -1480,6 +1501,7 @@ OacDRED *oac_dred_alloc(int *error) {
             *error = OAC_ALLOC_FAIL;
         return NULL;
     }
+    OAC_CLEAR(dec, 1);
     return dec;
 #else
     if (error)
@@ -1509,11 +1531,9 @@ int oac_dred_parse(OacDREDDecoder *dred_dec, OacDRED *dred, const unsigned char 
     if (payload_len < 0)
         return payload_len;
     if (payload != NULL) {
-        int offset;
-        int min_feature_frames;
-        offset = 100*max_dred_samples/sampling_rate;
-        min_feature_frames = IMIN(2 + offset, 2*DRED_NUM_REDUNDANCY_FRAMES);
-        oaci_dred_ec_decode(dred, payload, payload_len, min_feature_frames, dred_frame_offset);
+        int max_dred_features;
+        max_dred_features = (100*max_dred_samples + sampling_rate - 1)/sampling_rate;
+        oaci_dred_ec_decode(dred, payload, payload_len, max_dred_features, dred_frame_offset);
         if (!defer_processing)
             oac_dred_process(dred_dec, dred, dred);
         if (dred_end) *dred_end = IMAX(0, -dred->dred_offset*sampling_rate/400);
@@ -1544,6 +1564,7 @@ int oac_dred_process(OacDREDDecoder *dred_dec, const OacDRED *src, OacDRED *dst)
         OAC_COPY(dst, src, 1);
     if (dst->process_stage == 2)
         return OAC_OK;
+    celt_assert(dst->nb_latents >= 0 && dst->nb_latents <= DRED_NUM_REDUNDANCY_FRAMES/2);
     oaci_DRED_rdovae_decode_all(&dred_dec->model, dst->fec_features, dst->state, dst->latents, dst->nb_latents,
     dred_dec->arch);
     dst->process_stage = 2;
@@ -1562,7 +1583,6 @@ int oac_decoder_dred_decode(OacDecoder *st, const OacDRED *dred, oac_int32 dred_
     VARDECL(float, out);
     int ret, i;
     ALLOC_STACK;
-
     if (frame_size <= 0) {
         RESTORE_STACK;
         return OAC_BAD_ARG;

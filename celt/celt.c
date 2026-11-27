@@ -216,7 +216,7 @@ void oaci_comb_filter_const_c(oac_val32 *y, oac_val32 *x, int T, int N,
 #endif
 
 #ifdef ENABLE_QEXT
-void oaci_comb_filter_qext(oac_val32 *y, oac_val32 *x, int T0, int T1, int N,
+static void oaci_comb_filter_qext(oac_val32 *y, oac_val32 *x, int T0, int T1, int N,
                       oac_val16 g0, oac_val16 g1, int tapset0, int tapset1,
                       const celt_coef *window, int overlap, int arch) {
     VARDECL(oac_val32, mem_buf);
@@ -247,7 +247,7 @@ void oaci_comb_filter_qext(oac_val32 *y, oac_val32 *x, int T0, int T1, int N,
             yptr = buf;
         }
         oaci_comb_filter(yptr, mem_buf + COMBFILTER_MAXPERIOD, T0, T1, N2, g0, g1, tapset0, tapset1, new_window, overlap2,
-        arch);
+        arch, 1);
         for (i = 0; i < N2; i++) y[2*i + s] = yptr[i];
     }
     RESTORE_STACK;
@@ -258,7 +258,7 @@ void oaci_comb_filter_qext(oac_val32 *y, oac_val32 *x, int T0, int T1, int N,
 #ifndef OVERRIDE_oaci_comb_filter
 void oaci_comb_filter(oac_val32 *y, oac_val32 *x, int T0, int T1, int N,
                  oac_val16 g0, oac_val16 g1, int tapset0, int tapset1,
-                 const celt_coef *window, int overlap, int arch) {
+                 const celt_coef *window, int overlap, int arch, int qext_scale) {
     int i;
     /* printf ("%d %d %f %f\n", T0, T1, g0, g1); */
     celt_coef g00, g01, g02, g10, g11, g12;
@@ -269,10 +269,14 @@ void oaci_comb_filter(oac_val32 *y, oac_val32 *x, int T0, int T1, int N,
         {QCONST16(0.7998046875f, 15), QCONST16(0.1000976562f, 15), QCONST16(0.f, 15)}
     };
 # ifdef ENABLE_QEXT
-    if (overlap == 240) {
+    /* The 96 kHz modes double the history buffers and halve the period, which
+       is what the mirrored filter expects. */
+    if (qext_scale == 2) {
         oaci_comb_filter_qext(y, x, T0, T1, N, g0, g1, tapset0, tapset1, window, overlap, arch);
         return;
     }
+# else
+    (void)qext_scale;
 # endif
     if (g0 == 0 && g1 == 0) {
         /* OPT: Happens to work without the OAC_MOVE(), but only because the current encoder already copies x to y */

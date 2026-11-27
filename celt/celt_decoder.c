@@ -140,6 +140,7 @@ struct OacCustomDecoder {
     oac_uint32 rng;
     int error;
     int last_pitch_index;
+    oac_val16 plc_decay[OAC_MAX_CHANNELS];
     int loss_duration;
     int plc_duration;
     int last_frame_type;
@@ -555,9 +556,7 @@ static void oaci_prefilter_and_fold(CELTDecoder * OAC_RESTRICT st, int N) {
     celt_sig *decode_mem[OAC_MAX_CHANNELS];
     const OacCustomMode *mode;
     int decode_buffer_size;
-#ifdef ENABLE_QEXT
-    int qext_scale;
-#endif
+    int qext_scale = 1;
     VARDECL(oac_val32, etmp);
     SAVE_STACK
 #ifdef ENABLE_QEXT
@@ -579,7 +578,7 @@ static void oaci_prefilter_and_fold(CELTDecoder * OAC_RESTRICT st, int N) {
         oaci_comb_filter(etmp, decode_mem[c] + decode_buffer_size - N,
          st->postfilter_period_old, st->postfilter_period, overlap,
          -st->postfilter_gain_old, -st->postfilter_gain,
-         st->postfilter_tapset_old, st->postfilter_tapset, NULL, 0, st->arch);
+         st->postfilter_tapset_old, st->postfilter_tapset, NULL, 0, st->arch, qext_scale);
 
         /* Simulate TDAC on the concealed audio so that it blends with the
            MDCT of the next frame. */
@@ -612,8 +611,11 @@ void oaci_update_plc_state(LPCNetPLCState *lpcnet, celt_sig *decode_mem[OAC_MAX_
     int i;
     int tmp_read_post, tmp_fec_skip;
     int offset;
-    celt_sig buf48k[DECODE_BUFFER_SIZE];
-    oac_int16 buf16k[PLC_UPDATE_SAMPLES];
+    VARDECL(celt_sig, buf48k);
+    VARDECL(oac_int16, buf16k);
+    SAVE_STACK;
+    ALLOC(buf48k, DECODE_BUFFER_SIZE, celt_sig);
+    ALLOC(buf16k, PLC_UPDATE_SAMPLES, oac_int16);
     if (CC == 2) {
         for (i = 0; i < DECODE_BUFFER_SIZE; i++) {
             buf48k[i] = .5*(decode_mem[0][i] + decode_mem[1][i]);
@@ -642,6 +644,7 @@ void oaci_update_plc_state(LPCNetPLCState *lpcnet, celt_sig *decode_mem[OAC_MAX_
     }
     lpcnet->fec_read_pos = tmp_read_post;
     lpcnet->fec_skip = tmp_fec_skip;
+    RESTORE_STACK;
 }
 #endif
 
@@ -666,9 +669,7 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
     const oac_int16 *eBands;
     int decode_buffer_size;
     int max_period;
-#ifdef ENABLE_QEXT
-    int qext_scale;
-#endif
+    int qext_scale = 1;
     SAVE_STACK;
 #ifdef ENABLE_QEXT
     qext_scale = st->qext_scale;
@@ -730,7 +731,9 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
         }
 
         /* Energy decay */
-        decay = loss_duration == 0 ? GCONST(1.5f) : GCONST(.5f);
+        decay = (1<<LM)*GCONST(.0625f);
+        if (st->last_frame_type != FRAME_PLC_NOISE)
+            decay += MAXG(GCONST(1.f), IMIN(160, loss_duration)*GCONST(.0625f));
         c = 0; do {
             for (i = start; i < end; i++)
                 oldBandE[c*nbEBands + i] = MAXG(backgroundLogE[c*nbEBands + i], oldBandE[c*nbEBands + i] - decay);
@@ -759,12 +762,12 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
             st->postfilter_period_old = IMAX(st->postfilter_period_old, COMBFILTER_MINPERIOD);
             oaci_comb_filter(out_syn[c], out_syn[c], st->postfilter_period_old, st->postfilter_period, mode->shortMdctSize,
                st->postfilter_gain_old, st->postfilter_gain, st->postfilter_tapset_old, st->postfilter_tapset,
-               mode->window, overlap, st->arch);
+               mode->window, overlap, st->arch, qext_scale);
             if (LM != 0)
                 oaci_comb_filter(out_syn[c] + mode->shortMdctSize, out_syn[c] + mode->shortMdctSize, st->postfilter_period,
                 st->postfilter_period, N - mode->shortMdctSize,
                   st->postfilter_gain, st->postfilter_gain, st->postfilter_tapset, st->postfilter_tapset,
-                  mode->window, overlap, st->arch);
+                  mode->window, overlap, st->arch, qext_scale);
 
         } while (++c < C);
         st->postfilter_period_old = st->postfilter_period;
@@ -778,13 +781,15 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
         int exc_length;
         /* Pitch-based PLC */
         const celt_coef *window;
-        oac_val16 *exc;
+        oac_val16 *sig;
         oac_val16 fade = Q15ONE;
         int pitch_index;
         int curr_neural;
         int last_neural;
-        VARDECL(oac_val16, _exc);
-        VARDECL(oac_val16, fir_tmp);
+        VARDECL(oac_val16, _sig);
+        VARDECL(oac_val16, exc);
+        VARDECL(celt_sig, old_overlap);
+        VARDECL(oac_val32, etmp);
 
         curr_neural = curr_frame_type == FRAME_PLC_NEURAL || curr_frame_type == FRAME_DRED;
         last_neural = st->last_frame_type == FRAME_PLC_NEURAL || st->last_frame_type == FRAME_DRED;
@@ -792,19 +797,22 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
             st->last_pitch_index = pitch_index = oaci_celt_plc_pitch_search(st, decode_mem, C, st->arch);
         } else {
             pitch_index = st->last_pitch_index;
-            fade = QCONST16(.8f, 15);
+            if (st->plc_duration*mode->shortMdctSize >= pitch_index)
+                fade = QCONST16(.8f, 15);
         }
 #ifdef ENABLE_DEEP_PLC
         if (curr_neural && !last_neural) oaci_update_plc_state(lpcnet, decode_mem, &st->plc_preemphasis_mem, C);
 #endif
 
         /* We want the excitation for 2 pitch periods in order to look for a
-           decaying signal, but we can't get more than MAX_PERIOD. */
-        exc_length = IMIN(2*pitch_index, max_period);
+           decaying signal, and at least max_period to search for pitch multiples. */
+        exc_length = IMAX(max_period, 2*pitch_index);
 
-        ALLOC(_exc, max_period + CELT_LPC_ORDER, oac_val16);
-        ALLOC(fir_tmp, exc_length, oac_val16);
-        exc = _exc + CELT_LPC_ORDER;
+        ALLOC(_sig, exc_length + CELT_LPC_ORDER, oac_val16);
+        ALLOC(exc, exc_length, oac_val16);
+        ALLOC(old_overlap, overlap>>1, celt_sig);
+        ALLOC(etmp, overlap, oac_val32);
+        sig = _sig + CELT_LPC_ORDER;
         window = mode->window;
         c = 0; do {
             oac_val16 decay;
@@ -814,17 +822,21 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
             int extrapolation_offset;
             int extrapolation_len;
             int j;
+#ifdef FIXED_POINT
+            int shift1;
+#endif
 
+            pitch_index = st->last_pitch_index;
             buf = decode_mem[c];
-            for (i = 0; i < max_period + CELT_LPC_ORDER; i++)
-                exc[i - CELT_LPC_ORDER] = SROUND16(buf[decode_buffer_size - max_period - CELT_LPC_ORDER + i],
+            for (i = 0; i < exc_length + CELT_LPC_ORDER; i++)
+                sig[i - CELT_LPC_ORDER] = SROUND16(buf[decode_buffer_size - exc_length - CELT_LPC_ORDER + i],
                 SIG_SHIFT);
 
             if (st->last_frame_type != FRAME_PLC_PERIODIC && !(last_neural && curr_neural)) {
                 oac_val32 ac[CELT_LPC_ORDER + 1];
-                /* Compute LPC coefficients for the last MAX_PERIOD samples before
+                /* Compute LPC coefficients for the last max_period samples before
                    the first loss so we can work in the excitation-filter domain. */
-                oaci_celt_autocorr(exc, ac, window, overlap,
+                oaci_celt_autocorr(sig + exc_length - max_period, ac, window, overlap,
                    CELT_LPC_ORDER, max_period, st->arch);
                 /* Add a noise floor of -40 dB. */
 #ifdef FIXED_POINT
@@ -861,52 +873,83 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
             }
             /* Initialize the LPC history with the samples just before the start
                of the region for which we're computing the excitation. */
-            {
-                /* Compute the excitation for exc_length samples before the loss. We need the copy
-                   because oaci_celt_fir() cannot filter in-place. */
-                oaci_celt_fir(exc + max_period - exc_length, lpc + c*CELT_LPC_ORDER,
-                  fir_tmp, exc_length, CELT_LPC_ORDER, st->arch);
-                OAC_COPY(exc + max_period - exc_length, fir_tmp, exc_length);
-            }
+            oaci_celt_fir(sig, lpc + c*CELT_LPC_ORDER, exc, exc_length, CELT_LPC_ORDER, st->arch);
 
             /* Check if the waveform is decaying, and if so how fast.
                We do this to avoid adding energy when concealing in a segment
                with decaying energy. */
-            {
+            if (st->last_frame_type != FRAME_PLC_PERIODIC && !(last_neural && curr_neural)) {
                 oac_val32 E1 = 1, E2 = 1;
-                int decay_length;
 #ifdef FIXED_POINT
-                int shift = IMAX(0, 2*oaci_celt_zlog2(oaci_celt_maxabs16(&exc[max_period - exc_length], exc_length)) - 20);
+                int shift = IMAX(0, 2*oaci_celt_zlog2(oaci_celt_maxabs16(&exc[exc_length - 2*pitch_index],
+                    2*pitch_index)) - 19);
 # ifdef ENABLE_QEXT
                 if (st->qext_scale == 2) shift++;
 # endif
 #endif
-                decay_length = exc_length>>1;
-                for (i = 0; i < decay_length; i++) {
+                for (i = 0; i < pitch_index; i++) {
                     oac_val16 e;
-                    e = exc[max_period - decay_length + i];
+                    e = exc[exc_length - pitch_index + i];
                     E1 += SHR32(MULT16_16(e, e), shift);
-                    e = exc[max_period - 2*decay_length + i];
+                    e = exc[exc_length - 2*pitch_index + i];
                     E2 += SHR32(MULT16_16(e, e), shift);
                 }
                 E1 = MIN32(E1, E2);
-                decay = oaci_celt_sqrt(oaci_frac_div32(SHR32(E1, 1), E2));
+                st->plc_decay[c] = decay = oaci_celt_sqrt(oaci_frac_div32(SHR32(E1, 1), E2));
+            } else {
+                decay = st->plc_decay[c];
+            }
+            /* Use a large integer multiple of the pitch period to avoid repeating
+               a short sequence too many times, stopping before any >6 dB change. */
+            {
+                int k, K;
+                oac_val32 E0 = 1;
+#ifdef FIXED_POINT
+                int shift = IMAX(0, 2*oaci_celt_zlog2(oaci_celt_maxabs16(exc, exc_length)) - 19);
+# ifdef ENABLE_QEXT
+                if (st->qext_scale == 2) shift++;
+# endif
+#endif
+                K = exc_length/pitch_index;
+                for (i = 0; i < pitch_index; i++) {
+                    oac_val16 e = exc[exc_length - pitch_index + i];
+                    E0 += SHR32(MULT16_16(e, e), shift);
+                }
+                for (k = 2; k <= K; k++) {
+                    oac_val32 Ek = 1;
+                    for (i = 0; i < pitch_index; i++) {
+                        oac_val16 e = exc[exc_length - k*pitch_index + i];
+                        Ek += SHR32(MULT16_16(e, e), shift);
+                    }
+                    if (Ek < MULT16_32_Q15(QCONST16(.25f, 15), E0)
+                        || E0 < MULT16_32_Q15(QCONST16(.25f, 15), Ek))
+                        break;
+                }
+                pitch_index *= k - 1;
             }
 
-            /* Move the decoder memory one frame to the left to give us room to
-               add the data for the new frame. We ignore the overlap that extends
-               past the end of the buffer, because we aren't going to use it. */
+            /* Save the folded right-overlap tail from the previous MDCT frame before
+               moving the decoder memory one frame to the left. */
+            if (st->last_frame_type == FRAME_NORMAL)
+                OAC_COPY(old_overlap, &buf[decode_buffer_size], overlap>>1);
             OAC_MOVE(buf, buf + N, decode_buffer_size - N);
 
             /* Extrapolate from the end of the excitation with a period of
                "pitch_index", scaling down each period by an additional factor of
                "decay". */
-            extrapolation_offset = max_period - pitch_index;
+            extrapolation_offset = exc_length - pitch_index;
             /* We need to extrapolate enough samples to cover a complete MDCT
                window (including overlap/2 samples on both sides). */
             extrapolation_len = N + overlap;
             /* We also apply fading if this is not the first loss. */
             attenuation = MULT16_16_Q15(fade, decay);
+#ifdef FIXED_POINT
+            shift1 = IMAX(0, 2*oaci_celt_zlog2(MULT16_16_Q15(attenuation,
+                  oaci_celt_maxabs16(&sig[extrapolation_offset], pitch_index))) - 18);
+# ifdef ENABLE_QEXT
+            if (st->qext_scale == 2) shift1++;
+# endif
+#endif
             for (i = j = 0; i < extrapolation_len; i++, j++) {
                 oac_val16 tmp;
                 if (j >= pitch_index) {
@@ -916,12 +959,10 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
                 buf[decode_buffer_size - N + i] =
                     SHL32(EXTEND32(MULT16_16_Q15(attenuation,
                         exc[extrapolation_offset + j])), SIG_SHIFT);
-                /* Compute the energy of the previously decoded signal whose
+                /* Compute the expected energy of the attenuated signal whose
                    excitation we're copying. */
-                tmp = SROUND16(
-                  buf[decode_buffer_size - max_period - N + extrapolation_offset + j],
-                  SIG_SHIFT);
-                S1 += SHR32(MULT16_16(tmp, tmp), 11);
+                tmp = MULT16_16_Q15(attenuation, sig[extrapolation_offset + j]);
+                S1 += SHR32(MULT16_16(tmp, tmp), shift1);
             }
             {
                 oac_val16 lpc_mem[CELT_LPC_ORDER];
@@ -945,9 +986,18 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
                attenuate. */
             {
                 oac_val32 S2 = 0;
+#ifdef FIXED_POINT
+                int shift2 = IMAX(0, 2*oaci_celt_zlog2(SROUND16(celt_maxabs32(
+                      buf + decode_buffer_size - N, extrapolation_len), SIG_SHIFT)) - 18);
+# ifdef ENABLE_QEXT
+                if (st->qext_scale == 2) shift2++;
+# endif
+                shift2 = IMAX(shift1, shift2);
+                S1 = SHR32(S1, shift2 - shift1);
+#endif
                 for (i = 0; i < extrapolation_len; i++) {
                     oac_val16 tmp = SROUND16(buf[decode_buffer_size - N + i], SIG_SHIFT);
-                    S2 += SHR32(MULT16_16(tmp, tmp), 11);
+                    S2 += SHR32(MULT16_16(tmp, tmp), shift2);
                 }
                 /* This checks for an "explosion" in the synthesis. */
 #ifdef FIXED_POINT
@@ -973,6 +1023,32 @@ static void oaci_celt_decode_lost(CELTDecoder * OAC_RESTRICT st, int N, int LM
                             MULT16_32_Q15(ratio, buf[decode_buffer_size - N + i]);
                     }
                 }
+            }
+
+            if (st->last_frame_type == FRAME_NORMAL) {
+                oaci_comb_filter(etmp, buf + decode_buffer_size - N,
+                      st->postfilter_period_old, st->postfilter_period_old, overlap,
+                      -st->postfilter_gain_old, -st->postfilter_gain_old,
+                      st->postfilter_tapset_old, st->postfilter_tapset_old,
+                      NULL, 0, st->arch, qext_scale);
+                for (i = 0; i < overlap/2; i++) {
+                    oac_val16 w1 = COEF2VAL16(window[i]);
+                    oac_val16 w2 = COEF2VAL16(window[overlap - 1 - i]);
+                    celt_sig x2 = old_overlap[i];
+                    celt_sig x1 = SUB32(MULT16_32_Q15(w2, etmp[overlap - 1 - i]),
+                          MULT16_32_Q15(w1, etmp[i]));
+                    buf[decode_buffer_size - N + i] = SATURATE(
+                          SUB32(MULT16_32_Q15(w2, x2), MULT16_32_Q15(w1, x1)),
+                          SIG_SAT);
+                    buf[decode_buffer_size - N + overlap - 1 - i] = SATURATE(
+                          ADD32(MULT16_32_Q15(w1, x2), MULT16_32_Q15(w2, x1)),
+                          SIG_SAT);
+                }
+                oaci_comb_filter(buf + decode_buffer_size - N, buf + decode_buffer_size - N,
+                      st->postfilter_period_old, st->postfilter_period_old, overlap,
+                      st->postfilter_gain_old, st->postfilter_gain_old,
+                      st->postfilter_tapset_old, st->postfilter_tapset_old,
+                      NULL, 0, st->arch, qext_scale);
             }
 
         } while (++c < C);
@@ -1105,9 +1181,7 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
     celt_glog max_background_increase;
     int decode_buffer_size;
     int max_channels;
-#ifdef ENABLE_QEXT
-    int qext_scale;
-#endif
+    int qext_scale = 1;
     ALLOC_STACK;
 #ifdef ENABLE_QEXT
     qext_scale = st->qext_scale;
@@ -1414,12 +1488,12 @@ int oaci_celt_decode_with_ec_dred(CELTDecoder * OAC_RESTRICT st, const unsigned 
         st->postfilter_period_old = IMAX(st->postfilter_period_old, COMBFILTER_MINPERIOD);
         oaci_comb_filter(out_syn[c], out_syn[c], st->postfilter_period_old, st->postfilter_period, mode->shortMdctSize,
             st->postfilter_gain_old, st->postfilter_gain, st->postfilter_tapset_old, st->postfilter_tapset,
-            mode->window, overlap, st->arch);
+            mode->window, overlap, st->arch, qext_scale);
         if (LM != 0)
             oaci_comb_filter(out_syn[c] + mode->shortMdctSize, out_syn[c] + mode->shortMdctSize, st->postfilter_period,
             postfilter_pitch, N - mode->shortMdctSize,
                st->postfilter_gain, postfilter_gain, st->postfilter_tapset, postfilter_tapset,
-               mode->window, overlap, st->arch);
+               mode->window, overlap, st->arch, qext_scale);
 
     } while (++c < CC);
     st->postfilter_period_old = st->postfilter_period;

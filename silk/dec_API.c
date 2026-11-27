@@ -192,6 +192,19 @@ oac_int oaci_silk_Decode(                                   /* O    Returns erro
 
     celt_assert( decControl->nChannelsInternal == 1 || decControl->nChannelsInternal == 2 );
 
+#ifdef ENABLE_OSCE_BWE
+    /* Bandwidth extension needs the OSCE models. Fall back to plain
+       resampling when they have not been loaded. */
+    if( !psDec->osce_model.loaded ) {
+        if( decControl->osce_extended_mode == OSCE_MODE_SILK_BBWE ) {
+            decControl->osce_extended_mode = OSCE_MODE_SILK_ONLY;
+        }
+        if( decControl->prev_osce_extended_mode == OSCE_MODE_SILK_BBWE ) {
+            decControl->prev_osce_extended_mode = OSCE_MODE_SILK_ONLY;
+        }
+    }
+#endif
+
     /**********************************/
     /* Test if first frame in payload */
     /**********************************/

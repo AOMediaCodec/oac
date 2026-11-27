@@ -109,7 +109,7 @@ void write_weights(const WeightArray *list, FILE *fout) {
 }
 
 int main(void) {
-    FILE *fout = fopen("weights_blob.bin", "w");
+    FILE *fout = fopen("weights_blob.bin", "wb");
     write_weights(oaci_pitchdnn_arrays, fout);
     write_weights(oaci_fargan_arrays, fout);
     write_weights(oaci_plcmodel_arrays, fout);

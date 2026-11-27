@@ -65,6 +65,7 @@
 #include <stdlib.h>
 #include "nnet.h"
 #include "os_support.h"
+#include "vec.h"
 
 #define SPARSE_BLOCK_SIZE 32
 
@@ -96,8 +97,15 @@ int oaci_parse_weights(WeightArray **list, const void *data, int len) {
         if (ret > 0) {
             if (nb_arrays + 1 >= capacity) {
                 /* Make sure there's room for the ending NULL element too. */
+                WeightArray *new_list;
                 capacity = capacity*3/2;
-                *list = (WeightArray*)oac_realloc(*list, capacity*sizeof(WeightArray));
+                new_list = (WeightArray*)oac_realloc(*list, capacity*sizeof(WeightArray));
+                if (new_list == NULL) {
+                    oac_free(*list);
+                    *list = NULL;
+                    return -1;
+                }
+                *list = new_list;
             }
             (*list)[nb_arrays++] = array;
         } else {
@@ -134,17 +142,20 @@ static const void *oaci_find_idx_check(const WeightArray *arrays, const char *na
     const int *idx;
     const WeightArray *a = oaci_find_array_entry(arrays, name);
     *total_blocks = 0;
-    if (a == NULL) return NULL;
+    /* oaci_find_array_entry() returns the list terminator when the array is missing. */
+    if (a->name == NULL) return NULL;
     idx = (const int*)a->data;
     remain = a->size/sizeof(int);
     while (remain > 0) {
         int nb_blocks;
         int i;
+        /* Each group of 8 outputs lists at most one block per 4 inputs. */
+        if (nb_out < 8) return NULL;
         nb_blocks = *idx++;
-        if (remain < nb_blocks + 1) return NULL;
+        if (nb_blocks < 0 || nb_blocks >= remain || nb_blocks > nb_in/4) return NULL;
         for (i = 0; i < nb_blocks; i++) {
             int pos = *idx++;
-            if (pos + 3 >= nb_in || (pos&0x3)) return NULL;
+            if (pos < 0 || pos > nb_in - 4 || (pos&0x3)) return NULL;
         }
         nb_out -= 8;
         remain -= nb_blocks + 1;
@@ -172,6 +183,7 @@ int oaci_linear_init(LinearLayer *layer, const WeightArray *arrays,
     layer->weights_idx = NULL;
     layer->diag = NULL;
     layer->scale = NULL;
+    if (nb_inputs > MAX_INPUTS) return 1;
     if (bias != NULL) {
         if ((layer->bias = (const float*)oaci_find_array_check(arrays, bias,
         nb_outputs*sizeof(layer->bias[0]))) == NULL) return 1;

@@ -38,8 +38,9 @@ get_oac_sources(CELT_AM_SOURCES_ARM_ASM celt_sources.mk
                  celt_am_sources_arm_asm)
 get_oac_sources(CELT_SOURCES_ARM_NEON_INTR celt_sources.mk
                  celt_sources_arm_neon_intr)
-get_oac_sources(CELT_SOURCES_ARM_NE10 celt_sources.mk celt_sources_arm_ne10)
 
+get_oac_sources(DNN_HEAD lpcnet_headers.mk dnn_headers)
+get_oac_sources(DNN_SOURCES lpcnet_sources.mk dnn_sources)
 get_oac_sources(DEEP_PLC_HEAD lpcnet_headers.mk deep_plc_headers)
 get_oac_sources(DRED_HEAD lpcnet_headers.mk dred_headers)
 get_oac_sources(OSCE_HEAD lpcnet_headers.mk osce_headers)
